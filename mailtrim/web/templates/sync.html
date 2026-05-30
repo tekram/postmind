@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Sync — mailtrim{% endblock %}
+{% block content %}
+
+<div class="p-8 max-w-xl">
+
+  <div class="mb-6">
+    <h1 class="text-2xl font-semibold text-slate-900">Sync Inbox</h1>
+    <p class="text-slate-500 text-sm mt-1">
+      Cache email metadata locally so Stats and Purge run instantly without re-fetching from Gmail.
+    </p>
+  </div>
+
+  {% if not is_authed %}
+  <div class="bg-amber-50 border border-amber-200 rounded-xl p-5 mb-6">
+    <p class="text-amber-800 font-medium text-sm">Not authenticated</p>
+    <p class="text-amber-700 text-xs mt-1">
+      Run <code class="bg-amber-100 px-1 rounded font-mono">mailtrim auth</code> in your terminal first.
+    </p>
+  </div>
+  {% endif %}
+
+  <div class="bg-white border border-slate-200 rounded-xl shadow-sm">
+    <div class="px-5 py-4 border-b border-slate-100">
+      <h2 class="font-medium text-slate-800">Sync options</h2>
+    </div>
+    <div class="p-5">
+      <form id="sync-form" action="/sync/start" method="POST"
+            hx-post="/sync/start"
+            hx-target="#sync-status"
+            hx-swap="innerHTML"
+            hx-disabled-elt="#sync-btn">
+
+        <div class="space-y-4 mb-5">
+
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1.5">Scope</label>
+            <div class="space-y-2">
+              <label class="flex items-center gap-2.5 cursor-pointer">
+                <input type="radio" name="scope" value="inbox" checked
+                       class="text-teal-600 focus:ring-teal-500/30">
+                <div>
+                  <span class="text-sm font-medium text-slate-800">Inbox only</span>
+                  <span class="text-xs text-slate-400 ml-1.5">Fastest — sync what stats scans by default</span>
+                </div>
+              </label>
+              <label class="flex items-center gap-2.5 cursor-pointer">
+                <input type="radio" name="scope" value="anywhere"
+                       class="text-teal-600 focus:ring-teal-500/30">
+                <div>
+                  <span class="text-sm font-medium text-slate-800">All mail</span>
+                  <span class="text-xs text-slate-400 ml-1.5">Includes archived and sent — takes longer</span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <label for="limit" class="block text-sm font-medium text-slate-700 mb-1.5">Email limit</label>
+            <select id="limit" name="limit"
+                    class="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30 w-40">
+              <option value="500">500 emails</option>
+              <option value="1000" selected>1,000 emails</option>
+              <option value="2000">2,000 emails</option>
+              <option value="5000">5,000 emails</option>
+            </select>
+          </div>
+
+        </div>
+
+        <div class="flex items-center gap-3">
+          <button id="sync-btn" type="submit"
+                  {% if not is_authed %}disabled{% endif %}
+                  class="bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">
+            Start Sync
+          </button>
+          <a href="/stats" class="text-slate-500 hover:text-slate-700 text-sm transition-colors">
+            Skip → View Stats
+          </a>
+        </div>
+
+      </form>
+
+      <!-- Progress area (HTMX target) -->
+      <div id="sync-status" class="mt-5"></div>
+
+    </div>
+  </div>
+
+  <!-- Info card -->
+  <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 mt-5">
+    <p class="text-slate-600 text-xs font-medium mb-1.5">Why sync?</p>
+    <ul class="text-slate-500 text-xs space-y-1">
+      <li>• Stats re-scan takes 10–30s per run against the Gmail API</li>
+      <li>• After syncing, future scans read from local SQLite — near-instant</li>
+      <li>• Re-sync any time to pick up recent emails</li>
+      <li>• Everything stays on your machine — nothing sent to any server</li>
+    </ul>
+  </div>
+
+</div>
+
+{% endblock %}

@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Triage — mailtrim{% endblock %}
+{% block content %}
+
+<div class="p-8">
+
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-semibold text-slate-900">Inbox Triage</h1>
+      <p class="text-slate-500 text-sm mt-1">
+        AI classifies your unread emails by priority, category, and suggested action.
+      </p>
+    </div>
+    {% if results %}
+    <div class="flex items-center gap-3">
+      <span class="text-slate-400 text-xs">{{ results | length }} emails · scanned at {{ scanned_at }}</span>
+      <a href="/triage?limit=50" class="text-teal-600 hover:text-teal-700 text-sm font-medium">Load more</a>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if ai_off %}
+  <!-- AI not enabled -->
+  <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-10 text-center max-w-lg mx-auto">
+    <div class="text-4xl mb-4">🤖</div>
+    <h2 class="text-lg font-semibold text-slate-800">Cloud AI required</h2>
+    <p class="text-slate-500 text-sm mt-2 max-w-sm mx-auto">
+      Triage uses Claude to classify your emails. Enable cloud AI mode and add your Anthropic API key.
+    </p>
+    <div class="mt-6 space-y-3">
+      <a href="/settings"
+         class="block bg-teal-600 hover:bg-teal-700 text-white font-medium px-6 py-2.5 rounded-lg text-sm transition-colors">
+        Enable Cloud AI in Settings
+      </a>
+      <p class="text-slate-400 text-xs">
+        Only email subjects + snippets (≤300 chars) are sent — never full body.
+        <a href="/settings" class="underline hover:text-slate-600">Privacy details</a>
+      </p>
+    </div>
+  </div>
+
+  {% elif error is defined and error %}
+  <div class="bg-red-50 border border-red-200 rounded-xl p-5 max-w-lg">
+    <p class="text-red-800 font-medium text-sm">Triage failed</p>
+    <p class="text-red-600 text-sm mt-1">{{ error }}</p>
+  </div>
+
+  {% elif not results %}
+  <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-10 text-center max-w-lg mx-auto">
+    <div class="text-4xl mb-3">📭</div>
+    <p class="text-slate-600 font-medium">No unread emails in inbox</p>
+    <p class="text-slate-400 text-sm mt-1">You're at inbox zero!</p>
+  </div>
+
+  {% else %}
+  <!-- Results grid -->
+  <div class="grid gap-3 max-w-4xl">
+    {% for item in results %}
+    <div class="bg-white border rounded-xl shadow-sm p-4 transition-colors hover:border-slate-300
+                {% if item.priority == 'high' %}border-red-200{% elif item.priority == 'medium' %}border-yellow-200{% else %}border-slate-200{% endif %}">
+
+      <div class="flex items-start gap-4">
+
+        <!-- Priority indicator -->
+        <div class="shrink-0 mt-0.5">
+          {% if item.priority == 'high' %}
+          <span class="inline-flex items-center gap-1 text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
+            ⚡ HIGH
+          </span>
+          {% elif item.priority == 'medium' %}
+          <span class="inline-flex items-center gap-1 text-xs font-bold text-yellow-700 bg-yellow-50 border border-yellow-200 px-2 py-0.5 rounded-full">
+            · MED
+          </span>
+          {% else %}
+          <span class="inline-flex items-center gap-1 text-xs font-medium text-slate-400 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full">
+            LOW
+          </span>
+          {% endif %}
+        </div>
+
+        <!-- Main content -->
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-sm font-semibold text-slate-900 truncate">{{ item.subject[:70] }}</span>
+            {% if item.deadline_hint %}
+            <span class="text-xs text-red-500 font-medium bg-red-50 px-1.5 py-0.5 rounded shrink-0">
+              {{ item.deadline_hint }}
+            </span>
+            {% endif %}
+          </div>
+
+          <div class="flex items-center gap-3 mt-0.5">
+            <span class="text-xs text-slate-500">{{ item.sender_name[:40] }}</span>
+            <span class="text-xs text-slate-300">·</span>
+            <span class="text-xs text-slate-400">{{ item.category_icon }} {{ item.category | replace('_', ' ') | title }}</span>
+          </div>
+
+          {% if item.snippet %}
+          <p class="text-xs text-slate-400 mt-1.5 line-clamp-2">{{ item.snippet }}</p>
+          {% endif %}
+
+          <p class="text-xs text-slate-500 mt-1.5 italic">{{ item.explanation }}</p>
+        </div>
+
+        <!-- Action badge -->
+        <div class="shrink-0">
+          {% set action = item.suggested_action %}
+          {% if action == 'reply' %}
+          <span class="text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-lg">Reply</span>
+          {% elif action == 'archive' %}
+          <span class="text-xs font-medium text-slate-500 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg">Archive</span>
+          {% elif action == 'delete' or action == 'unsubscribe' %}
+          <span class="text-xs font-medium text-red-600 bg-red-50 border border-red-200 px-2.5 py-1 rounded-lg capitalize">{{ action }}</span>
+          {% else %}
+          <span class="text-xs font-medium text-slate-400 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg capitalize">{{ action }}</span>
+          {% endif %}
+        </div>
+
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Summary footer -->
+  <div class="mt-6 flex items-center gap-6 text-xs text-slate-400 border-t border-slate-100 pt-4 max-w-4xl">
+    {% set high = results | selectattr("priority", "eq", "high") | list | length %}
+    {% set med  = results | selectattr("priority", "eq", "medium") | list | length %}
+    {% set need_reply = results | selectattr("requires_reply") | list | length %}
+    <span>{{ high }} high priority</span>
+    <span>{{ med }} medium</span>
+    {% if need_reply %}<span>{{ need_reply }} need reply</span>{% endif %}
+    <span class="ml-auto">
+      Only subjects + snippets sent to Anthropic — never full body.
+      <a href="/settings" class="underline hover:text-slate-600">AI settings</a>
+    </span>
+  </div>
+
+  {% endif %}
+
+</div>
+
+{% endblock %}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,7 +26,10 @@ templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 _scan_cache: dict[str, dict] = {}
 _CACHE_TTL = 300  # 5 minutes
 
-_executor = ThreadPoolExecutor(max_workers=2)
+# In-memory sync task state: task_id → state dict
+_sync_tasks: dict[str, dict] = {}
+
+_executor = ThreadPoolExecutor(max_workers=4)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -468,3 +472,318 @@ async def update_ai_mode(request: Request):
     _cfg._settings = None
 
     return RedirectResponse("/settings?success=ai_mode", status_code=303)
+
+
+# ── Protected senders ─────────────────────────────────────────────────────────
+
+
+@app.get("/settings/blocked", response_class=HTMLResponse)
+async def blocked_list(request: Request):
+    def _get():
+        from mailtrim.core.storage import BlocklistRepo, get_session
+        client = _build_provider()
+        acct = client.get_email_address()
+        entries = BlocklistRepo(get_session()).list_all(acct)
+        return entries, acct
+
+    try:
+        loop = asyncio.get_event_loop()
+        entries, acct = await loop.run_in_executor(_executor, _get)
+    except Exception as exc:
+        return _resp(request, "error.html", {"error": str(exc)})
+
+    ctx = _base()
+    ctx.update({
+        "active": "settings",
+        "entries": [{"email": e.sender_email, "domain": e.sender_domain} for e in entries],
+        "account_email": acct,
+    })
+    return _resp(request, "blocked.html", ctx)
+
+
+@app.post("/settings/blocked/add")
+async def blocked_add(request: Request):
+    form = await request.form()
+    sender = (form.get("sender_email") or "").strip()
+    if not sender:
+        return RedirectResponse("/settings/blocked", status_code=303)
+
+    def _add():
+        from mailtrim.core.storage import BlocklistRepo, get_session
+        client = _build_provider()
+        acct = client.get_email_address()
+        BlocklistRepo(get_session()).add(acct, sender)
+
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(_executor, _add)
+    return RedirectResponse("/settings/blocked?added=1", status_code=303)
+
+
+@app.post("/settings/blocked/remove")
+async def blocked_remove(request: Request):
+    form = await request.form()
+    sender = (form.get("sender_email") or "").strip()
+    if not sender:
+        return RedirectResponse("/settings/blocked", status_code=303)
+
+    def _remove():
+        from mailtrim.core.storage import BlocklistRepo, get_session
+        client = _build_provider()
+        acct = client.get_email_address()
+        BlocklistRepo(get_session()).remove(acct, sender)
+
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(_executor, _remove)
+    return RedirectResponse("/settings/blocked", status_code=303)
+
+
+# ── Sync ─────────────────────────────────────────────────────────────────────
+
+
+@app.get("/sync", response_class=HTMLResponse)
+async def sync_page(request: Request):
+    ctx = _base()
+    ctx["active"] = "sync"
+    return _resp(request, "sync.html", ctx)
+
+
+@app.post("/sync/start", response_class=HTMLResponse)
+async def sync_start(request: Request):
+    form = await request.form()
+    scope = form.get("scope", "inbox")
+    limit = int(form.get("limit", "1000"))
+
+    task_id = uuid.uuid4().hex[:8]
+    _sync_tasks[task_id] = {
+        "status": "running",
+        "step": 0,
+        "message": "Connecting…",
+        "count": 0,
+        "total": 0,
+        "error": None,
+        "started_at": time.time(),
+    }
+
+    def _run():
+        state = _sync_tasks[task_id]
+        try:
+            import json as _json
+
+            from mailtrim.core.gmail_client import GmailClient
+            from mailtrim.core.storage import EmailRecord, EmailRepo, UndoLogRepo, get_session
+
+            client = GmailClient()
+            profile = client.get_profile()
+            account_email = profile.get("emailAddress", "")
+
+            state["message"] = f"Connected to {account_email}"
+            state["step"] = 1
+
+            query = "in:anywhere -in:trash -in:spam" if scope == "anywhere" else "in:inbox"
+            ids = client.list_message_ids(query=query, max_results=limit)
+            total = len(ids)
+            state["total"] = total
+            state["message"] = f"Found {total:,} emails — fetching metadata…"
+            state["step"] = 2
+
+            session = get_session()
+            repo = EmailRepo(session)
+            chunk_size = 50
+            saved = 0
+
+            for i in range(0, total, chunk_size):
+                chunk_ids = ids[i : i + chunk_size]
+                messages = client.get_messages_metadata(chunk_ids)
+                records = [
+                    EmailRecord(
+                        account_email=account_email,
+                        gmail_id=msg.id,
+                        thread_id=msg.thread_id,
+                        subject=msg.headers.subject,
+                        sender_email=msg.sender_email,
+                        sender_name=msg.sender_name,
+                        snippet=msg.snippet or "",
+                        label_ids_json=_json.dumps(msg.label_ids),
+                        internal_date=msg.internal_date,
+                        size_estimate=msg.size_estimate,
+                        is_unread=msg.is_unread,
+                        is_inbox=msg.is_inbox,
+                        list_unsubscribe=msg.headers.list_unsubscribe or "",
+                    )
+                    for msg in messages
+                ]
+                repo.upsert_many(records)
+                saved += len(records)
+                state["count"] = saved
+                state["message"] = f"Synced {saved:,} / {total:,} emails…"
+                state["step"] = 3
+
+            # Housekeeping
+            UndoLogRepo(session).purge_expired()
+
+            elapsed = int(time.time() - state["started_at"])
+            state["status"] = "done"
+            state["message"] = f"Synced {saved:,} emails in {elapsed}s"
+            state["count"] = saved
+
+        except Exception as exc:
+            state["status"] = "error"
+            state["error"] = str(exc)
+            state["message"] = str(exc)
+
+    _executor.submit(_run)
+
+    # Return the polling fragment immediately
+    html = f"""
+<div id="sync-progress"
+     hx-get="/sync/poll/{task_id}"
+     hx-trigger="every 1s"
+     hx-target="this"
+     hx-swap="outerHTML">
+  <div class="flex items-center gap-3 text-slate-500 text-sm py-2">
+    <div class="w-4 h-4 border-2 border-teal-500 border-t-transparent rounded-full animate-spin shrink-0"></div>
+    Connecting…
+  </div>
+</div>"""
+    return HTMLResponse(html)
+
+
+@app.get("/sync/poll/{task_id}", response_class=HTMLResponse)
+async def sync_poll(task_id: str):
+    state = _sync_tasks.get(task_id)
+    if not state:
+        return HTMLResponse('<p class="text-red-500 text-sm">Task not found.</p>')
+
+    status = state["status"]
+    msg = state["message"]
+    count = state["count"]
+    total = state["total"]
+    pct = int((count / total) * 100) if total > 0 else 0
+
+    if status == "error":
+        return HTMLResponse(f"""
+<div id="sync-result" class="bg-red-50 border border-red-200 rounded-xl p-4">
+  <p class="text-red-800 font-medium text-sm">Sync failed</p>
+  <p class="text-red-600 text-sm mt-1">{state['error']}</p>
+</div>""")
+
+    if status == "done":
+        return HTMLResponse(f"""
+<div id="sync-result" class="bg-green-50 border border-green-200 rounded-xl p-4">
+  <div class="flex items-center justify-between">
+    <div>
+      <p class="text-green-800 font-medium text-sm">✓ {msg}</p>
+      <p class="text-green-600 text-xs mt-0.5">Local cache is up to date</p>
+    </div>
+    <a href="/stats" class="bg-teal-600 hover:bg-teal-700 text-white text-xs font-medium px-4 py-2 rounded-lg transition-colors">
+      View Stats →
+    </a>
+  </div>
+</div>""")
+
+    # Still running — keep polling
+    bar_width = pct if pct > 0 else 5
+    return HTMLResponse(f"""
+<div id="sync-progress"
+     hx-get="/sync/poll/{task_id}"
+     hx-trigger="every 1s"
+     hx-target="this"
+     hx-swap="outerHTML">
+  <div class="space-y-2">
+    <div class="flex items-center gap-3">
+      <div class="w-4 h-4 border-2 border-teal-500 border-t-transparent rounded-full animate-spin shrink-0"></div>
+      <span class="text-slate-600 text-sm">{msg}</span>
+    </div>
+    {f'''<div class="w-full bg-slate-100 rounded-full h-1.5">
+      <div class="bg-teal-500 h-1.5 rounded-full transition-all" style="width:{bar_width}%"></div>
+    </div>
+    <p class="text-slate-400 text-xs">{count:,} / {total:,} emails — {pct}%</p>''' if total > 0 else ""}
+  </div>
+</div>""")
+
+
+# ── Triage ────────────────────────────────────────────────────────────────────
+
+
+@app.get("/triage", response_class=HTMLResponse)
+async def triage_page(request: Request):
+    ctx = _base()
+    ctx["active"] = "triage"
+
+    if _ai_mode() != "cloud":
+        return _resp(request, "triage.html", {**ctx, "ai_off": True, "results": []})
+
+    if not _is_authed():
+        return _resp(request, "triage.html", {**ctx, "ai_off": False, "auth_error": True, "results": []})
+
+    limit = int(request.query_params.get("limit", "20"))
+
+    def _run():
+        from mailtrim.core.ai_engine import AIEngine
+        from mailtrim.core.gmail_client import GmailClient
+
+        client = GmailClient()
+        profile = client.get_profile()
+        account_email = profile.get("emailAddress", "")
+
+        ids = client.list_message_ids(query="in:inbox is:unread", max_results=limit)
+        if not ids:
+            return [], account_email
+
+        messages = client.get_messages_batch(ids)
+
+        ai = AIEngine()
+        classified = ai.classify_emails(messages)
+
+        msg_map = {m.id: m for m in messages}
+        PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+        CATEGORY_ICONS = {
+            "action_required": "⚡",
+            "conversation": "💬",
+            "newsletter": "📰",
+            "notification": "🔔",
+            "receipt": "🧾",
+            "calendar": "📅",
+            "social": "👥",
+            "spam": "🗑",
+            "other": "📧",
+        }
+
+        results = []
+        for c in sorted(classified, key=lambda x: PRIORITY_ORDER.get(x.priority, 3)):
+            msg = msg_map.get(c.gmail_id)
+            if not msg:
+                continue
+            results.append({
+                "id": c.gmail_id,
+                "priority": c.priority,
+                "category": c.category,
+                "category_icon": CATEGORY_ICONS.get(c.category, "📧"),
+                "explanation": c.explanation,
+                "suggested_action": c.suggested_action,
+                "requires_reply": c.requires_reply,
+                "deadline_hint": c.deadline_hint,
+                "subject": msg.headers.subject or "(no subject)",
+                "sender_name": msg.sender_name or msg.sender_email,
+                "sender_email": msg.sender_email,
+                "snippet": (msg.snippet or "")[:200],
+            })
+
+        return results, account_email
+
+    try:
+        loop = asyncio.get_event_loop()
+        results, account_email = await loop.run_in_executor(_executor, _run)
+    except Exception as exc:
+        ctx["error"] = str(exc)
+        return _resp(request, "triage.html", {**ctx, "ai_off": False, "results": []})
+
+    ctx.update({
+        "ai_off": False,
+        "auth_error": False,
+        "results": results,
+        "account_email": account_email,
+        "limit": limit,
+        "scanned_at": datetime.now(timezone.utc).strftime("%H:%M"),
+    })
+    return _resp(request, "triage.html", ctx)
