@@ -1173,6 +1173,69 @@ def fetch_sender_groups(
     return result[:top_n]
 
 
+def fetch_sender_groups_from_db(
+    account_email: str,
+    scope: str = "anywhere",
+    min_count: int = 2,
+    top_n: int = 30,
+    sort_by: SortKey = "score",
+) -> list[SenderGroup]:
+    """Build sender groups from locally synced DB — no Gmail API calls.
+
+    Requires prior ``mailtrim sync`` to populate the local database.
+    Use ``scope="inbox"`` to restrict to inbox-only records.
+    """
+    from mailtrim.core.gmail_client import Message, MessageHeader
+    from mailtrim.core.storage import EmailRecord, get_session
+
+    session = get_session()
+    q = session.query(EmailRecord).filter(EmailRecord.account_email == account_email)
+    if scope == "inbox":
+        q = q.filter(EmailRecord.is_inbox.is_(True))
+    records = q.all()
+
+    if not records:
+        return []
+
+    accumulators: dict[str, _Accumulator] = {}
+    for rec in records:
+        key = rec.sender_email
+        if not key:
+            continue
+        if key not in accumulators:
+            accumulators[key] = _Accumulator(
+                sender_email=key, sender_name=rec.sender_name or ""
+            )
+        msg = Message(
+            id=rec.gmail_id,
+            thread_id=rec.thread_id,
+            label_ids=rec.label_ids,
+            snippet=rec.snippet or "",
+            headers=MessageHeader(
+                subject=rec.subject or "",
+                from_=f"{rec.sender_name} <{rec.sender_email}>",
+                list_unsubscribe=rec.list_unsubscribe or "",
+            ),
+            size_estimate=rec.size_estimate or 0,
+            internal_date=rec.internal_date or 0,
+        )
+        accumulators[key].add(msg)
+
+    result = [acc.to_group() for acc in accumulators.values() if acc.count >= min_count]
+    compute_impact_scores(result)
+
+    if sort_by == "oldest":
+        result.sort(key=lambda g: g.earliest_date)
+    elif sort_by == "size":
+        result.sort(key=lambda g: g.total_size_bytes, reverse=True)
+    elif sort_by == "count":
+        result.sort(key=lambda g: g.count, reverse=True)
+    else:
+        result.sort(key=lambda g: g.impact_score, reverse=True)
+
+    return result[:top_n]
+
+
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 
