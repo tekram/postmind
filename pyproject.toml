@@ -50,6 +50,13 @@ Homepage = "https://github.com/sadhgurutech/mailtrim"
 [project.optional-dependencies]
 # Headless browser support for unsubscribe fallback
 headless = ["playwright>=1.44.0"]
+# Local web UI: mailtrim serve
+web = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.27.0",
+    "jinja2>=3.1.0",
+    "python-multipart>=0.0.9",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",

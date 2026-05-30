@@ -1,0 +1,15 @@
+<!-- HTMX fragment — shown when stats scan fails -->
+<div id="stats-data" class="bg-amber-50 border border-amber-200 rounded-xl p-6">
+  <div class="flex items-start gap-3">
+    <span class="text-amber-500 text-xl shrink-0">⚠</span>
+    <div>
+      <p class="text-amber-800 font-medium">Could not scan inbox</p>
+      <p class="text-amber-700 text-sm mt-1">{{ error }}</p>
+      <p class="text-amber-600 text-xs mt-3">
+        If you're not authenticated, run
+        <code class="bg-amber-100 px-1.5 py-0.5 rounded font-mono">mailtrim auth</code>
+        in your terminal, then reload this page.
+      </p>
+    </div>
+  </div>
+</div>

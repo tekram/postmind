@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — mailtrim{% endblock %}
+{% block content %}
+
+<div class="p-8 max-w-4xl">
+
+  <!-- Header -->
+  <div class="mb-8">
+    <h1 class="text-2xl font-semibold text-slate-900">
+      {% if has_scan and account_email %}
+        {{ account_email }}
+      {% else %}
+        Inbox Overview
+      {% endif %}
+    </h1>
+    <p class="text-slate-500 text-sm mt-1">
+      {% if has_scan %}Last scanned at {{ scanned_at }}{% else %}Scan your inbox to get started{% endif %}
+    </p>
+  </div>
+
+  {% if not is_authed %}
+  <!-- Not authenticated banner -->
+  <div class="bg-amber-50 border border-amber-200 rounded-xl p-5 mb-6">
+    <div class="flex items-start gap-3">
+      <span class="text-amber-500 text-xl mt-0.5">⚠</span>
+      <div>
+        <p class="text-amber-800 font-medium">Not authenticated</p>
+        <p class="text-amber-700 text-sm mt-1">
+          Run <code class="bg-amber-100 px-1.5 py-0.5 rounded text-xs font-mono">mailtrim auth</code>
+          in your terminal to connect your Gmail account, then refresh this page.
+        </p>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if has_scan %}
+  <!-- Stat cards -->
+  <div class="grid grid-cols-3 gap-4 mb-8">
+
+    <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+      <p class="text-slate-500 text-xs font-medium uppercase tracking-wide">Senders found</p>
+      <p class="text-3xl font-bold text-slate-900 mt-1">{{ sender_count }}</p>
+      <p class="text-slate-400 text-xs mt-1">top senders scanned</p>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+      <p class="text-slate-500 text-xs font-medium uppercase tracking-wide">Reclaimable</p>
+      <p class="text-3xl font-bold text-teal-600 mt-1">{{ total_reclaimable }} MB</p>
+      <p class="text-slate-400 text-xs mt-1">safe to move to trash</p>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+      <p class="text-slate-500 text-xs font-medium uppercase tracking-wide">Total messages</p>
+      <p class="text-3xl font-bold text-slate-900 mt-1">
+        {{ "{:,}".format(profile.get("messagesTotal", 0)) }}
+      </p>
+      <p class="text-slate-400 text-xs mt-1">in your account</p>
+    </div>
+
+  </div>
+
+  <!-- Best next step -->
+  {% if best_next %}
+  <div class="bg-teal-50 border border-teal-200 rounded-xl p-5 mb-8">
+    <div class="flex items-center justify-between">
+      <div>
+        <p class="text-teal-800 font-medium text-sm">Recommended next step</p>
+        <p class="text-teal-700 text-lg font-semibold mt-0.5">
+          {{ best_next.sender.sender_name or best_next.sender.sender_email }}
+        </p>
+        {% if best_next.actions %}
+        <p class="text-teal-600 text-sm mt-1">
+          {{ best_next.actions[0].label }} — {{ best_next.sender.count }} emails · ~{{ best_next.actions[0].savings_mb }} MB
+        </p>
+        {% endif %}
+      </div>
+      <a href="/stats"
+         class="bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+        View Stats →
+      </a>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Top senders preview -->
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm mb-6">
+    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+      <h2 class="font-medium text-slate-800">Top senders</h2>
+      <a href="/stats" class="text-teal-600 hover:text-teal-700 text-sm font-medium">View all →</a>
+    </div>
+    <div class="divide-y divide-slate-100">
+      {% for s in top_senders %}
+      <div class="px-5 py-3 flex items-center justify-between">
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-medium text-slate-800 truncate">{{ s.sender_name }}</p>
+          <p class="text-xs text-slate-400 truncate">{{ s.sender_email }}</p>
+        </div>
+        <div class="flex items-center gap-4 ml-4 shrink-0">
+          <span class="text-sm text-slate-600">{{ s.count }} emails</span>
+          <span class="text-sm font-medium text-slate-700">{{ s.size_str }}</span>
+          <span class="text-base" title="{{ s.safety_label }}">{{ s.tier_icon }}</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% else %}
+  <!-- No scan data CTA -->
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-12 text-center">
+    <div class="text-5xl mb-4">✂</div>
+    <h2 class="text-xl font-semibold text-slate-800">Ready to trim your inbox</h2>
+    <p class="text-slate-500 text-sm mt-2 max-w-sm mx-auto">
+      Scan your inbox to see which senders are filling it up and how much space you can reclaim.
+    </p>
+    {% if is_authed %}
+    <a href="/stats"
+       class="inline-block mt-6 bg-teal-600 hover:bg-teal-700 text-white font-medium px-6 py-2.5 rounded-lg text-sm transition-colors">
+      Scan inbox
+    </a>
+    {% else %}
+    <p class="mt-6 text-slate-400 text-sm">
+      Run <code class="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-xs">mailtrim auth</code> first, then return here.
+    </p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- Quick actions -->
+  <div class="grid grid-cols-3 gap-3 mt-4">
+    <a href="/stats"
+       class="flex items-center gap-2.5 bg-white border border-slate-200 hover:border-teal-300 hover:bg-teal-50/50 rounded-xl p-4 transition-colors group">
+      <span class="text-xl">📊</span>
+      <div>
+        <p class="text-sm font-medium text-slate-800 group-hover:text-teal-700">Stats</p>
+        <p class="text-xs text-slate-400">Analyze your inbox</p>
+      </div>
+    </a>
+    <a href="/undo"
+       class="flex items-center gap-2.5 bg-white border border-slate-200 hover:border-slate-300 rounded-xl p-4 transition-colors group">
+      <span class="text-xl">↩</span>
+      <div>
+        <p class="text-sm font-medium text-slate-800">Undo</p>
+        <p class="text-xs text-slate-400">Restore deleted emails</p>
+      </div>
+    </a>
+    <a href="/settings"
+       class="flex items-center gap-2.5 bg-white border border-slate-200 hover:border-slate-300 rounded-xl p-4 transition-colors group">
+      <span class="text-xl">⚙️</span>
+      <div>
+        <p class="text-sm font-medium text-slate-800">Settings</p>
+        <p class="text-xs text-slate-400">AI mode, provider</p>
+      </div>
+    </a>
+  </div>
+
+</div>
+
+{% endblock %}

@@ -46,6 +46,61 @@ def version() -> None:
     typer.echo(f"mailtrim {__version__}")
 
 
+@app.command()
+def serve(
+    port: int = typer.Option(8484, "--port", "-p", help="Port to listen on (default 8484)."),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to. Defaults to localhost only."),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Don't auto-open a browser tab."),
+) -> None:
+    """
+    Start the local web interface — inbox triage in your browser.
+
+    Binds to 127.0.0.1 only (localhost) by default — not accessible on the network.
+    Requires: pip install mailtrim[web]
+
+    Examples:
+      mailtrim serve
+      mailtrim serve --port 9000
+      mailtrim serve --no-browser
+    """
+    try:
+        import uvicorn
+        from mailtrim.web.server import app as _web_app  # noqa: F401
+    except ImportError:
+        console.print(
+            Panel(
+                "[bold red]Web dependencies not installed.[/bold red]\n\n"
+                "Install them with:\n"
+                "  [cyan]pip install mailtrim[web][/cyan]\n\n"
+                "[dim]The web UI requires: fastapi, uvicorn, jinja2, python-multipart[/dim]",
+                border_style="red",
+            )
+        )
+        raise typer.Exit(1)
+
+    import threading
+    import time
+    import webbrowser
+
+    url = f"http://{host}:{port}"
+
+    console.print(
+        Panel.fit(
+            f"[bold cyan]mailtrim web[/bold cyan]  ·  [bold]{url}[/bold]\n"
+            "[dim]Press Ctrl+C to stop.[/dim]",
+            border_style="cyan",
+        )
+    )
+
+    if not no_browser:
+        def _open():
+            time.sleep(1.2)
+            webbrowser.open(url)
+        threading.Thread(target=_open, daemon=True).start()
+
+    uvicorn.run(_web_app, host=host, port=port, log_level="warning")
+
+
 # ── Lazy imports to keep startup fast ────────────────────────────────────────
 
 

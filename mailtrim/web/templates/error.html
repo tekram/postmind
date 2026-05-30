@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Error — mailtrim{% endblock %}
+{% block content %}
+
+<div class="p-8 max-w-xl">
+  <div class="bg-red-50 border border-red-200 rounded-xl p-6">
+    <div class="flex items-start gap-3">
+      <span class="text-red-500 text-xl shrink-0 mt-0.5">✗</span>
+      <div>
+        <p class="text-red-800 font-medium">Something went wrong</p>
+        <p class="text-red-700 text-sm mt-1">{{ error }}</p>
+        <div class="mt-4 flex gap-3">
+          <a href="/" class="text-sm font-medium text-red-700 hover:text-red-800 underline">Go to dashboard</a>
+          <a href="/stats" class="text-sm font-medium text-red-700 hover:text-red-800 underline">Try Stats again</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

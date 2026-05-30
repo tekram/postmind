@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Confirm Purge — mailtrim{% endblock %}
+{% block content %}
+
+<div class="p-8 max-w-2xl">
+
+  <!-- Back link -->
+  <a href="/stats" class="inline-flex items-center gap-1.5 text-slate-500 hover:text-slate-700 text-sm mb-6 transition-colors">
+    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+    </svg>
+    Back to Stats
+  </a>
+
+  <h1 class="text-2xl font-semibold text-slate-900 mb-1">Confirm purge</h1>
+  <p class="text-slate-500 text-sm mb-6">
+    Everything goes to Trash — recoverable for {{ undo_days }} days with <strong>Undo History</strong>.
+  </p>
+
+  <!-- Summary card -->
+  <div class="bg-red-50 border border-red-200 rounded-xl p-5 mb-6">
+    <div class="flex items-center gap-6">
+      <div class="text-center">
+        <p class="text-3xl font-bold text-red-700">{{ total_count }}</p>
+        <p class="text-red-500 text-xs mt-0.5">emails</p>
+      </div>
+      <div class="text-red-300 text-2xl">·</div>
+      <div class="text-center">
+        <p class="text-3xl font-bold text-red-700">{{ total_mb }} MB</p>
+        <p class="text-red-500 text-xs mt-0.5">freed</p>
+      </div>
+      <div class="text-red-300 text-2xl">·</div>
+      <div class="text-center">
+        <p class="text-3xl font-bold text-red-700">{{ selected | length }}</p>
+        <p class="text-red-500 text-xs mt-0.5">sender{{ 's' if selected|length != 1 else '' }}</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Selected senders table -->
+  <div class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden mb-6">
+    <div class="px-5 py-3 border-b border-slate-100 bg-slate-50">
+      <p class="text-xs font-medium text-slate-500 uppercase tracking-wide">Senders to purge</p>
+    </div>
+    {% for s in selected %}
+    <div class="px-5 py-3.5 border-b border-slate-100 last:border-0 flex items-center justify-between">
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-medium text-slate-800 truncate">{{ s.sender_name }}</p>
+        <p class="text-xs text-slate-400">{{ s.sender_email }}</p>
+      </div>
+      <div class="flex items-center gap-4 ml-4 shrink-0 text-sm text-slate-600">
+        <span>{{ s.count }} emails</span>
+        <span class="font-medium">{{ s.size_str }}</span>
+        <span>{{ s.tier_icon }}</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Safety note -->
+  <div class="flex items-start gap-2.5 text-slate-500 text-sm mb-6">
+    <svg class="w-4 h-4 mt-0.5 text-slate-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+    </svg>
+    <p>
+      All emails go to <strong>Trash</strong>, not permanently deleted.
+      You can restore them from <a href="/undo" class="text-teal-600 hover:underline">Undo History</a>
+      within {{ undo_days }} days.
+    </p>
+  </div>
+
+  <!-- Action buttons -->
+  <form action="/purge/confirm" method="POST" id="confirm-form">
+    {% for s in senders %}
+    <input type="hidden" name="senders" value="{{ s }}">
+    {% endfor %}
+    <div class="flex items-center gap-3">
+      <button type="submit"
+              class="bg-red-600 hover:bg-red-700 text-white font-medium px-6 py-2.5 rounded-lg text-sm transition-colors">
+        Move {{ total_count }} emails to Trash
+      </button>
+      <a href="/stats"
+         class="text-slate-500 hover:text-slate-700 font-medium px-4 py-2.5 rounded-lg text-sm hover:bg-slate-100 transition-colors">
+        Cancel
+      </a>
+    </div>
+  </form>
+
+</div>
+
+{% endblock %}

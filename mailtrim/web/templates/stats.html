@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Stats — mailtrim{% endblock %}
+{% block content %}
+
+<div class="p-8">
+
+  <!-- Page header -->
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-semibold text-slate-900">Inbox Stats</h1>
+      <p class="text-slate-500 text-sm mt-1">Ranked by storage impact + confidence score</p>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-4 mb-6">
+    <div class="flex items-center gap-4 flex-wrap">
+      <div class="flex items-center gap-2">
+        <label class="text-slate-500 text-sm">Scope</label>
+        <select id="scope-sel" class="text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30">
+          <option value="inbox" {% if scope == 'inbox' %}selected{% endif %}>Inbox only</option>
+          <option value="anywhere" {% if scope == 'anywhere' %}selected{% endif %}>All mail</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-2">
+        <label class="text-slate-500 text-sm">Sort</label>
+        <select id="sort-sel" class="text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30">
+          <option value="score" {% if sort_by == 'score' %}selected{% endif %}>Impact score</option>
+          <option value="size"  {% if sort_by == 'size'  %}selected{% endif %}>Size</option>
+          <option value="count" {% if sort_by == 'count' %}selected{% endif %}>Email count</option>
+          <option value="oldest" {% if sort_by == 'oldest' %}selected{% endif %}>Oldest first</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-2">
+        <label class="text-slate-500 text-sm">Since</label>
+        <select id="since-sel" class="text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30">
+          <option value="" {% if not since %}selected{% endif %}>All time</option>
+          <option value="30d"  {% if since == '30d'  %}selected{% endif %}>Last 30 days</option>
+          <option value="90d"  {% if since == '90d'  %}selected{% endif %}>Last 90 days</option>
+          <option value="365d" {% if since == '365d' %}selected{% endif %}>Last year</option>
+        </select>
+      </div>
+      <button id="rescan-btn"
+              class="ml-auto bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg transition-colors">
+        Scan
+      </button>
+    </div>
+  </div>
+
+  <!-- Data area: loaded via HTMX -->
+  <div id="stats-data"
+       hx-get="/stats/data?sort={{ sort_by }}&scope={{ scope }}&since={{ since }}"
+       hx-trigger="load"
+       hx-target="this"
+       hx-swap="outerHTML">
+
+    <!-- Skeleton loader shown while fetching -->
+    <div class="bg-white border border-slate-200 rounded-xl shadow-sm">
+      <div class="px-6 py-5 border-b border-slate-100 flex items-center gap-3">
+        <div class="w-5 h-5 border-2 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+        <span class="text-slate-500 text-sm">Scanning your inbox — this takes 10–30 seconds…</span>
+      </div>
+      {% for _ in range(6) %}
+      <div class="px-6 py-4 border-b border-slate-50 flex items-center gap-4 animate-pulse">
+        <div class="w-4 h-4 bg-slate-100 rounded"></div>
+        <div class="flex-1 h-4 bg-slate-100 rounded"></div>
+        <div class="w-16 h-4 bg-slate-100 rounded"></div>
+        <div class="w-12 h-4 bg-slate-100 rounded"></div>
+        <div class="w-20 h-4 bg-slate-100 rounded"></div>
+        <div class="w-20 h-6 bg-slate-100 rounded-full"></div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // Re-scan when filters change or Scan button clicked
+  function triggerScan() {
+    const sort  = document.getElementById('sort-sel').value;
+    const scope = document.getElementById('scope-sel').value;
+    const since = document.getElementById('since-sel').value;
+    const url   = `/stats/data?sort=${sort}&scope=${scope}&since=${since}`;
+
+    const el = document.getElementById('stats-data');
+    if (!el) return;
+
+    // Show loader
+    el.innerHTML = `
+      <div class="bg-white border border-slate-200 rounded-xl shadow-sm">
+        <div class="px-6 py-5 border-b border-slate-100 flex items-center gap-3">
+          <div class="w-5 h-5 border-2 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+          <span class="text-slate-500 text-sm">Scanning your inbox…</span>
+        </div>
+      </div>`;
+
+    htmx.ajax('GET', url, {target: '#stats-data', swap: 'outerHTML'});
+  }
+
+  document.getElementById('rescan-btn').addEventListener('click', triggerScan);
+</script>
+
+{% endblock %}
