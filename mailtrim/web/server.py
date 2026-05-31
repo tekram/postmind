@@ -720,6 +720,8 @@ async def watch_page(request: Request):
     ctx["active"] = "watch"
     ctx["is_running"] = bool(_watch_thread and _watch_thread.is_alive())
     ctx["interval"] = _watch_interval
+    ctx["started"] = request.query_params.get("started") == "1"
+    ctx["stopped"] = request.query_params.get("stopped") == "1"
     ctx["agents"] = [
         {
             "email": a.account_email,

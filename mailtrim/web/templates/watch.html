@@ -3,177 +3,130 @@
 {% block content %}
 <div class="px-8 py-8 max-w-4xl mx-auto">
 
-  <!-- Header -->
   <div class="flex items-center justify-between mb-6">
     <div>
-      <h1 class="text-2xl font-bold text-slate-900">Watch daemon</h1>
-      <p class="text-slate-500 text-sm mt-1">Run background agents to periodically triage your inbox</p>
+      <h1 class="text-2xl font-bold text-slate-900">Watch</h1>
+      <p class="text-slate-500 text-sm mt-1">Heartbeat daemon — auto-triage your inbox on a schedule.</p>
     </div>
+    <!-- Daemon start/stop -->
+    {% if is_running %}
+    <form method="POST" action="/watch/stop">
+      <button type="submit"
+              class="inline-flex items-center gap-2 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 10h6v4H9z"/>
+        </svg>
+        Stop daemon
+      </button>
+    </form>
+    {% else %}
+    <form method="POST" action="/watch/start" class="flex items-center gap-2">
+      <select name="interval"
+              class="text-sm bg-white border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400">
+        <option value="5">Every 5 min</option>
+        <option value="15">Every 15 min</option>
+        <option value="30" selected>Every 30 min</option>
+        <option value="60">Every 60 min</option>
+      </select>
+      <button type="submit"
+              class="inline-flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        Start daemon
+      </button>
+    </form>
+    {% endif %}
   </div>
 
-  <!-- Success banners -->
-  {% if request.query_params.get('started') %}
-  <div class="mb-6 bg-teal-50 border border-teal-200 rounded-xl p-4 flex items-center gap-3">
-    <svg class="w-5 h-5 text-teal-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+  {% if started %}
+  <div class="mb-5 bg-green-50 border border-green-200 rounded-xl p-3 flex items-center gap-2">
+    <svg class="w-4 h-4 text-green-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
       <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
     </svg>
-    <p class="text-teal-800 text-sm font-medium">Daemon started.</p>
+    <p class="text-green-800 text-sm">Daemon started — running every {{ interval }} minutes.</p>
   </div>
   {% endif %}
-  {% if request.query_params.get('stopped') %}
-  <div class="mb-6 bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center gap-3">
-    <svg class="w-5 h-5 text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-      <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0zM9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>
+
+  {% if stopped %}
+  <div class="mb-5 bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center gap-2">
+    <svg class="w-4 h-4 text-amber-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      <path stroke-linecap="round" stroke-linejoin="round" d="M9 10h6v4H9z"/>
     </svg>
-    <p class="text-slate-600 text-sm font-medium">Daemon stopped.</p>
+    <p class="text-amber-800 text-sm">Daemon stopped.</p>
   </div>
   {% endif %}
 
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-    <!-- Control panel -->
-    <div class="lg:col-span-1 space-y-4">
-
-      <!-- Status card -->
-      <div class="bg-white rounded-xl border border-slate-200 p-5">
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-sm font-semibold text-slate-700">Daemon</h2>
-          {% if is_running %}
-          <span class="inline-flex items-center gap-1.5 text-xs font-medium text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-full">
-            <span class="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse"></span>Running
-          </span>
-          {% else %}
-          <span class="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full">
-            <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>Stopped
-          </span>
-          {% endif %}
-        </div>
-
-        {% if not is_running %}
-        <!-- Start form -->
-        <form method="POST" action="/watch/start" class="space-y-3">
-          <div>
-            <label class="block text-xs font-medium text-slate-600 mb-1">Check interval (minutes)</label>
-            <input type="number" name="interval" value="{{ interval }}" min="1" max="1440"
-                   class="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400">
-          </div>
-          <button type="submit"
-                  class="w-full inline-flex items-center justify-center gap-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
-              <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-            </svg>
-            Start daemon
-          </button>
-        </form>
-        {% else %}
-        <!-- Stop form -->
-        <p class="text-slate-500 text-xs mb-3">Checking every {{ interval }} minutes.</p>
-        <form method="POST" action="/watch/stop">
-          <button type="submit"
-                  class="w-full inline-flex items-center justify-center gap-2 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-sm font-medium px-4 py-2.5 rounded-lg transition-colors">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0zM9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>
-            </svg>
-            Stop daemon
-          </button>
-        </form>
-        {% endif %}
-      </div>
-
-      <!-- Info card -->
-      <div class="bg-slate-50 rounded-xl border border-slate-200 p-4">
-        <p class="text-xs font-medium text-slate-600 mb-2">About the watch daemon</p>
-        <ul class="space-y-1.5 text-xs text-slate-500">
-          <li class="flex items-start gap-2">
-            <svg class="w-3.5 h-3.5 text-teal-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
-            </svg>
-            Runs agents registered on the Agents page
-          </li>
-          <li class="flex items-start gap-2">
-            <svg class="w-3.5 h-3.5 text-teal-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
-            </svg>
-            Fetches unread mail and runs AI classification (if enabled)
-          </li>
-          <li class="flex items-start gap-2">
-            <svg class="w-3.5 h-3.5 text-teal-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
-            </svg>
-            Stops automatically when the web server exits
-          </li>
-          <li class="flex items-start gap-2">
-            <svg class="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-            </svg>
-            Manage agents on the <a href="/agents" class="text-teal-600 hover:underline">Agents</a> page
-          </li>
-        </ul>
-      </div>
+  <!-- Live status (HTMX polling) -->
+  <div id="watch-status"
+       hx-get="/watch/status"
+       hx-trigger="every 10s"
+       hx-swap="outerHTML"
+       class="bg-white rounded-xl border border-slate-200 p-5 mb-6">
+    <div class="flex items-center justify-between mb-4">
+      <span class="text-sm font-medium text-slate-700">Daemon status</span>
+      {% if is_running %}
+      <span class="inline-flex items-center gap-1.5 text-xs font-medium text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-full">
+        <span class="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse"></span>Running
+      </span>
+      {% else %}
+      <span class="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full">
+        <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>Stopped
+      </span>
+      {% endif %}
     </div>
 
-    <!-- Live status table -->
-    <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <div class="p-5">
-        <div id="watch-status"
-             hx-get="/watch/status"
-             hx-trigger="every 10s"
-             hx-swap="outerHTML">
-          <div class="flex items-center justify-between mb-4">
-            <span class="text-sm font-medium text-slate-700">Agent status</span>
-            {% if is_running %}
-            <span class="inline-flex items-center gap-1.5 text-xs font-medium text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-full">
-              <span class="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse"></span>Running
-            </span>
+    {% if agents %}
+    <table class="w-full">
+      <thead>
+        <tr class="text-xs text-slate-400 uppercase tracking-wide border-b border-slate-100">
+          <th class="py-2 px-4 text-left">Agent</th>
+          <th class="py-2 px-4 text-left">Account</th>
+          <th class="py-2 px-4 text-left">Status</th>
+          <th class="py-2 px-4 text-left">Last run</th>
+          <th class="py-2 px-4 text-left">Emails found</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in agents %}
+        <tr class="border-b border-slate-50 last:border-0">
+          <td class="py-2 px-4 text-sm font-medium text-slate-800">{{ a.name }}</td>
+          <td class="py-2 px-4 text-xs text-slate-500">{{ a.email }}</td>
+          <td class="py-2 px-4">
+            {% if a.status == 'error' %}
+            <span class="w-2 h-2 rounded-full bg-red-400 inline-block"></span>
+            {% elif a.is_active %}
+            <span class="w-2 h-2 rounded-full bg-teal-400 inline-block"></span>
             {% else %}
-            <span class="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full">
-              <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>Stopped
-            </span>
+            <span class="w-2 h-2 rounded-full bg-slate-300 inline-block"></span>
             {% endif %}
-          </div>
-
-          {% if agents %}
-          <table class="w-full">
-            <thead>
-              <tr class="text-xs text-slate-400 uppercase tracking-wide border-b border-slate-100">
-                <th class="py-2 px-4 text-left">Agent</th>
-                <th class="py-2 px-4 text-left">Account</th>
-                <th class="py-2 px-4 text-left">Status</th>
-                <th class="py-2 px-4 text-left">Last run</th>
-                <th class="py-2 px-4 text-left">Found</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for a in agents %}
-              <tr class="border-b border-slate-50 last:border-0">
-                <td class="py-2 px-4 text-sm font-medium text-slate-800">{{ a.name }}</td>
-                <td class="py-2 px-4 text-xs text-slate-500 truncate max-w-xs">{{ a.email }}</td>
-                <td class="py-2 px-4">
-                  {% if a.status == 'error' %}
-                  <span class="w-2 h-2 rounded-full bg-red-400 inline-block"></span>
-                  {% elif a.is_active %}
-                  <span class="w-2 h-2 rounded-full bg-teal-400 inline-block"></span>
-                  {% else %}
-                  <span class="w-2 h-2 rounded-full bg-slate-300 inline-block"></span>
-                  {% endif %}
-                </td>
-                <td class="py-2 px-4 text-xs text-slate-500">{{ a.last_run }}</td>
-                <td class="py-2 px-4 text-xs text-slate-500">{{ a.last_found }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-          {% else %}
-          <div class="py-8 text-center">
-            <p class="text-slate-400 text-sm">No agents configured.</p>
-            <a href="/agents" class="text-teal-600 text-sm hover:underline mt-1 inline-block">Create an agent &rarr;</a>
-          </div>
-          {% endif %}
-        </div>
-      </div>
-    </div>
-
+          </td>
+          <td class="py-2 px-4 text-xs text-slate-500">{{ a.last_run }}</td>
+          <td class="py-2 px-4 text-xs text-slate-500">{{ a.last_found }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="text-slate-400 text-sm text-center py-4">No agents configured. Go to <a href="/agents" class="text-teal-600 underline">Agents</a> to create one.</p>
+    {% endif %}
   </div>
+
+  <!-- Info panel -->
+  <div class="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-3">
+    <h3 class="text-sm font-semibold text-slate-700">About the daemon</h3>
+    <p class="text-sm text-slate-500">
+      The watch daemon runs in the background and calls AI triage on each account's unread emails at the configured interval. Results are stored in the local database and shown in the <a href="/triage" class="text-teal-600 underline">Triage</a> view.
+    </p>
+    <div class="bg-white border border-slate-200 rounded-lg p-3">
+      <p class="text-xs text-slate-500 font-medium mb-1.5">Alternatively, run the CLI daemon directly:</p>
+      <code class="text-xs text-slate-700 font-mono">mailtrim watch --interval 30</code>
+    </div>
+    <p class="text-xs text-slate-400">AI must be enabled in <a href="/settings" class="underline hover:text-slate-600">Settings</a> for triage to classify emails.</p>
+  </div>
+
 </div>
 {% endblock %}
