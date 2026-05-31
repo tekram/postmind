@@ -30,6 +30,11 @@ console = Console()
 accounts_app = typer.Typer(name="accounts", help="Manage multiple email accounts.", no_args_is_help=True)
 app.add_typer(accounts_app, name="accounts")
 
+# ── agents sub-app ────────────────────────────────────────────────────────────
+
+agents_app = typer.Typer(name="agents", help="Manage per-account heartbeat agents.", no_args_is_help=True)
+app.add_typer(agents_app, name="agents")
+
 
 @accounts_app.command(name="list")
 def accounts_list() -> None:
@@ -152,6 +157,100 @@ def accounts_remove(
                 ACTIVE_ACCOUNT_PATH.unlink()
 
     console.print(f"[green]✓[/green] Account [bold]{email}[/bold] removed.")
+
+
+# ── agents commands ───────────────────────────────────────────────────────────
+
+
+@agents_app.command(name="list")
+def agents_list() -> None:
+    """List all heartbeat agents."""
+    from mailtrim.core.storage import AgentRepo, get_session
+    from datetime import datetime, timezone
+
+    agents = AgentRepo(get_session()).list_all()
+    if not agents:
+        console.print("[yellow]No agents registered.[/yellow]  Run [cyan]mailtrim agents create[/cyan] to add one.")
+        return
+
+    table = Table(show_header=True, header_style="bold", border_style="dim")
+    table.add_column("Name")
+    table.add_column("Email")
+    table.add_column("Interval", width=10)
+    table.add_column("Status", width=10)
+    table.add_column("Last run", width=14)
+    table.add_column("Found", width=7, justify="right")
+
+    now = datetime.now(timezone.utc)
+    for a in agents:
+        status_color = {"idle": "green", "running": "cyan", "error": "red"}.get(a.status, "dim")
+        active_prefix = "" if a.is_active else "[dim](paused) [/dim]"
+        if a.last_run_at:
+            last_run_ts = a.last_run_at
+            if last_run_ts.tzinfo is None:
+                last_run_ts = last_run_ts.replace(tzinfo=timezone.utc)
+            delta = int((now - last_run_ts).total_seconds() // 60)
+            last_run_str = f"{delta} min ago" if delta < 60 else f"{delta // 60}h ago"
+        else:
+            last_run_str = "never"
+        table.add_row(
+            active_prefix + a.name,
+            a.account_email,
+            f"{a.interval_minutes} min",
+            f"[{status_color}]{a.status}[/{status_color}]",
+            last_run_str,
+            str(a.last_found_count),
+        )
+
+    console.print(table)
+
+
+@agents_app.command(name="create")
+def agents_create(
+    email: str = typer.Option(..., "--email", "-e", help="Account email address."),
+    name: str = typer.Option("", "--name", "-n", help="Agent name (e.g. 'Work')."),
+    interval: int = typer.Option(30, "--interval", "-i", help="Heartbeat interval in minutes."),
+) -> None:
+    """Create a heartbeat agent for an account."""
+    from mailtrim.core.account_registry import list_accounts
+    from mailtrim.core.storage import AgentRepo, get_session
+    accounts = list_accounts()
+    if not any(a.email == email for a in accounts):
+        console.print(f"[red]Account not registered:[/red] {email}")
+        console.print("  Run [cyan]mailtrim accounts add[/cyan] first.")
+        raise typer.Exit(1)
+    agent_name = name or email.split("@")[0].title()
+    AgentRepo(get_session()).register(email, agent_name, interval)
+    console.print(f"[green]✓[/green] Agent [bold]{agent_name}[/bold] created for {email} (every {interval} min)")
+
+
+@agents_app.command(name="pause")
+def agents_pause(email: str = typer.Argument(...)) -> None:
+    """Pause a heartbeat agent."""
+    from mailtrim.core.storage import AgentRepo, get_session
+    AgentRepo(get_session()).set_active(email, False)
+    console.print(f"[yellow]⏸[/yellow]  Agent for {email} paused.")
+
+
+@agents_app.command(name="resume")
+def agents_resume(email: str = typer.Argument(...)) -> None:
+    """Resume a paused agent."""
+    from mailtrim.core.storage import AgentRepo, get_session
+    AgentRepo(get_session()).set_active(email, True)
+    console.print(f"[green]▶[/green]  Agent for {email} resumed.")
+
+
+@agents_app.command(name="delete")
+def agents_delete(
+    email: str = typer.Argument(...),
+    yes: bool = typer.Option(False, "--yes", "-y"),
+) -> None:
+    """Delete a heartbeat agent."""
+    if not yes:
+        typer.confirm(f"Delete agent for {email}?", abort=True)
+    from mailtrim.core.storage import AgentRepo, get_session
+    AgentRepo(get_session()).delete(email)
+    console.print(f"[green]✓[/green] Agent deleted.")
 
 
 @app.callback(invoke_without_command=True)

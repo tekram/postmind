@@ -511,6 +511,68 @@ async def web_switch_account(request: Request):
     return RedirectResponse("/", status_code=303)
 
 
+# ── Agents ────────────────────────────────────────────────────────────────────
+
+
+@app.get("/agents", response_class=HTMLResponse)
+async def agents_page(request: Request):
+    ctx = _base()
+    ctx["active"] = "agents"
+    from mailtrim.core.storage import AgentRepo, get_session
+    from mailtrim.core.account_registry import list_accounts
+    agents = AgentRepo(get_session()).list_all()
+    accounts = list_accounts()
+    registered_emails = {a.account_email for a in agents}
+    unregistered = [a for a in accounts if a.email not in registered_emails]
+    ctx["agents"] = [
+        {
+            "name": a.name,
+            "email": a.account_email,
+            "interval": a.interval_minutes,
+            "is_active": a.is_active,
+            "status": a.status,
+            "last_run_at": a.last_run_at.strftime("%H:%M") if a.last_run_at else "never",
+            "last_found": a.last_found_count,
+            "error": a.error_message,
+        }
+        for a in agents
+    ]
+    ctx["unregistered_accounts"] = [{"email": a.email} for a in unregistered]
+    return _resp(request, "agents.html", ctx)
+
+
+@app.post("/agents/create")
+async def agents_create(request: Request):
+    form = await request.form()
+    email = (form.get("email") or "").strip()
+    name = (form.get("name") or email.split("@")[0].title()).strip()
+    interval = int(form.get("interval") or 30)
+    if not email:
+        raise HTTPException(status_code=400, detail="Email required")
+    from mailtrim.core.storage import AgentRepo, get_session
+    AgentRepo(get_session()).register(email, name, max(1, min(1440, interval)))
+    return RedirectResponse("/agents", status_code=303)
+
+
+@app.post("/agents/toggle")
+async def agents_toggle(request: Request):
+    form = await request.form()
+    email = (form.get("email") or "").strip()
+    active = form.get("active") == "true"
+    from mailtrim.core.storage import AgentRepo, get_session
+    AgentRepo(get_session()).set_active(email, active)
+    return RedirectResponse("/agents", status_code=303)
+
+
+@app.post("/agents/delete")
+async def agents_delete_route(request: Request):
+    form = await request.form()
+    email = (form.get("email") or "").strip()
+    from mailtrim.core.storage import AgentRepo, get_session
+    AgentRepo(get_session()).delete(email)
+    return RedirectResponse("/agents", status_code=303)
+
+
 @app.post("/settings/ai-mode")
 async def update_ai_mode(request: Request):
     form = await request.form()

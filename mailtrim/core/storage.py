@@ -466,6 +466,80 @@ class BlocklistRepo:
         return {r.sender_email for r in rows}
 
 
+class Agent(Base):
+    __tablename__ = "agents"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)           # e.g. "Work", "Personal"
+    account_email = Column(String, nullable=False, unique=True)
+    interval_minutes = Column(Integer, default=30)
+    is_active = Column(Boolean, default=True)
+    last_run_at = Column(DateTime(timezone=True), nullable=True)
+    last_found_count = Column(Integer, default=0)   # emails found in last heartbeat
+    status = Column(String, default="idle")         # "idle" | "running" | "error"
+    error_message = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class AgentRepo:
+    def __init__(self, session: Session):
+        self.s = session
+
+    def register(self, account_email: str, name: str, interval_minutes: int = 30) -> Agent:
+        existing = self.s.query(Agent).filter_by(account_email=account_email).first()
+        if existing:
+            existing.name = name
+            existing.interval_minutes = interval_minutes
+            self.s.commit()
+            return existing
+        from datetime import datetime, timezone
+        agent = Agent(
+            name=name,
+            account_email=account_email,
+            interval_minutes=interval_minutes,
+            is_active=True,
+            status="idle",
+            created_at=datetime.now(timezone.utc),
+        )
+        self.s.add(agent)
+        self.s.commit()
+        return agent
+
+    def list_all(self) -> list[Agent]:
+        return self.s.query(Agent).order_by(Agent.created_at).all()
+
+    def get_by_email(self, account_email: str) -> Agent | None:
+        return self.s.query(Agent).filter_by(account_email=account_email).first()
+
+    def set_active(self, account_email: str, active: bool) -> None:
+        agent = self.get_by_email(account_email)
+        if agent:
+            agent.is_active = active
+            self.s.commit()
+
+    def update_after_run(
+        self,
+        account_email: str,
+        found_count: int,
+        status: str = "idle",
+        error: str | None = None,
+    ) -> None:
+        from datetime import datetime, timezone
+        agent = self.get_by_email(account_email)
+        if agent:
+            agent.last_run_at = datetime.now(timezone.utc)
+            agent.last_found_count = found_count
+            agent.status = status
+            agent.error_message = error
+            self.s.commit()
+
+    def delete(self, account_email: str) -> None:
+        agent = self.get_by_email(account_email)
+        if agent:
+            self.s.delete(agent)
+            self.s.commit()
+
+
 class AccountRepo:
     def __init__(self, session: Session):
         self.s = session

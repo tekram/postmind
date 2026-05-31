@@ -12,7 +12,7 @@ def _triage_account(email: str) -> None:
     """Run one heartbeat cycle for a single account: fetch new mail, classify, apply rules."""
     from mailtrim.config import get_settings, load_account_config, token_path_for
     from mailtrim.core.account_registry import list_accounts
-    from mailtrim.core.storage import AccountRepo, EmailRepo, get_session
+    from mailtrim.core.storage import AccountRepo, AgentRepo, EmailRepo, get_session
 
     logger.info("Heartbeat: %s", email)
 
@@ -29,6 +29,7 @@ def _triage_account(email: str) -> None:
             logger.warning("No token for %s — skipping heartbeat (run: mailtrim auth)", email)
             return
 
+    found_count = 0
     try:
         from mailtrim.core.providers.factory import get_provider
         cfg = load_account_config(email)
@@ -53,10 +54,12 @@ def _triage_account(email: str) -> None:
         if not ids:
             logger.info("Heartbeat %s: inbox clear", email)
             AccountRepo(get_session()).update_last_synced(email)
+            AgentRepo(get_session()).update_after_run(email, found_count=0, status="idle")
             return
 
         messages = provider.get_messages_batch(ids)
-        logger.info("Heartbeat %s: %d unread messages", email, len(messages))
+        found_count = len(messages)
+        logger.info("Heartbeat %s: %d unread messages", email, found_count)
 
         # Run AI classification if AI mode is enabled
         settings = get_settings()
@@ -70,13 +73,20 @@ def _triage_account(email: str) -> None:
                 logger.warning("Heartbeat %s: AI classification failed: %s", email, exc)
 
         AccountRepo(get_session()).update_last_synced(email)
+        AgentRepo(get_session()).update_after_run(email, found_count=found_count, status="idle")
 
     except Exception as exc:
         logger.error("Heartbeat %s failed: %s", email, exc, exc_info=True)
+        AgentRepo(get_session()).update_after_run(
+            email,
+            found_count=found_count,
+            status="error",
+            error=str(exc),
+        )
 
 
-def start_daemon(interval_minutes: int = 30, *, run_immediately: bool = False) -> None:
-    """Start the APScheduler background daemon. Blocks until interrupted."""
+def start_daemon(interval_minutes: int | None = None, *, run_immediately: bool = False) -> None:
+    """Start the daemon. interval_minutes overrides per-agent config if provided."""
     try:
         from apscheduler.schedulers.blocking import BlockingScheduler
         from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
@@ -87,13 +97,26 @@ def start_daemon(interval_minutes: int = 30, *, run_immediately: bool = False) -
         )
 
     from mailtrim.config import DB_PATH
-    from mailtrim.core.account_registry import list_accounts
+    from mailtrim.core.storage import AgentRepo, get_session
 
-    accounts = list_accounts()
-    if not accounts:
-        raise RuntimeError(
-            "No accounts registered. Run `mailtrim setup` or `mailtrim accounts add` first."
-        )
+    agents = AgentRepo(get_session()).list_all()
+    active_agents = [a for a in agents if a.is_active]
+
+    if not active_agents:
+        # Fall back to accounts if no agents configured yet
+        from mailtrim.core.account_registry import list_accounts
+        accounts = list_accounts()
+        if not accounts:
+            raise RuntimeError("No accounts or agents registered.")
+        # Auto-register agents for all accounts
+        repo = AgentRepo(get_session())
+        for acct in accounts:
+            repo.register(
+                account_email=acct.email,
+                name=acct.email.split("@")[0].title(),
+                interval_minutes=interval_minutes or 30,
+            )
+        active_agents = AgentRepo(get_session()).list_all()
 
     jobstore = SQLAlchemyJobStore(url=f"sqlite:///{DB_PATH}")
     scheduler = BlockingScheduler(
@@ -101,18 +124,23 @@ def start_daemon(interval_minutes: int = 30, *, run_immediately: bool = False) -
         job_defaults={"coalesce": True, "max_instances": 1, "misfire_grace_time": 60},
     )
 
-    for acct in accounts:
-        job_id = f"heartbeat_{acct.email}"
+    for agent in active_agents:
+        effective_interval = interval_minutes if interval_minutes is not None else agent.interval_minutes
+        job_id = f"heartbeat_{agent.account_email}"
         scheduler.add_job(
             _triage_account,
             "interval",
-            minutes=interval_minutes,
-            args=[acct.email],
+            minutes=effective_interval,
+            args=[agent.account_email],
             id=job_id,
             replace_existing=True,
             next_run_time=datetime.now(timezone.utc) if run_immediately else None,
         )
-        logger.info("Scheduled heartbeat for %s every %d min", acct.email, interval_minutes)
+        logger.info(
+            "Scheduled heartbeat for %s every %d min",
+            agent.account_email,
+            effective_interval,
+        )
 
     try:
         scheduler.start()
