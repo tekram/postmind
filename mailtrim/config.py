@@ -89,13 +89,13 @@ class Settings(BaseSettings):
     avoidance_view_threshold: int = 3  # Views before an email is "avoided"
     follow_up_default_days: int = 3  # Default follow-up reminder window
 
-    # Provider — persisted by `mailtrim setup` so Gmail-only commands can guard
-    # themselves with a clear message before hitting the OAuth flow.
-    # "gmail" → Gmail OAuth (default)
-    # "imap"  → IMAP (Outlook, Yahoo, custom server)
+    # Deprecated: per-account provider and IMAP settings now live in
+    # ~/.mailtrim/accounts/<email>.json via save_account_config()/load_account_config().
+    # These fields remain for backward-compat fallback on unmigrated installs
+    # (web/server.py and cli/main.py use them as the last-resort tier in a
+    # four-way priority: CLI flag → per-account config → these Settings → default).
+    # Do NOT remove until all callers have migrated to per-account config.
     provider: str = "gmail"
-
-    # IMAP connection settings — persisted by `mailtrim setup` for zero-flag usage
     imap_server: str = ""
     imap_user: str = ""
     imap_port: int = 993

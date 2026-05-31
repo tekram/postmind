@@ -3822,6 +3822,66 @@ def privacy():
     console.print()
 
 
+# ── watch ─────────────────────────────────────────────────────────────────────
+
+
+@app.command()
+def watch(
+    interval: int = typer.Option(
+        30,
+        "--interval",
+        "-i",
+        help="Minutes between heartbeat cycles per account.",
+        min=1,
+        max=1440,
+    ),
+    now: bool = typer.Option(
+        False,
+        "--now",
+        help="Run one triage cycle immediately on startup before entering the schedule.",
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Start the heartbeat daemon — triage each account on a schedule."""
+    import logging
+
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(asctime)s  %(levelname)-7s  %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    from mailtrim.core.account_registry import list_accounts
+
+    accounts = list_accounts()
+    if not accounts:
+        console.print(
+            "[red]No accounts registered.[/red]  "
+            "Run [cyan]mailtrim setup[/cyan] or [cyan]mailtrim accounts add[/cyan] first."
+        )
+        raise typer.Exit(1)
+
+    console.print(f"[bold]mailtrim watch[/bold]  interval=[cyan]{interval}m[/cyan]")
+    for a in accounts:
+        console.print(f"  [dim]·[/dim] {a.email} ({a.provider})")
+    console.print()
+    console.print("[dim]Press Ctrl-C to stop.[/dim]")
+    console.print()
+
+    try:
+        from mailtrim.core.daemon import start_daemon
+        start_daemon(interval_minutes=interval, run_immediately=now)
+    except ImportError as e:
+        console.print(f"[red]Missing dependency:[/red] {e}")
+        console.print("  Install with: [cyan]pip install apscheduler[/cyan]")
+        raise typer.Exit(1)
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+    except KeyboardInterrupt:
+        console.print("\n[dim]Stopped.[/dim]")
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 

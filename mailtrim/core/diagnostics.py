@@ -24,24 +24,34 @@ class CheckResult:
 
 
 def check_token_exists() -> CheckResult:
-    from mailtrim.config import TOKEN_PATH
+    from mailtrim.config import get_active_account, token_path_for, TOKEN_PATH
 
-    if TOKEN_PATH.exists():
-        return CheckResult("Auth token file", ok=True, message="Token file present")
-    return CheckResult(
-        "Auth token file",
-        ok=False,
-        message="Token file not found",
-        fix="mailtrim auth",
-    )
+    email = get_active_account()
+    if email:
+        p = token_path_for(email)
+        label = f"Auth token ({email})"
+    else:
+        p = TOKEN_PATH
+        label = "Auth token"
+    if p.exists():
+        return CheckResult(label, ok=True, message=f"Found at {p}")
+    return CheckResult(label, ok=False, message=f"Not found: {p}", fix="mailtrim auth")
 
 
 def check_token_valid() -> CheckResult:
-    from mailtrim.config import TOKEN_PATH
+    from mailtrim.config import get_active_account, token_path_for, TOKEN_PATH
 
-    if not TOKEN_PATH.exists():
+    email = get_active_account()
+    if email:
+        p = token_path_for(email)
+        label = f"Auth token valid ({email})"
+    else:
+        p = TOKEN_PATH
+        label = "Auth token valid"
+
+    if not p.exists():
         return CheckResult(
-            "Auth token valid",
+            label,
             ok=False,
             message="No token to validate",
             fix="mailtrim auth",
@@ -49,18 +59,18 @@ def check_token_valid() -> CheckResult:
     try:
         from google.oauth2.credentials import Credentials
 
-        creds = Credentials.from_authorized_user_file(str(TOKEN_PATH))
+        creds = Credentials.from_authorized_user_file(str(p))
         if creds.expired and not creds.refresh_token:
             return CheckResult(
-                "Auth token valid",
+                label,
                 ok=False,
                 message="Token expired, no refresh token",
                 fix="mailtrim auth",
             )
-        return CheckResult("Auth token valid", ok=True, message="Token looks valid")
+        return CheckResult(label, ok=True, message="Token looks valid")
     except Exception as exc:
         return CheckResult(
-            "Auth token valid",
+            label,
             ok=False,
             message=f"Token unreadable: {exc}",
             fix="mailtrim auth",
