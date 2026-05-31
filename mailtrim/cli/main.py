@@ -3718,7 +3718,6 @@ def privacy():
         CREDENTIALS_PATH,
         DATA_DIR,
         DB_PATH,
-        TOKEN_PATH,
         UNDO_LOG_DIR,
     )
     from mailtrim.core.usage_stats import get_stats
@@ -3759,13 +3758,35 @@ def privacy():
     console.print()
 
     rows = [
-        ("OAuth token", TOKEN_PATH, "Lets mailtrim access Gmail. Never shared."),
         ("OAuth credentials", CREDENTIALS_PATH, "Your Google Cloud app credentials. Never shared."),
         ("Email database", DB_PATH, "Local cache of metadata (no email body stored)."),
         ("Undo logs", UNDO_LOG_DIR, "History of cleanup operations for undo."),
         ("Usage stats", DATA_DIR / "usage.json", "Local run counts. Never uploaded."),
         ("Config / env", DATA_DIR / ".env", "Your settings (API keys, ai_mode, etc.)."),
     ]
+
+    # ── OAuth token — one entry per registered Gmail account ─────────────────
+    from mailtrim.core.account_registry import list_accounts
+    from mailtrim.config import token_path_for
+
+    accounts = list_accounts()
+    if accounts:
+        for acct in accounts:
+            if acct.provider == "gmail":
+                p = token_path_for(acct.email)
+                exists_str = "[green]exists[/green]" if p.exists() else "[dim]not created[/dim]"
+                console.print(f"  [bold]{'OAuth token':<20}[/bold]  {exists_str}  [dim]({acct.email})[/dim]")
+                console.print(f"  [dim]  {p}[/dim]")
+                console.print(f"  [dim]  Lets mailtrim access Gmail. Never shared.[/dim]")
+                console.print()
+    else:
+        # Legacy fallback for unmigrated single-account installs
+        from mailtrim.config import TOKEN_PATH
+        exists_str = "[green]exists[/green]" if TOKEN_PATH.exists() else "[dim]not created yet[/dim]"
+        console.print(f"  [bold]{'OAuth token':<20}[/bold]  {exists_str}")
+        console.print(f"  [dim]  {TOKEN_PATH}[/dim]")
+        console.print(f"  [dim]  Lets mailtrim access Gmail. Never shared.[/dim]")
+        console.print()
 
     for label, path, note in rows:
         exists = "[green]exists[/green]" if Path(path).exists() else "[dim]not created yet[/dim]"
