@@ -66,9 +66,18 @@ present in the email. Be concise and direct.\
 
 
 class AIEngine:
-    def __init__(self, api_key: str | None = None):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        mode: str | None = None,
+        cloud_model: str | None = None,
+        ollama_model: str | None = None,
+    ):
+        """Construct an engine. ``mode``/``cloud_model``/``ollama_model`` override
+        the global settings — used by the chat assistant so it can run on a
+        different backend than the rest of the app."""
         settings = get_settings()
-        self._mode = settings.ai_mode
+        self._mode = mode or settings.ai_mode
 
         if self._mode == "cloud":
             import anthropic
@@ -80,11 +89,11 @@ class AIEngine:
                     "Set it as an environment variable before running this command."
                 )
             self._anthropic = anthropic.Anthropic(api_key=key)
-            self._cloud_model = settings.ai_model
+            self._cloud_model = cloud_model or settings.ai_model
 
         elif self._mode == "local":
             self._ollama_url = settings.ollama_base_url.rstrip("/")
-            self._ollama_model = settings.ollama_model
+            self._ollama_model = ollama_model or settings.ollama_model
 
         else:
             raise ValueError(
@@ -334,6 +343,98 @@ then the body. No preamble, no sign-off commentary.
             parts.append(f"Replying to:\n---\n{thread_snippet[:800]}\n---")
 
         return self._complete(system, "\n\n".join(parts), max_tokens=600)
+
+    # ── Conversational assistant ─────────────────────────────────────────────
+
+    def chat(
+        self,
+        messages: list[dict],
+        system: str,
+        tools: list[dict] | None = None,
+        tool_executor=None,
+        max_tokens: int = 1024,
+        max_tool_iterations: int = 6,
+    ) -> str:
+        """Run a multi-turn assistant conversation and return the final reply text.
+
+        ``messages`` is a list of ``{"role": "user"|"assistant", "content": str}``.
+        In cloud mode the model can call ``tools`` (Anthropic tool-use); each call
+        is dispatched through ``tool_executor(name, input) -> str``. In local mode
+        tools are ignored — the model answers conversationally from ``system``
+        context only (Ollama tool-use is unreliable across models).
+        """
+        if self._mode == "cloud":
+            return self._chat_cloud(
+                messages, system, tools, tool_executor, max_tokens, max_tool_iterations
+            )
+        if self._mode == "local":
+            # Flatten the conversation into a single prompt for /api/chat.
+            transcript = "\n".join(
+                f"{m['role'].capitalize()}: {m['content']}" for m in messages
+            )
+            prompt = (
+                f"{transcript}\n\nAssistant: "
+                if transcript
+                else "Greet the user briefly and ask how you can help with their inbox."
+            )
+            return self._complete(system, prompt, max_tokens=max_tokens)
+        raise ValueError(
+            f"AI mode is '{self._mode}'. Enable cloud or local AI mode to chat."
+        )
+
+    def _chat_cloud(
+        self, messages, system, tools, tool_executor, max_tokens, max_tool_iterations
+    ) -> str:
+        # Cache the (large, reused) system prompt and tool definitions across turns.
+        system_blocks = [
+            {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
+        ]
+        cached_tools = None
+        if tools:
+            cached_tools = [dict(t) for t in tools]
+            cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
+
+        convo = [{"role": m["role"], "content": m["content"]} for m in messages]
+
+        for _ in range(max_tool_iterations):
+            kwargs = {
+                "model": self._cloud_model,
+                "max_tokens": max_tokens,
+                "system": system_blocks,
+                "messages": convo,
+            }
+            if cached_tools:
+                kwargs["tools"] = cached_tools
+
+            resp = self._anthropic.messages.create(**kwargs)
+
+            if resp.stop_reason == "tool_use":
+                convo.append({"role": "assistant", "content": resp.content})
+                tool_results = []
+                for block in resp.content:
+                    if block.type != "tool_use":
+                        continue
+                    try:
+                        result = (
+                            tool_executor(block.name, block.input)
+                            if tool_executor
+                            else "Tool unavailable."
+                        )
+                    except Exception as exc:  # surface failures to the model, don't crash
+                        result = f"Error running {block.name}: {exc}"
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": str(result),
+                        }
+                    )
+                convo.append({"role": "user", "content": tool_results})
+                continue
+
+            return "".join(b.text for b in resp.content if b.type == "text").strip()
+
+        return "I wasn't able to finish that — could you rephrase or break it into smaller steps?"
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

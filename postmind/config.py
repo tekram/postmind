@@ -111,6 +111,13 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:32b"
 
+    # Chat assistant — lets the floating assistant use a different backend/model
+    # than the global ai_mode (e.g. cloud triage but a local, private chat).
+    # Empty string means "inherit": fall back to ai_mode / ai_model / ollama_model.
+    chat_ai_mode: str = ""  # "" inherit · "off" · "local" · "cloud"
+    chat_cloud_model: str = ""  # "" → ai_model
+    chat_ollama_model: str = ""  # "" → ollama_model
+
     # Rate limiting
     gmail_batch_size: int = 50  # Max messages per Gmail batch request
     ai_max_classify_batch: int = 20  # Emails per AI classification call

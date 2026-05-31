@@ -12,6 +12,12 @@
     <p class="text-green-800 text-sm font-medium">AI mode updated.</p>
   </div>
   {% endif %}
+  {% if success == 'chat' %}
+  <div class="bg-green-50 border border-green-200 rounded-xl p-4 mb-6 flex items-center gap-2">
+    <span class="text-green-500">✓</span>
+    <p class="text-green-800 text-sm font-medium">Chat assistant settings updated.</p>
+  </div>
+  {% endif %}
 
   <!-- AI mode -->
   <div class="bg-white border border-slate-200 rounded-xl shadow-sm mb-5">
@@ -82,6 +88,72 @@
           <button type="submit"
                   class="bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
             Save AI mode
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Chat assistant -->
+  <div class="bg-white border border-slate-200 rounded-xl shadow-sm mb-5">
+    <div class="px-5 py-4 border-b border-slate-100">
+      <h2 class="font-medium text-slate-800">Chat Assistant</h2>
+      <p class="text-slate-500 text-xs mt-0.5">Which LLM powers the floating assistant (bottom-right). Can differ from your AI Mode above.</p>
+    </div>
+    <div class="p-5">
+      <form action="/settings/chat" method="POST" class="space-y-3">
+        <label class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors
+                      {% if chat_ai_mode == '' %}border-slate-900 bg-slate-50{% else %}border-slate-200 hover:border-slate-300{% endif %}">
+          <input type="radio" name="chat_mode" value="inherit" {% if chat_ai_mode == '' %}checked{% endif %}
+                 class="mt-0.5 text-slate-700 chat-mode-radio">
+          <div>
+            <p class="text-sm font-medium text-slate-800">Inherit AI Mode <span class="text-slate-400 font-normal">(default)</span></p>
+            <p class="text-xs text-slate-500 mt-0.5">Use whatever the AI Mode above is set to (currently <span class="font-medium">{{ ai_mode }}</span>).</p>
+          </div>
+        </label>
+
+        <label class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors
+                      {% if chat_ai_mode == 'local' %}border-teal-500 bg-teal-50{% else %}border-slate-200 hover:border-slate-300{% endif %}">
+          <input type="radio" name="chat_mode" value="local" {% if chat_ai_mode == 'local' %}checked{% endif %}
+                 class="mt-0.5 text-teal-600 chat-mode-radio">
+          <div class="flex-1">
+            <p class="text-sm font-medium text-slate-800">Local <span class="text-slate-400 font-normal">(Ollama)</span></p>
+            <p class="text-xs text-slate-500 mt-0.5">Private — chat runs on your machine, nothing leaves your device.</p>
+            <div id="chat-local-config" class="mt-3 {% if chat_ai_mode != 'local' %}hidden{% endif %}">
+              <div class="flex items-center gap-2">
+                <label class="text-xs text-slate-500 w-24 shrink-0">Model</label>
+                <input type="text" name="chat_ollama_model" value="{{ chat_ollama_model }}" placeholder="qwen2.5:32b"
+                       class="flex-1 text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500/30 text-slate-800 font-mono bg-white">
+              </div>
+              <p class="text-xs text-slate-400 mt-1.5">Uses your Ollama URL from AI Mode above. Tool-use is limited on local models, so the assistant answers conversationally.</p>
+            </div>
+          </div>
+        </label>
+
+        <label class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors
+                      {% if chat_ai_mode == 'cloud' %}border-amber-400 bg-amber-50{% else %}border-slate-200 hover:border-slate-300{% endif %}">
+          <input type="radio" name="chat_mode" value="cloud" {% if chat_ai_mode == 'cloud' %}checked{% endif %}
+                 class="mt-0.5 text-amber-500 chat-mode-radio">
+          <div class="flex-1">
+            <p class="text-sm font-medium text-slate-800">Cloud <span class="text-slate-400 font-normal">(Claude)</span></p>
+            <p class="text-xs text-slate-500 mt-0.5">Most capable — full tool-use (looks up your inbox, drafts emails). Sends chat + inbox snippets to Anthropic. Requires <code class="font-mono bg-slate-100 px-1 rounded">ANTHROPIC_API_KEY</code>.</p>
+            {% if not has_api_key %}
+            <p class="text-xs text-amber-600 mt-1 font-medium">⚠ No API key set — set ANTHROPIC_API_KEY in your environment.</p>
+            {% endif %}
+            <div id="chat-cloud-config" class="mt-3 {% if chat_ai_mode != 'cloud' %}hidden{% endif %}">
+              <div class="flex items-center gap-2">
+                <label class="text-xs text-slate-500 w-24 shrink-0">Model</label>
+                <input type="text" name="chat_cloud_model" value="{{ chat_cloud_model }}" placeholder="claude-sonnet-4-6"
+                       class="flex-1 text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-500/30 text-slate-800 font-mono bg-white">
+              </div>
+            </div>
+          </div>
+        </label>
+
+        <div class="pt-1">
+          <button type="submit"
+                  class="bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+            Save chat settings
           </button>
         </div>
       </form>
@@ -171,6 +243,13 @@
   document.querySelectorAll('input[name="mode"]').forEach(function(radio) {
     radio.addEventListener('change', function() {
       document.getElementById('ollama-config').classList.toggle('hidden', this.value !== 'local');
+    });
+  });
+
+  document.querySelectorAll('.chat-mode-radio').forEach(function(radio) {
+    radio.addEventListener('change', function() {
+      document.getElementById('chat-local-config').classList.toggle('hidden', this.value !== 'local');
+      document.getElementById('chat-cloud-config').classList.toggle('hidden', this.value !== 'cloud');
     });
   });
 </script>
