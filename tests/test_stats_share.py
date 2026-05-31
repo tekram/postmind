@@ -192,7 +192,7 @@ class TestGenerateStatsShareText:
             top_domains=[],
             scan_seconds=1,
         )
-        assert "github.com/sadhgurutech/mailtrim" in text
+        assert "github.com/tekram/mailtrim" in text
 
     def test_scan_speed_shown(self):
         from mailtrim.core.sender_stats import generate_stats_share_text
@@ -287,7 +287,7 @@ class TestShareExamples:
         assert len(text) <= 200
         # Has emoji and URL
         assert "🧹" in text
-        assert "github.com/sadhgurutech/mailtrim" in text
+        assert "github.com/tekram/mailtrim" in text
 
     def test_example_single_sender_twitter(self):
         """Single-sender result uses singular 'sender', not 'senders'."""
@@ -343,7 +343,7 @@ class TestShareExamples:
         assert "Notion" in text
         assert "Top sources:" in text
         assert "3s" in text
-        assert "github.com/sadhgurutech/mailtrim" in text
+        assert "github.com/tekram/mailtrim" in text
 
     def test_example_sensitive_domain_filtered(self):
         """Sensitive domains (bank, health …) are silently excluded from share text."""
@@ -377,7 +377,7 @@ class TestStatsCLIShare:
 
     def test_share_shows_github_url(self):
         result = _invoke("--share")
-        assert "github.com/sadhgurutech/mailtrim" in result.output
+        assert "github.com/tekram/mailtrim" in result.output
 
     def test_share_shows_copy_ready_section(self):
         result = _invoke("--share")
