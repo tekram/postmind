@@ -682,6 +682,20 @@ def setup():
                     "  Setup will continue — pass [bold]--imap-server[/bold] and "
                     "[bold]--imap-user[/bold] explicitly if needed."
                 )
+            # Register in account registry (Phase 4)
+            try:
+                from mailtrim.core.account_registry import register_imap
+                from mailtrim.config import set_active_account
+                register_imap(
+                    email=imap_user,
+                    imap_server=imap_server,
+                    imap_user=imap_user,
+                    imap_port=imap_port,
+                    imap_folder="INBOX",
+                )
+                set_active_account(imap_user)
+            except Exception:
+                pass  # Registry errors are non-fatal during setup
         except Exception as exc:
             console.print(f"  [red]✗  IMAP connection failed:[/red] {str(exc)[:100]}")
             console.print()
