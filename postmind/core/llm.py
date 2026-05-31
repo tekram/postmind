@@ -5,8 +5,8 @@ Drop-in enhancement: if the server is unavailable, every call returns {}
 and the caller falls back to rule-based logic unchanged.
 
 Usage:
-    from mailtrim.core.llm import analyze_email, analyze_batch, confidence_delta
-    from mailtrim.core.llm import classify_for_triage  # triage fallback
+    from postmind.core.llm import analyze_email, analyze_batch, confidence_delta
+    from postmind.core.llm import classify_for_triage  # triage fallback
 """
 
 from __future__ import annotations
@@ -15,13 +15,13 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING
 
-from mailtrim.core.ai.client import AIClient, get_ai_client
+from postmind.core.ai.client import AIClient, get_ai_client
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from mailtrim.core.ai_engine import ClassifiedEmail
-    from mailtrim.core.gmail_client import Message
+    from postmind.core.ai_engine import ClassifiedEmail
+    from postmind.core.gmail_client import Message
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -380,8 +380,8 @@ def classify_for_triage(messages: list[Message]) -> list[ClassifiedEmail]:
     Returns:
         list[ClassifiedEmail] in the same order as ``messages``.
     """
-    from mailtrim.core.ai_engine import ClassifiedEmail
-    from mailtrim.core.mock_ai import MockAIEngine
+    from postmind.core.ai_engine import ClassifiedEmail
+    from postmind.core.mock_ai import MockAIEngine
 
     mock = MockAIEngine()
 

@@ -14,8 +14,8 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 from rich.text import Text
 
-from mailtrim import __version__
-from mailtrim.config import CREDENTIALS_PATH, DATA_DIR, get_settings
+from postmind import __version__
+from postmind.config import CREDENTIALS_PATH, DATA_DIR, get_settings
 
 app = typer.Typer(
     name="mailtrim",
@@ -39,8 +39,8 @@ app.add_typer(agents_app, name="agents")
 @accounts_app.command(name="list")
 def accounts_list() -> None:
     """List all registered accounts."""
-    from mailtrim.core.account_registry import list_accounts, get_active
-    from mailtrim.config import token_path_for
+    from postmind.core.account_registry import list_accounts, get_active
+    from postmind.config import token_path_for
     accounts = list_accounts()
     if not accounts:
         console.print("[yellow]No accounts registered.[/yellow]  Run [cyan]mailtrim setup[/cyan] to add one.")
@@ -67,7 +67,7 @@ def accounts_switch(
     email: str = typer.Argument(..., help="Account email address to switch to.")
 ) -> None:
     """Switch the active account."""
-    from mailtrim.core.account_registry import switch_to
+    from postmind.core.account_registry import switch_to
     try:
         switch_to(email)
         console.print(f"[green]✓[/green] Active account set to [bold]{email}[/bold]")
@@ -83,8 +83,8 @@ def accounts_add(
 ) -> None:
     """Add and authenticate a new Gmail or IMAP account."""
     if provider == "gmail":
-        from mailtrim.core.gmail_client import authenticate
-        from mailtrim.config import CREDENTIALS_PATH, TOKENS_DIR
+        from postmind.core.gmail_client import authenticate
+        from postmind.config import CREDENTIALS_PATH, TOKENS_DIR
         if not CREDENTIALS_PATH.exists():
             console.print("[red]credentials.json not found.[/red]  Download it from Google Cloud Console and save to ~/.mailtrim/credentials.json")
             raise typer.Exit(1)
@@ -102,14 +102,14 @@ def accounts_add(
             if tmp_token.exists():
                 tmp_token.unlink()
             raise typer.Exit(1)
-        from mailtrim.config import token_path_for
+        from postmind.config import token_path_for
         dest = token_path_for(email)
         shutil.move(str(tmp_token), str(dest))
         dest.chmod(0o600)
-        from mailtrim.core.account_registry import register_gmail, list_accounts
+        from postmind.core.account_registry import register_gmail, list_accounts
         register_gmail(email)
         if make_active:
-            from mailtrim.config import set_active_account
+            from postmind.config import set_active_account
             set_active_account(email)
         console.print(f"[green]✓[/green] Account [bold]{email}[/bold] added.")
         if make_active:
@@ -124,9 +124,9 @@ def accounts_remove(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
     """Remove a registered account and delete its token."""
-    from mailtrim.core.account_registry import list_accounts
-    from mailtrim.core.storage import AccountRepo, get_session
-    from mailtrim.config import token_path_for, get_active_account, set_active_account
+    from postmind.core.account_registry import list_accounts
+    from postmind.core.storage import AccountRepo, get_session
+    from postmind.config import token_path_for, get_active_account, set_active_account
 
     accounts = list_accounts()
     if not any(a.email == email for a in accounts):
@@ -152,7 +152,7 @@ def accounts_remove(
         if remaining:
             set_active_account(remaining[0].email)
         else:
-            from mailtrim.config import ACTIVE_ACCOUNT_PATH
+            from postmind.config import ACTIVE_ACCOUNT_PATH
             if ACTIVE_ACCOUNT_PATH.exists():
                 ACTIVE_ACCOUNT_PATH.unlink()
 
@@ -165,7 +165,7 @@ def accounts_remove(
 @agents_app.command(name="list")
 def agents_list() -> None:
     """List all heartbeat agents."""
-    from mailtrim.core.storage import AgentRepo, get_session
+    from postmind.core.storage import AgentRepo, get_session
     from datetime import datetime, timezone
 
     agents = AgentRepo(get_session()).list_all()
@@ -212,8 +212,8 @@ def agents_create(
     interval: int = typer.Option(30, "--interval", "-i", help="Heartbeat interval in minutes."),
 ) -> None:
     """Create a heartbeat agent for an account."""
-    from mailtrim.core.account_registry import list_accounts
-    from mailtrim.core.storage import AgentRepo, get_session
+    from postmind.core.account_registry import list_accounts
+    from postmind.core.storage import AgentRepo, get_session
     accounts = list_accounts()
     if not any(a.email == email for a in accounts):
         console.print(f"[red]Account not registered:[/red] {email}")
@@ -227,7 +227,7 @@ def agents_create(
 @agents_app.command(name="pause")
 def agents_pause(email: str = typer.Argument(...)) -> None:
     """Pause a heartbeat agent."""
-    from mailtrim.core.storage import AgentRepo, get_session
+    from postmind.core.storage import AgentRepo, get_session
     AgentRepo(get_session()).set_active(email, False)
     console.print(f"[yellow]⏸[/yellow]  Agent for {email} paused.")
 
@@ -235,7 +235,7 @@ def agents_pause(email: str = typer.Argument(...)) -> None:
 @agents_app.command(name="resume")
 def agents_resume(email: str = typer.Argument(...)) -> None:
     """Resume a paused agent."""
-    from mailtrim.core.storage import AgentRepo, get_session
+    from postmind.core.storage import AgentRepo, get_session
     AgentRepo(get_session()).set_active(email, True)
     console.print(f"[green]▶[/green]  Agent for {email} resumed.")
 
@@ -248,7 +248,7 @@ def agents_delete(
     """Delete a heartbeat agent."""
     if not yes:
         typer.confirm(f"Delete agent for {email}?", abort=True)
-    from mailtrim.core.storage import AgentRepo, get_session
+    from postmind.core.storage import AgentRepo, get_session
     AgentRepo(get_session()).delete(email)
     console.print(f"[green]✓[/green] Agent deleted.")
 
@@ -268,7 +268,7 @@ def _main(
 ) -> None:
     # Silently migrate legacy token.json on startup
     try:
-        from mailtrim.core.account_registry import migrate_legacy_token
+        from postmind.core.account_registry import migrate_legacy_token
         migrate_legacy_token()
     except Exception:
         pass
@@ -277,7 +277,7 @@ def _main(
         typer.echo(f"mailtrim {__version__}")
         raise typer.Exit()
     if account:
-        from mailtrim.core.account_registry import list_accounts
+        from postmind.core.account_registry import list_accounts
         _accounts = list_accounts()
         if _accounts and not any(a.email == account for a in _accounts):
             console.print(f"[red]Unknown account:[/red] {account}")
@@ -314,7 +314,7 @@ def serve(
     """
     try:
         import uvicorn
-        from mailtrim.web.server import app as _web_app  # noqa: F401
+        from postmind.web.server import app as _web_app  # noqa: F401
     except ImportError:
         console.print(
             Panel(
@@ -354,7 +354,7 @@ def serve(
 
 
 def _get_client():
-    from mailtrim.core.gmail_client import GmailClient, authenticate
+    from postmind.core.gmail_client import GmailClient, authenticate
 
     creds = authenticate()
     return GmailClient(creds)
@@ -369,7 +369,7 @@ def _get_provider(
     imap_folder: str = "INBOX",
 ):
     """Construct the EmailProvider selected by --provider."""
-    from mailtrim.core.providers.factory import get_provider
+    from postmind.core.providers.factory import get_provider
 
     return get_provider(
         provider=provider,
@@ -385,13 +385,13 @@ def _get_ai_client_opt(backend: str, url: str, model: str):
     """Return an AIClient override, or None to use the llm.py default."""
     if backend == "llama" and not url:
         return None  # default client already configured in llm.py
-    from mailtrim.core.ai.client import get_ai_client
+    from postmind.core.ai.client import get_ai_client
 
     return get_ai_client(backend=backend, url=url, model=model)
 
 
 def _get_ai():
-    from mailtrim.core.mock_ai import get_ai_engine
+    from postmind.core.mock_ai import get_ai_engine
 
     return get_ai_engine()
 
@@ -458,8 +458,8 @@ def _is_first_stats_run() -> bool:
 
 def _handle_error(exc: Exception, verbose: bool = False) -> None:
     """Translate an exception to a friendly message and exit."""
-    from mailtrim.core.ai.mode import AIModeError
-    from mailtrim.core.errors import friendly_error
+    from postmind.core.ai.mode import AIModeError
+    from postmind.core.errors import friendly_error
 
     if isinstance(exc, AIModeError):
         lines = str(exc).strip().splitlines()
@@ -482,7 +482,7 @@ def _handle_error(exc: Exception, verbose: bool = False) -> None:
 def _record(command: str) -> None:
     """Record command run in local usage stats (best-effort, never raises)."""
     try:
-        from mailtrim.core.usage_stats import record_run
+        from postmind.core.usage_stats import record_run
 
         record_run(command)
     except Exception:
@@ -537,7 +537,7 @@ def _resolve_imap_settings(
     # Load per-account config for the active account
     _acct_cfg: dict = {}
     try:
-        from mailtrim.config import get_active_account, load_account_config
+        from postmind.config import get_active_account, load_account_config
         _active_email = get_active_account()
         if _active_email:
             _acct_cfg = load_account_config(_active_email)
@@ -613,8 +613,8 @@ def setup():
     """
     _record("setup")
 
-    from mailtrim.core.diagnostics import run_all
-    from mailtrim.core.sender_stats import (
+    from postmind.core.diagnostics import run_all
+    from postmind.core.sender_stats import (
         best_next_step,
         classify_sender_risk,
         compute_confidence_score,
@@ -672,7 +672,7 @@ def setup():
 
         console.print("  [dim]Opening browser for Google OAuth consent…[/dim]")
         try:
-            from mailtrim.core.gmail_client import GmailClient, authenticate
+            from postmind.core.gmail_client import GmailClient, authenticate
 
             creds = authenticate(credentials_path=CREDENTIALS_PATH)
             _client = GmailClient(creds)
@@ -704,8 +704,8 @@ def setup():
                 )
             # Register in account registry (Phase 4)
             try:
-                from mailtrim.core.account_registry import register_gmail
-                from mailtrim.config import set_active_account
+                from postmind.core.account_registry import register_gmail
+                from postmind.config import set_active_account
                 register_gmail(email)
                 set_active_account(email)
             except Exception:
@@ -736,7 +736,7 @@ def setup():
         console.print()
         console.print("  [dim]Testing IMAP connection…[/dim]")
         try:
-            from mailtrim.core.providers.factory import get_provider
+            from postmind.core.providers.factory import get_provider
 
             _client = get_provider(
                 provider="imap",
@@ -783,8 +783,8 @@ def setup():
                 )
             # Register in account registry (Phase 4)
             try:
-                from mailtrim.core.account_registry import register_imap
-                from mailtrim.config import set_active_account
+                from postmind.core.account_registry import register_imap
+                from postmind.config import set_active_account
                 register_imap(
                     email=imap_user,
                     imap_server=imap_server,
@@ -813,7 +813,7 @@ def setup():
 
     # For IMAP setups skip Gmail-specific checks (token/connection checks need OAuth)
     if provider_choice == "I":
-        from mailtrim.core.diagnostics import (
+        from postmind.core.diagnostics import (
             check_config,
             check_data_dir,
             check_dependencies,
@@ -826,7 +826,7 @@ def setup():
             try:
                 results.append(fn())
             except Exception as exc:
-                from mailtrim.core.diagnostics import CheckResult
+                from postmind.core.diagnostics import CheckResult
 
                 results.append(CheckResult(fn.__name__, ok=False, message=str(exc)))
     else:
@@ -957,7 +957,7 @@ def auth(
       mailtrim auth
       mailtrim auth --credentials ~/Downloads/client_secret.json
     """
-    from mailtrim.core.gmail_client import authenticate
+    from postmind.core.gmail_client import authenticate
 
     console.print(
         Panel.fit(
@@ -982,7 +982,7 @@ def auth(
 
     with console.status("Opening browser for OAuth consent..."):
         creds = authenticate(credentials_path=credentials)
-        client = __import__("mailtrim.core.gmail_client", fromlist=["GmailClient"]).GmailClient(
+        client = __import__("postmind.core.gmail_client", fromlist=["GmailClient"]).GmailClient(
             creds
         )
         email = client.get_email_address()
@@ -1076,7 +1076,7 @@ def stats(
     import json as json_lib
     import time as _time
 
-    from mailtrim.core.sender_stats import (
+    from postmind.core.sender_stats import (
         best_next_step,
         classify_sender_risk,
         confidence_description,
@@ -1104,7 +1104,7 @@ def stats(
         mail_query = "in:inbox"
         scope_label = "inbox"
 
-    from mailtrim.core.validation import validate_since
+    from postmind.core.validation import validate_since
 
     since_days: int | None = None
     if since:
@@ -1284,7 +1284,7 @@ def stats(
         console.print_json(json_lib.dumps(data))
         return
 
-    from mailtrim.core.ai.mode import ai_status_line
+    from postmind.core.ai.mode import ai_status_line
 
     ai_label, ai_note, ai_color = ai_status_line(get_settings().ai_mode)
 
@@ -1593,10 +1593,10 @@ def stats(
     # Optional local-AI enrichment — always runs on all top recommendations.
     ai_insights: dict[str, dict] = {}
     if use_ai and recommendations:
-        from mailtrim.core.ai.mode import require_local
+        from postmind.core.ai.mode import require_local
 
         require_local(get_settings().ai_mode)
-        from mailtrim.core.llm import (
+        from postmind.core.llm import (
             analyze_batch,
             confidence_delta,
         )
@@ -1611,7 +1611,7 @@ def stats(
 
             _ai_handler = _logging.StreamHandler()
             _ai_handler.setFormatter(_logging.Formatter("[AI DEBUG] %(name)s — %(message)s"))
-            for _mod in ("mailtrim.core.ai.client", "mailtrim.core.llm"):
+            for _mod in ("postmind.core.ai.client", "mailtrim.core.llm"):
                 _log = _logging.getLogger(_mod)
                 _log.setLevel(_logging.DEBUG)
                 _log.addHandler(_ai_handler)
@@ -1648,7 +1648,7 @@ def stats(
             ai_insights[rec.sender.sender_email] = result
 
         if any(ai_insights.values()):
-            from mailtrim.core.llm import apply_impact_nudge
+            from postmind.core.llm import apply_impact_nudge
 
             apply_impact_nudge(groups, ai_insights)
         else:
@@ -1663,7 +1663,7 @@ def stats(
             )
 
     if recommendations:
-        from mailtrim.core.llm import format_ai_line  # always available
+        from postmind.core.llm import format_ai_line  # always available
 
         # AI summary block — one concise insight line per sender with AI data
         if use_ai and ai_insights:
@@ -1807,7 +1807,7 @@ def quickstart(
     """
     import os as _os
 
-    from mailtrim.core.sender_stats import (
+    from postmind.core.sender_stats import (
         best_next_step,
         classify_sender_risk,
         compute_confidence_score,
@@ -1889,7 +1889,7 @@ def quickstart(
         )
     )
 
-    from mailtrim.core.ai.mode import ai_status_line
+    from postmind.core.ai.mode import ai_status_line
 
     _qs_ai_label, _qs_ai_note, _qs_ai_color = ai_status_line(get_settings().ai_mode)
     console.print(
@@ -1960,7 +1960,7 @@ def sync(
       mailtrim sync --scope anywhere
     """
     _require_gmail("sync")
-    from mailtrim.core.storage import EmailRecord, EmailRepo, get_session
+    from postmind.core.storage import EmailRecord, EmailRepo, get_session
 
     if scope == "anywhere" and query == "in:inbox":
         query = "in:anywhere -in:trash -in:spam"
@@ -2013,7 +2013,7 @@ def sync(
     console.print(f"[green]Synced {len(records)} messages[/green] for [bold]{account_email}[/bold]")
 
     # Housekeeping: purge expired undo log entries silently
-    from mailtrim.core.storage import UndoLogRepo
+    from postmind.core.storage import UndoLogRepo
 
     purged = UndoLogRepo(session).purge_expired()
     if purged:
@@ -2042,14 +2042,14 @@ def triage(
       mailtrim triage --no-actions
     """
     _require_gmail("triage")
-    from mailtrim.core.ai.mode import require_cloud
+    from postmind.core.ai.mode import require_cloud
 
     try:
         require_cloud(get_settings().ai_mode)
     except Exception as exc:
         _handle_error(exc)
     _cloud_ai_warning()
-    from mailtrim.core.avoidance import AvoidanceDetector
+    from postmind.core.avoidance import AvoidanceDetector
 
     client = _get_client()
     account_email = _get_account_email(client)
@@ -2068,7 +2068,7 @@ def triage(
     try:
         import anthropic
 
-        from mailtrim.core.ai_engine import AIEngine
+        from postmind.core.ai_engine import AIEngine
 
         ai = AIEngine()  # raises ValueError if ANTHROPIC_API_KEY is unset
         _print_ai_data_notice(f"{len(messages)} email subjects + snippets (≤300 chars each)")
@@ -2091,8 +2091,8 @@ def triage(
             f"[yellow]Anthropic unavailable ({reason}) — falling back to local AI "
             f"(localhost:8080).[/yellow]"
         )
-        from mailtrim.core.llm import classify_for_triage
-        from mailtrim.core.mock_ai import MockAIEngine
+        from postmind.core.llm import classify_for_triage
+        from postmind.core.mock_ai import MockAIEngine
 
         with console.status(f"Classifying {len(messages)} messages with local AI..."):
             classified = classify_for_triage(messages)
@@ -2186,8 +2186,8 @@ def bulk(
       mailtrim bulk "archive LinkedIn notifications" --dry-run   # preview first
     """
     _require_gmail("bulk")
-    from mailtrim.core.ai.mode import require_cloud
-    from mailtrim.core.bulk_engine import BulkEngine
+    from postmind.core.ai.mode import require_cloud
+    from postmind.core.bulk_engine import BulkEngine
 
     try:
         require_cloud(get_settings().ai_mode)
@@ -2276,7 +2276,7 @@ def undo(
     """
     import os as _os
 
-    from mailtrim.core.storage import UndoLogRepo, get_session
+    from postmind.core.storage import UndoLogRepo, get_session
 
     # Resolve provider + IMAP settings (CLI flags override persisted settings)
     provider, imap_server, imap_user, imap_port, imap_folder = _resolve_imap_settings(
@@ -2392,7 +2392,7 @@ def undo(
             )
     else:
         # Gmail: use BulkEngine (handles archive, label, mark_read undo too)
-        from mailtrim.core.bulk_engine import BulkEngine
+        from postmind.core.bulk_engine import BulkEngine
 
         engine = BulkEngine(_gmail_client, account_email)
         with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as prog:
@@ -2402,7 +2402,7 @@ def undo(
         console.print(f"[green]✓ Restored {count} email(s).[/green]")
 
     try:
-        from mailtrim.core.usage_stats import record_undo
+        from postmind.core.usage_stats import record_undo
 
         record_undo(restored=count)
     except Exception:
@@ -2416,7 +2416,7 @@ def undo(
             default=False,
         )
         if protect_them:
-            from mailtrim.core.storage import BlocklistRepo
+            from postmind.core.storage import BlocklistRepo
 
             repo = BlocklistRepo(get_session())
             for s in senders:
@@ -2447,7 +2447,7 @@ def follow_up(
       mailtrim follow-up --sync
     """
     _require_gmail("follow-up")
-    from mailtrim.core.follow_up import FollowUpTracker
+    from postmind.core.follow_up import FollowUpTracker
 
     client = _get_client()
     account_email = _get_account_email(client)
@@ -2538,8 +2538,8 @@ def avoid(
       mailtrim avoid --process <id> --action trash  # move to Trash
     """
     _require_gmail("avoid")
-    from mailtrim.core.ai.mode import require_cloud
-    from mailtrim.core.avoidance import AvoidanceDetector
+    from postmind.core.ai.mode import require_cloud
+    from postmind.core.avoidance import AvoidanceDetector
 
     try:
         require_cloud(get_settings().ai_mode)
@@ -2625,7 +2625,7 @@ def unsubscribe(
       mailtrim unsubscribe --history
     """
     _require_gmail("unsubscribe")
-    from mailtrim.core.unsubscribe import UnsubscribeEngine
+    from postmind.core.unsubscribe import UnsubscribeEngine
 
     client = _get_client()
     account_email = _get_account_email(client)
@@ -2651,7 +2651,7 @@ def unsubscribe(
 
     messages: list = []
     if sender:
-        from mailtrim.core.validation import validate_sender_email
+        from postmind.core.validation import validate_sender_email
 
         sender = validate_sender_email(sender)
         with console.status(f"Finding emails from {sender}..."):
@@ -2720,8 +2720,8 @@ def rules(
       mailtrim rules --list
     """
     _require_gmail("rules")
-    from mailtrim.core.bulk_engine import BulkEngine
-    from mailtrim.core.storage import RuleRepo, get_session
+    from postmind.core.bulk_engine import BulkEngine
+    from postmind.core.storage import RuleRepo, get_session
 
     client = _get_client()
     account_email = _get_account_email(client)
@@ -2810,7 +2810,7 @@ def digest():
       mailtrim digest
     """
     _require_gmail("digest")
-    from mailtrim.core.ai.mode import require_cloud
+    from postmind.core.ai.mode import require_cloud
 
     try:
         require_cloud(get_settings().ai_mode)
@@ -2819,9 +2819,9 @@ def digest():
     _cloud_ai_warning()
     from collections import Counter
 
-    from mailtrim.core.avoidance import AvoidanceDetector
-    from mailtrim.core.follow_up import FollowUpTracker
-    from mailtrim.core.storage import EmailRepo, get_session
+    from postmind.core.avoidance import AvoidanceDetector
+    from postmind.core.follow_up import FollowUpTracker
+    from postmind.core.storage import EmailRepo, get_session
 
     client = _get_client()
     account_email = _get_account_email(client)
@@ -2889,7 +2889,7 @@ def _print_cleanup_complete(
     Print a celebratory completion panel after any purge operation,
     then optionally append a copyable share line.
     """
-    from mailtrim.core.sender_stats import generate_share_text
+    from postmind.core.sender_stats import generate_share_text
 
     names_str = ", ".join(sender_names[:3])
     if len(sender_names) > 3:
@@ -3039,10 +3039,10 @@ def purge(
     import os as _os
     import time as _time
 
-    from mailtrim.core.sender_stats import compute_confidence_score, fetch_sender_groups
-    from mailtrim.core.storage import UndoLogRepo, get_session
-    from mailtrim.core.unsubscribe import UnsubscribeEngine
-    from mailtrim.core.validation import validate_domain, validate_older_than, validate_since
+    from postmind.core.sender_stats import compute_confidence_score, fetch_sender_groups
+    from postmind.core.storage import UndoLogRepo, get_session
+    from postmind.core.unsubscribe import UnsubscribeEngine
+    from postmind.core.validation import validate_domain, validate_older_than, validate_since
 
     # Guard: --permanent requires the explicit confirmation flag to prevent accidents.
     if permanent and not i_understand_permanent:
@@ -3141,8 +3141,8 @@ def purge(
         progress.update(t, description=f"Found {len(groups)} senders.")
 
     # Filter protected senders before displaying anything
-    from mailtrim.core.storage import BlocklistRepo
-    from mailtrim.core.storage import get_session as _get_session
+    from postmind.core.storage import BlocklistRepo
+    from postmind.core.storage import get_session as _get_session
 
     _blocked = BlocklistRepo(_get_session()).blocked_emails(account_email)
     if _blocked:
@@ -3308,10 +3308,10 @@ def purge(
     # Optional local-AI enrichment — only for senders where AI adds signal.
     purge_ai_insights: dict[str, dict] = {}
     if use_ai:
-        from mailtrim.core.ai.mode import require_local
+        from postmind.core.ai.mode import require_local
 
         require_local(get_settings().ai_mode)
-        from mailtrim.core.llm import (
+        from postmind.core.llm import (
             analyze_batch,
             confidence_delta,
             should_analyze,
@@ -3334,7 +3334,7 @@ def purge(
             purge_ai_insights = {g.sender_email: r for g, r in zip(eligible_groups, ai_results)}
 
         if any(purge_ai_insights.values()):
-            from mailtrim.core.llm import apply_impact_nudge
+            from postmind.core.llm import apply_impact_nudge
 
             apply_impact_nudge(groups, purge_ai_insights)
         elif eligible_groups:
@@ -3395,7 +3395,7 @@ def purge(
         if use_ai:
             ai = purge_ai_insights.get(g.sender_email, {})
             if ai:
-                from mailtrim.core.llm import CATEGORY_ICON as _ICON
+                from postmind.core.llm import CATEGORY_ICON as _ICON
 
                 cat = ai.get("category", "")
                 action = ai.get("action", "")
@@ -3519,7 +3519,7 @@ def purge(
 
     if not permanent:
         try:
-            from mailtrim.core.usage_stats import record_emails_trashed
+            from postmind.core.usage_stats import record_emails_trashed
 
             record_emails_trashed(deleted)
         except Exception:
@@ -3575,7 +3575,7 @@ def protect(
       mailtrim protect --list
       mailtrim protect --remove invoices@mybank.com
     """
-    from mailtrim.core.storage import BlocklistRepo, get_session
+    from postmind.core.storage import BlocklistRepo, get_session
 
     client = _get_client()
     account_email = _get_account_email(client)
@@ -3649,7 +3649,7 @@ def doctor(
     """
     import os as _os
 
-    from mailtrim.core.diagnostics import run_all, run_imap_checks
+    from postmind.core.diagnostics import run_all, run_imap_checks
 
     # Resolve provider + IMAP settings (CLI flags override persisted settings)
     provider, imap_server, imap_user, imap_port, _ = _resolve_imap_settings(
@@ -3707,7 +3707,7 @@ def doctor(
 
     console.print()
 
-    from mailtrim.core.ai.mode import ai_status_line
+    from postmind.core.ai.mode import ai_status_line
 
     _dr_ai_label, _dr_ai_note, _dr_ai_color = ai_status_line(get_settings().ai_mode)
     console.print(
@@ -3763,7 +3763,7 @@ def config_cmd(
         console.print("  Supported keys: ai-mode")
         raise typer.Exit(1)
 
-    from mailtrim.core.ai.mode import validate_mode
+    from postmind.core.ai.mode import validate_mode
 
     try:
         validate_mode(value)
@@ -3813,13 +3813,13 @@ def config_cmd(
 @app.command()
 def privacy():
     """Show what data mailtrim stores and whether any leaves your machine."""
-    from mailtrim.config import (
+    from postmind.config import (
         CREDENTIALS_PATH,
         DATA_DIR,
         DB_PATH,
         UNDO_LOG_DIR,
     )
-    from mailtrim.core.usage_stats import get_stats
+    from postmind.core.usage_stats import get_stats
 
     settings = get_settings()
     ai_mode = settings.ai_mode
@@ -3865,8 +3865,8 @@ def privacy():
     ]
 
     # ── OAuth token — one entry per registered Gmail account ─────────────────
-    from mailtrim.core.account_registry import list_accounts
-    from mailtrim.config import token_path_for
+    from postmind.core.account_registry import list_accounts
+    from postmind.config import token_path_for
 
     accounts = list_accounts()
     if accounts:
@@ -3880,7 +3880,7 @@ def privacy():
                 console.print()
     else:
         # Legacy fallback for unmigrated single-account installs
-        from mailtrim.config import TOKEN_PATH
+        from postmind.config import TOKEN_PATH
         exists_str = "[green]exists[/green]" if TOKEN_PATH.exists() else "[dim]not created yet[/dim]"
         console.print(f"  [bold]{'OAuth token':<20}[/bold]  {exists_str}")
         console.print(f"  [dim]  {TOKEN_PATH}[/dim]")
@@ -3950,7 +3950,7 @@ def watch(
         datefmt="%H:%M:%S",
     )
 
-    from mailtrim.core.account_registry import list_accounts
+    from postmind.core.account_registry import list_accounts
 
     accounts = list_accounts()
     if not accounts:
@@ -3968,7 +3968,7 @@ def watch(
     console.print()
 
     try:
-        from mailtrim.core.daemon import start_daemon
+        from postmind.core.daemon import start_daemon
         start_daemon(interval_minutes=interval, run_immediately=now)
     except ImportError as e:
         console.print(f"[red]Missing dependency:[/red] {e}")

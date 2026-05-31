@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from mailtrim.core.gmail_client import Message
+from postmind.core.gmail_client import Message
 
 
 class EmailProvider(ABC):

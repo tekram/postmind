@@ -19,8 +19,8 @@ class AccountInfo:
 
 def list_accounts() -> list[AccountInfo]:
     """Return all registered accounts ordered by registration time."""
-    from mailtrim.core.storage import AccountRepo, get_session
-    from mailtrim.config import load_account_config
+    from postmind.core.storage import AccountRepo, get_session
+    from postmind.config import load_account_config
     rows = AccountRepo(get_session()).list_all()
     result = []
     for row in rows:
@@ -40,7 +40,7 @@ def list_accounts() -> list[AccountInfo]:
 
 def get_active() -> AccountInfo | None:
     """Return the currently active account, or the first registered if none set."""
-    from mailtrim.config import get_active_account
+    from postmind.config import get_active_account
     email = get_active_account()
     accounts = list_accounts()
     if not accounts:
@@ -54,7 +54,7 @@ def get_active() -> AccountInfo | None:
 
 def switch_to(email: str) -> None:
     """Switch the active account. Raises ValueError if not registered."""
-    from mailtrim.config import set_active_account
+    from postmind.config import set_active_account
     accounts = list_accounts()
     if not any(a.email == email for a in accounts):
         raise ValueError(
@@ -65,8 +65,8 @@ def switch_to(email: str) -> None:
 
 def register_gmail(email: str, display_name: str = "") -> None:
     """Register a Gmail account in the registry."""
-    from mailtrim.config import save_account_config
-    from mailtrim.core.storage import AccountRepo, get_session
+    from postmind.config import save_account_config
+    from postmind.core.storage import AccountRepo, get_session
     save_account_config(email, {"provider": "gmail"})
     AccountRepo(get_session()).register(
         email=email, provider="gmail", display_name=display_name or email
@@ -82,8 +82,8 @@ def register_imap(
     display_name: str = "",
 ) -> None:
     """Register an IMAP account in the registry."""
-    from mailtrim.config import save_account_config
-    from mailtrim.core.storage import AccountRepo, get_session
+    from postmind.config import save_account_config
+    from postmind.core.storage import AccountRepo, get_session
     save_account_config(email, {
         "provider": "imap",
         "imap_server": imap_server,
@@ -98,18 +98,18 @@ def register_imap(
 
 def migrate_legacy_token() -> None:
     """One-time: move ~/.mailtrim/token.json → tokens/<email>.json and register the account."""
-    from mailtrim.config import DATA_DIR, TOKEN_PATH, token_path_for, set_active_account
+    from postmind.config import DATA_DIR, TOKEN_PATH, token_path_for, set_active_account
 
     legacy = DATA_DIR / "token.json"
     if not legacy.exists():
         return
 
-    from mailtrim.core.storage import AccountRepo, get_session
+    from postmind.core.storage import AccountRepo, get_session
     if AccountRepo(get_session()).count() > 0:
         return  # already migrated
 
     try:
-        from mailtrim.config import get_settings
+        from postmind.config import get_settings
         from google.oauth2.credentials import Credentials
         from google.auth.transport.requests import Request
 

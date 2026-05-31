@@ -6,7 +6,7 @@ All other code depends only on the EmailProvider interface.
 
 from __future__ import annotations
 
-from mailtrim.core.providers.base import EmailProvider
+from postmind.core.providers.base import EmailProvider
 
 
 def get_provider(
@@ -36,11 +36,11 @@ def get_provider(
         ValueError: if provider is unknown or IMAP credentials are missing
     """
     if provider == "gmail":
-        from mailtrim.core.providers.gmail import GmailProvider
+        from postmind.core.providers.gmail import GmailProvider
 
         if account_email:
-            from mailtrim.core.gmail_client import GmailClient, authenticate
-            from mailtrim.config import token_path_for
+            from postmind.core.gmail_client import GmailClient, authenticate
+            from postmind.config import token_path_for
             creds = authenticate(token_path=token_path_for(account_email))
             return GmailProvider(client=GmailClient(creds=creds))
         return GmailProvider()
@@ -51,7 +51,7 @@ def get_provider(
                 "IMAP provider requires --imap-server, --imap-user, and --imap-password. "
                 "Use an app password, not your account password."
             )
-        from mailtrim.core.providers.imap import IMAPProvider
+        from postmind.core.providers.imap import IMAPProvider
 
         return IMAPProvider(
             server=imap_server,

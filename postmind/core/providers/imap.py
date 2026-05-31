@@ -28,8 +28,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
-from mailtrim.core.gmail_client import Message, MessageHeader
-from mailtrim.core.providers.base import EmailProvider
+from postmind.core.gmail_client import Message, MessageHeader
+from postmind.core.providers.base import EmailProvider
 
 logger = logging.getLogger(__name__)
 

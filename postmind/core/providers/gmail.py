@@ -7,9 +7,9 @@ the rest of the pipeline sees only EmailProvider.
 
 from __future__ import annotations
 
-from mailtrim.config import get_settings
-from mailtrim.core.gmail_client import GmailClient, Message, _chunks
-from mailtrim.core.providers.base import EmailProvider
+from postmind.config import get_settings
+from postmind.core.gmail_client import GmailClient, Message, _chunks
+from postmind.core.providers.base import EmailProvider
 
 
 class GmailProvider(EmailProvider):

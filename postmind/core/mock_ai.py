@@ -13,13 +13,13 @@ from __future__ import annotations
 import hashlib
 import re
 
-from mailtrim.core.ai_engine import (
+from postmind.core.ai_engine import (
     AIEngine,
     BulkOperation,
     ClassifiedEmail,
     NLRule,
 )
-from mailtrim.core.gmail_client import Message
+from postmind.core.gmail_client import Message
 
 # Deterministic bucketing so the same email always gets the same category
 _CATEGORIES = [

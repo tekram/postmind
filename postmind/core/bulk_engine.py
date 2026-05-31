@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from mailtrim.config import get_settings
-from mailtrim.core.ai_engine import AIEngine, BulkOperation, NLRule
-from mailtrim.core.gmail_client import GmailClient, Message
-from mailtrim.core.storage import (
+from postmind.config import get_settings
+from postmind.core.ai_engine import AIEngine, BulkOperation, NLRule
+from postmind.core.gmail_client import GmailClient, Message
+from postmind.core.storage import (
     EmailRepo,
     RuleDefinition,
     RuleRepo,

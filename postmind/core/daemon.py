@@ -10,9 +10,9 @@ logger = logging.getLogger(__name__)
 
 def _triage_account(email: str) -> None:
     """Run one heartbeat cycle for a single account: fetch new mail, classify, apply rules."""
-    from mailtrim.config import get_settings, load_account_config, token_path_for
-    from mailtrim.core.account_registry import list_accounts
-    from mailtrim.core.storage import AccountRepo, AgentRepo, EmailRepo, get_session
+    from postmind.config import get_settings, load_account_config, token_path_for
+    from postmind.core.account_registry import list_accounts
+    from postmind.core.storage import AccountRepo, AgentRepo, EmailRepo, get_session
 
     logger.info("Heartbeat: %s", email)
 
@@ -31,7 +31,7 @@ def _triage_account(email: str) -> None:
 
     found_count = 0
     try:
-        from mailtrim.core.providers.factory import get_provider
+        from postmind.core.providers.factory import get_provider
         cfg = load_account_config(email)
         provider_name = cfg.get("provider", "gmail")
 
@@ -65,7 +65,7 @@ def _triage_account(email: str) -> None:
         settings = get_settings()
         if settings.ai_mode in ("cloud", "local"):
             try:
-                from mailtrim.core.ai_engine import AIEngine
+                from postmind.core.ai_engine import AIEngine
                 ai = AIEngine()
                 classified = ai.classify_emails(messages)
                 logger.info("Heartbeat %s: classified %d emails", email, len(classified))
@@ -96,15 +96,15 @@ def start_daemon(interval_minutes: int | None = None, *, run_immediately: bool =
             "Install it with: pip install apscheduler"
         )
 
-    from mailtrim.config import DB_PATH
-    from mailtrim.core.storage import AgentRepo, get_session
+    from postmind.config import DB_PATH
+    from postmind.core.storage import AgentRepo, get_session
 
     agents = AgentRepo(get_session()).list_all()
     active_agents = [a for a in agents if a.is_active]
 
     if not active_agents:
         # Fall back to accounts if no agents configured yet
-        from mailtrim.core.account_registry import list_accounts
+        from postmind.core.account_registry import list_accounts
         accounts = list_accounts()
         if not accounts:
             raise RuntimeError("No accounts or agents registered.")
@@ -156,8 +156,8 @@ def start_daemon_background(stop_event=None, interval_minutes: int | None = None
     except ImportError:
         raise ImportError("Install apscheduler: pip install apscheduler")
 
-    from mailtrim.core.storage import AgentRepo, get_session
-    from mailtrim.core.account_registry import list_accounts
+    from postmind.core.storage import AgentRepo, get_session
+    from postmind.core.account_registry import list_accounts
 
     agents = AgentRepo(get_session()).list_all()
     active = [a for a in agents if a.is_active]

@@ -25,7 +25,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from mailtrim.config import CREDENTIALS_PATH, TOKEN_PATH, get_settings
+from postmind.config import CREDENTIALS_PATH, TOKEN_PATH, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +145,7 @@ def authenticate(
     The token file is written with mode 0o600 (owner read/write only).
     """
     if token_path is None:
-        from mailtrim.config import get_active_account, token_path_for, TOKEN_PATH
+        from postmind.config import get_active_account, token_path_for, TOKEN_PATH
         active = get_active_account()
         token_path = token_path_for(active) if active else TOKEN_PATH
     settings = get_settings()

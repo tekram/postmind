@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from mailtrim.config import get_settings
-from mailtrim.core.gmail_client import GmailClient, Message
-from mailtrim.core.storage import FollowUp, FollowUpRepo, get_session
+from postmind.config import get_settings
+from postmind.core.gmail_client import GmailClient, Message
+from postmind.core.storage import FollowUp, FollowUpRepo, get_session
 
 
 class FollowUpTracker:

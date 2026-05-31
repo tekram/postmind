@@ -13,8 +13,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from mailtrim import __version__
-from mailtrim.config import CREDENTIALS_PATH, DATA_DIR, TOKEN_PATH, get_settings
+from postmind import __version__
+from postmind.config import CREDENTIALS_PATH, DATA_DIR, TOKEN_PATH, get_settings
 
 _THIS_DIR = Path(__file__).parent
 _TEMPLATES_DIR = _THIS_DIR / "templates"
@@ -60,16 +60,16 @@ def _cache_get() -> dict | None:
 
 def _get_web_account() -> str | None:
     """Return the email address the web UI is currently scoped to."""
-    from mailtrim.config import get_active_account
+    from postmind.config import get_active_account
     return _active_web_account or get_active_account()
 
 
 def _is_authed() -> bool:
-    from mailtrim.config import token_path_for, TOKEN_PATH
+    from postmind.config import token_path_for, TOKEN_PATH
     email = _get_web_account()
     if not email:
         return TOKEN_PATH.exists()  # legacy fallback for unmigrated installs
-    from mailtrim.core.account_registry import list_accounts
+    from postmind.core.account_registry import list_accounts
     acct = next((a for a in list_accounts() if a.email == email), None)
     if not acct:
         return TOKEN_PATH.exists()
@@ -94,7 +94,7 @@ def _provider_name() -> str:
 
 def _base() -> dict:
     """Base template context — request passed separately to TemplateResponse."""
-    from mailtrim.core.account_registry import list_accounts
+    from postmind.core.account_registry import list_accounts
     accounts = list_accounts()
     current_email = _get_web_account()
     return {
@@ -117,8 +117,8 @@ def _resp(request: Request, name: str, ctx: dict, status: int = 200) -> HTMLResp
 
 
 def _build_provider():
-    from mailtrim.config import load_account_config
-    from mailtrim.core.providers.factory import get_provider
+    from postmind.config import load_account_config
+    from postmind.core.providers.factory import get_provider
 
     email = _get_web_account()
     if email:
@@ -146,7 +146,7 @@ def _build_provider():
 
 
 def _enrich_groups(groups) -> list[dict]:
-    from mailtrim.core.sender_stats import (
+    from postmind.core.sender_stats import (
         classify_sender_risk,
         compute_confidence_score,
         confidence_safety_label,
@@ -187,13 +187,13 @@ async def dashboard(request: Request):
     ctx = _base()
     ctx["active"] = "dashboard"
 
-    from mailtrim.core.account_registry import list_accounts as _list_accts
+    from postmind.core.account_registry import list_accounts as _list_accts
     if not _list_accts() and not _is_authed():
         return RedirectResponse("/onboarding", status_code=302)
 
     cached = _cache_get()
     if cached:
-        from mailtrim.core.sender_stats import (
+        from postmind.core.sender_stats import (
             best_next_step,
             generate_recommendations,
             group_by_domain,
@@ -252,13 +252,13 @@ async def stats_data(
         )
 
     def _scan():
-        from mailtrim.core.sender_stats import (
+        from postmind.core.sender_stats import (
             fetch_sender_groups,
             generate_recommendations,
             group_by_domain,
             reclaimable_mb,
         )
-        from mailtrim.core.storage import BlocklistRepo, get_session
+        from postmind.core.storage import BlocklistRepo, get_session
 
         client = _build_provider()
         profile = client.get_profile()
@@ -356,7 +356,7 @@ async def purge_confirm(request: Request):
     account_email = cached["account_email"]
 
     def _do_purge():
-        from mailtrim.core.storage import UndoLogRepo, get_session
+        from postmind.core.storage import UndoLogRepo, get_session
 
         client = _build_provider()
         all_ids = [mid for g in selected_groups for mid in g.message_ids]
@@ -395,7 +395,7 @@ async def undo_page(request: Request):
     undo_id = request.query_params.get("undo_id")
 
     def _get_entries():
-        from mailtrim.core.storage import UndoLogRepo, get_session
+        from postmind.core.storage import UndoLogRepo, get_session
 
         client = _build_provider()
         account_email = client.get_email_address()
@@ -438,8 +438,8 @@ async def undo_page(request: Request):
 @app.post("/undo/{entry_id}", response_class=HTMLResponse)
 async def undo_restore(request: Request, entry_id: int):
     def _do_undo():
-        from mailtrim.core.bulk_engine import BulkEngine
-        from mailtrim.core.storage import UndoLogRepo, get_session
+        from postmind.core.bulk_engine import BulkEngine
+        from postmind.core.storage import UndoLogRepo, get_session
 
         # Security check: ensure the undo entry belongs to the current account
         entry = UndoLogRepo(get_session()).get(entry_id)
@@ -474,7 +474,7 @@ async def settings_page(request: Request):
     ctx["success"] = request.query_params.get("success")
 
     try:
-        from mailtrim.config import load_account_config
+        from postmind.config import load_account_config
         s = get_settings()
         email = _get_web_account()
         acct_cfg = load_account_config(email) if email else {}
@@ -510,7 +510,7 @@ async def web_switch_account(request: Request):
     global _active_web_account
     form = await request.form()
     email = (form.get("email") or "").strip()
-    from mailtrim.core.account_registry import list_accounts
+    from postmind.core.account_registry import list_accounts
     if email and any(a.email == email for a in list_accounts()):
         _active_web_account = email
         _scan_cache.clear()
@@ -519,9 +519,9 @@ async def web_switch_account(request: Request):
 
 @app.get("/accounts", response_class=HTMLResponse)
 async def accounts_page(request: Request):
-    from mailtrim.core.account_registry import list_accounts
-    from mailtrim.config import token_path_for
-    from mailtrim.core.storage import AccountRepo, get_session
+    from postmind.core.account_registry import list_accounts
+    from postmind.config import token_path_for
+    from postmind.core.storage import AccountRepo, get_session
     all_db = {r.email: r for r in AccountRepo(get_session()).list_all()}
     accounts_detail = []
     for a in list_accounts():
@@ -554,8 +554,8 @@ async def accounts_remove(request: Request):
     email = (form.get("email") or "").strip()
     if not email:
         raise HTTPException(status_code=400)
-    from mailtrim.core.storage import AccountRepo, get_session
-    from mailtrim.config import token_path_for
+    from postmind.core.storage import AccountRepo, get_session
+    from postmind.config import token_path_for
     token = token_path_for(email)
     if token.exists():
         token.unlink()
@@ -586,9 +586,9 @@ async def gmail_add_start(request: Request):
         state = _oauth_tasks[task_id]
         try:
             import shutil
-            from mailtrim.core.gmail_client import authenticate
-            from mailtrim.config import TOKENS_DIR, token_path_for, set_active_account
-            from mailtrim.core.account_registry import register_gmail
+            from postmind.core.gmail_client import authenticate
+            from postmind.config import TOKENS_DIR, token_path_for, set_active_account
+            from postmind.core.account_registry import register_gmail
             tmp = TOKENS_DIR / f"_tmp_{task_id}.json"
             creds = authenticate(token_path=tmp)
             from googleapiclient.discovery import build
@@ -651,9 +651,9 @@ async def imap_add(request: Request):
         return _resp(request, "accounts_add.html", ctx)
 
     def _test_and_register():
-        from mailtrim.core.providers.factory import get_provider
-        from mailtrim.core.account_registry import register_imap
-        from mailtrim.config import set_active_account
+        from postmind.core.providers.factory import get_provider
+        from postmind.core.account_registry import register_imap
+        from postmind.config import set_active_account
         provider = get_provider("imap", imap_server=server, imap_user=user, imap_password=password, imap_port=port, imap_folder=folder)
         provider.get_profile()
         register_imap(user, server, user, port, folder, display_name or user)
@@ -674,7 +674,7 @@ async def imap_add(request: Request):
 
 @app.get("/onboarding", response_class=HTMLResponse)
 async def onboarding(request: Request):
-    from mailtrim.core.account_registry import list_accounts
+    from postmind.core.account_registry import list_accounts
     step = int(request.query_params.get("step", "1"))
     ctx = _base()
     ctx.update({
@@ -715,7 +715,7 @@ _watch_interval: int = 30
 
 @app.get("/watch", response_class=HTMLResponse)
 async def watch_page(request: Request):
-    from mailtrim.core.storage import AgentRepo, get_session
+    from postmind.core.storage import AgentRepo, get_session
     ctx = _base()
     ctx["active"] = "watch"
     ctx["is_running"] = bool(_watch_thread and _watch_thread.is_alive())
@@ -747,7 +747,7 @@ async def watch_start(request: Request):
     _watch_stop_event.clear()
     def _run():
         try:
-            from mailtrim.core.daemon import start_daemon_background
+            from postmind.core.daemon import start_daemon_background
             start_daemon_background(stop_event=_watch_stop_event)
         except Exception:
             pass
@@ -768,7 +768,7 @@ async def watch_stop(request: Request):
 
 @app.get("/watch/status", response_class=HTMLResponse)
 async def watch_status(request: Request):
-    from mailtrim.core.storage import AgentRepo, get_session
+    from postmind.core.storage import AgentRepo, get_session
     is_running = bool(_watch_thread and _watch_thread.is_alive())
     agents = AgentRepo(get_session()).list_all()
     rows = ""
@@ -787,8 +787,8 @@ async def watch_status(request: Request):
 async def agents_page(request: Request):
     ctx = _base()
     ctx["active"] = "agents"
-    from mailtrim.core.storage import AgentRepo, get_session
-    from mailtrim.core.account_registry import list_accounts
+    from postmind.core.storage import AgentRepo, get_session
+    from postmind.core.account_registry import list_accounts
     agents = AgentRepo(get_session()).list_all()
     accounts = list_accounts()
     registered_emails = {a.account_email for a in agents}
@@ -818,7 +818,7 @@ async def agents_create(request: Request):
     interval = int(form.get("interval") or 30)
     if not email:
         raise HTTPException(status_code=400, detail="Email required")
-    from mailtrim.core.storage import AgentRepo, get_session
+    from postmind.core.storage import AgentRepo, get_session
     AgentRepo(get_session()).register(email, name, max(1, min(1440, interval)))
     return RedirectResponse("/agents", status_code=303)
 
@@ -828,7 +828,7 @@ async def agents_toggle(request: Request):
     form = await request.form()
     email = (form.get("email") or "").strip()
     active = form.get("active") == "true"
-    from mailtrim.core.storage import AgentRepo, get_session
+    from postmind.core.storage import AgentRepo, get_session
     AgentRepo(get_session()).set_active(email, active)
     return RedirectResponse("/agents", status_code=303)
 
@@ -837,7 +837,7 @@ async def agents_toggle(request: Request):
 async def agents_delete_route(request: Request):
     form = await request.form()
     email = (form.get("email") or "").strip()
-    from mailtrim.core.storage import AgentRepo, get_session
+    from postmind.core.storage import AgentRepo, get_session
     AgentRepo(get_session()).delete(email)
     return RedirectResponse("/agents", status_code=303)
 
@@ -872,7 +872,7 @@ async def update_ai_mode(request: Request):
 
     env_file.write_text("".join(lines))
 
-    import mailtrim.config as _cfg
+    import postmind.config as _cfg
     _cfg._settings = None
 
     return RedirectResponse("/settings?success=ai_mode", status_code=303)
@@ -884,7 +884,7 @@ async def update_ai_mode(request: Request):
 @app.get("/settings/blocked", response_class=HTMLResponse)
 async def blocked_list(request: Request):
     def _get():
-        from mailtrim.core.storage import BlocklistRepo, get_session
+        from postmind.core.storage import BlocklistRepo, get_session
         client = _build_provider()
         acct = client.get_email_address()
         entries = BlocklistRepo(get_session()).list_all(acct)
@@ -913,7 +913,7 @@ async def blocked_add(request: Request):
         return RedirectResponse("/settings/blocked", status_code=303)
 
     def _add():
-        from mailtrim.core.storage import BlocklistRepo, get_session
+        from postmind.core.storage import BlocklistRepo, get_session
         client = _build_provider()
         acct = client.get_email_address()
         BlocklistRepo(get_session()).add(acct, sender)
@@ -931,7 +931,7 @@ async def blocked_remove(request: Request):
         return RedirectResponse("/settings/blocked", status_code=303)
 
     def _remove():
-        from mailtrim.core.storage import BlocklistRepo, get_session
+        from postmind.core.storage import BlocklistRepo, get_session
         client = _build_provider()
         acct = client.get_email_address()
         BlocklistRepo(get_session()).remove(acct, sender)
@@ -973,8 +973,8 @@ async def sync_start(request: Request):
         try:
             import json as _json
 
-            from mailtrim.core.gmail_client import GmailClient
-            from mailtrim.core.storage import EmailRecord, EmailRepo, UndoLogRepo, get_session
+            from postmind.core.gmail_client import GmailClient
+            from postmind.core.storage import EmailRecord, EmailRepo, UndoLogRepo, get_session
 
             client = GmailClient()
             profile = client.get_profile()
@@ -1123,8 +1123,8 @@ async def triage_page(request: Request):
     limit = int(request.query_params.get("limit", "20"))
 
     def _run():
-        from mailtrim.core.ai_engine import AIEngine
-        from mailtrim.core.gmail_client import GmailClient
+        from postmind.core.ai_engine import AIEngine
+        from postmind.core.gmail_client import GmailClient
 
         client = GmailClient()
         profile = client.get_profile()

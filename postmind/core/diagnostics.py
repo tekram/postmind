@@ -24,7 +24,7 @@ class CheckResult:
 
 
 def check_token_exists() -> CheckResult:
-    from mailtrim.config import get_active_account, token_path_for, TOKEN_PATH
+    from postmind.config import get_active_account, token_path_for, TOKEN_PATH
 
     email = get_active_account()
     if email:
@@ -39,7 +39,7 @@ def check_token_exists() -> CheckResult:
 
 
 def check_token_valid() -> CheckResult:
-    from mailtrim.config import get_active_account, token_path_for, TOKEN_PATH
+    from postmind.config import get_active_account, token_path_for, TOKEN_PATH
 
     email = get_active_account()
     if email:
@@ -79,7 +79,7 @@ def check_token_valid() -> CheckResult:
 
 def check_gmail_connection() -> CheckResult:
     try:
-        from mailtrim.core.gmail_client import GmailClient, authenticate
+        from postmind.core.gmail_client import GmailClient, authenticate
 
         creds = authenticate()
         client = GmailClient(creds)
@@ -119,7 +119,7 @@ def check_gmail_connection() -> CheckResult:
 
 def check_trash_access() -> CheckResult:
     try:
-        from mailtrim.core.gmail_client import GmailClient, authenticate
+        from postmind.core.gmail_client import GmailClient, authenticate
 
         creds = authenticate()
         client = GmailClient(creds)
@@ -136,7 +136,7 @@ def check_trash_access() -> CheckResult:
 
 
 def check_data_dir() -> CheckResult:
-    from mailtrim.config import DATA_DIR
+    from postmind.config import DATA_DIR
 
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -155,7 +155,7 @@ def check_data_dir() -> CheckResult:
 
 def check_undo_storage() -> CheckResult:
     try:
-        from mailtrim.core.storage import UndoLogEntry, get_session
+        from postmind.core.storage import UndoLogEntry, get_session
 
         session = get_session()
         session.query(UndoLogEntry).limit(1).all()
@@ -171,7 +171,7 @@ def check_undo_storage() -> CheckResult:
 
 def check_config() -> CheckResult:
     try:
-        from mailtrim.config import get_settings
+        from postmind.config import get_settings
 
         settings = get_settings()
         _ = settings.undo_window_days  # access any field
@@ -200,7 +200,7 @@ def check_imap_connection(
             fix="Provide --imap-server, --imap-user, and set MAILTRIM_IMAP_PASSWORD",
         )
     try:
-        from mailtrim.core.providers.imap import IMAPProvider
+        from postmind.core.providers.imap import IMAPProvider
 
         provider = IMAPProvider(server=server, user=user, password=password, port=port)
         profile = provider.get_profile()
@@ -231,7 +231,7 @@ def check_imap_connection(
 def check_imap_trash_folder(server: str, user: str, password: str, port: int = 993) -> CheckResult:
     """Verify that a recognisable Trash folder exists (needed for undo)."""
     try:
-        from mailtrim.core.providers.imap import _TRASH_FOLDERS, IMAPProvider
+        from postmind.core.providers.imap import _TRASH_FOLDERS, IMAPProvider
 
         provider = IMAPProvider(server=server, user=user, password=password, port=port)
         trash = provider._get_trash_folder()

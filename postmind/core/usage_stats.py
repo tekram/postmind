@@ -14,7 +14,7 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from mailtrim.config import DATA_DIR
+from postmind.config import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ def _save(data: dict) -> None:
 
 def record_run(command: str) -> None:
     """Record that a command was run. Called at the start of each command."""
-    from mailtrim import __version__
+    from postmind import __version__
 
     data = _load()
     now = datetime.now(timezone.utc).date().isoformat()

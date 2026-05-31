@@ -16,7 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-import mailtrim.config as _cfg
+import postmind.config as _cfg
 
 # ── Base ─────────────────────────────────────────────────────────────────────
 

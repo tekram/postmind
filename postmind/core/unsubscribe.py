@@ -11,8 +11,8 @@ from datetime import datetime, timezone
 
 import httpx
 
-from mailtrim.core.gmail_client import GmailClient, Message
-from mailtrim.core.storage import UnsubscribeRecord, get_session
+from postmind.core.gmail_client import GmailClient, Message
+from postmind.core.storage import UnsubscribeRecord, get_session
 
 # ── URL safety validation ─────────────────────────────────────────────────────
 

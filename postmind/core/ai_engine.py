@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from mailtrim.config import get_settings
-from mailtrim.core.gmail_client import Message
+from postmind.config import get_settings
+from postmind.core.gmail_client import Message
 
 # ── Data models ─────────────────────────────────────────────────────────────
 

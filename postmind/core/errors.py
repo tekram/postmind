@@ -2,7 +2,7 @@
 Human-readable error translation for common failure modes.
 
 Usage:
-    from mailtrim.core.errors import friendly_error
+    from postmind.core.errors import friendly_error
     try:
         ...
     except Exception as exc:

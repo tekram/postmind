@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from mailtrim.core.ai_engine import AIEngine
-from mailtrim.core.gmail_client import GmailClient, Message
-from mailtrim.core.storage import EmailRecord, EmailRepo, get_session
+from postmind.core.ai_engine import AIEngine
+from postmind.core.gmail_client import GmailClient, Message
+from postmind.core.storage import EmailRecord, EmailRepo, get_session
 
 
 @dataclass

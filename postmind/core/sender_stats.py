@@ -17,11 +17,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Literal
 
-from mailtrim.config import get_settings
+from postmind.config import get_settings
 
 if TYPE_CHECKING:
-    from mailtrim.core.providers.base import EmailProvider
-from mailtrim.core.gmail_client import GmailClient, Message
+    from postmind.core.providers.base import EmailProvider
+from postmind.core.gmail_client import GmailClient, Message
 
 SortKey = Literal["score", "count", "oldest", "size"]
 
@@ -1235,7 +1235,7 @@ def _fetch_metadata_batch(client: "GmailClient | EmailProvider", ids: list[str])
     # Legacy GmailClient path — keep working without any changes to call sites
     settings = get_settings()
     results: list[Message] = []
-    from mailtrim.core.gmail_client import _chunks
+    from postmind.core.gmail_client import _chunks
 
     for chunk in _chunks(ids, settings.gmail_batch_size):
         results.extend(client._fetch_batch(chunk, format="metadata"))
