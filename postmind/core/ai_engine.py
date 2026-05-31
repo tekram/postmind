@@ -287,6 +287,54 @@ Be direct and empathetic. No filler words.\
 """
         return self._complete(SYSTEM_PROMPT, prompt, max_tokens=150)
 
+    # ── Soul-aware email composition ─────────────────────────────────────────
+
+    def compose_email(
+        self,
+        intent: str,
+        recipient_context: str = "",
+        thread_snippet: str = "",
+        soul: dict | None = None,
+    ) -> str:
+        """Draft an email in the agent's configured voice.
+
+        Returns a plain-text draft with a Subject line followed by the body.
+        Requires cloud (Anthropic) mode — raises ValueError for local-only setups.
+        """
+        if self._mode != "cloud":
+            raise ValueError(
+                "Email composition requires cloud AI mode (Anthropic). "
+                "Set POSTMIND_AI_MODE=cloud and provide ANTHROPIC_API_KEY."
+            )
+
+        soul = soul or {}
+        voice_style = soul.get("voice_style") or "professional"
+        user_context = soul.get("user_context") or ""
+        writing_guidelines = soul.get("writing_guidelines") or ""
+
+        soul_block = f"Voice style: {voice_style}."
+        if user_context:
+            soul_block += f"\nAbout the sender: {user_context}"
+        if writing_guidelines:
+            soul_block += f"\nWriting guidelines: {writing_guidelines}"
+
+        system = f"""\
+You are a personal email ghostwriter. Write emails exactly as the sender would — \
+matching their stated voice, style, and context. Never add filler phrases like \
+"I hope this email finds you well." Never explain what you're doing. Output only \
+the email itself: first a Subject line (prefixed "Subject: "), then a blank line, \
+then the body. No preamble, no sign-off commentary.
+
+{soul_block}\
+"""
+        parts = [f"Write an email with this intent: {intent}"]
+        if recipient_context:
+            parts.append(f"Recipient context: {recipient_context}")
+        if thread_snippet:
+            parts.append(f"Replying to:\n---\n{thread_snippet[:800]}\n---")
+
+        return self._complete(system, "\n\n".join(parts), max_tokens=600)
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 

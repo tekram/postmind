@@ -803,6 +803,9 @@ async def agents_page(request: Request):
             "last_run_at": a.last_run_at.strftime("%H:%M") if a.last_run_at else "never",
             "last_found": a.last_found_count,
             "error": a.error_message,
+            "voice_style": a.voice_style or "professional",
+            "user_context": a.user_context or "",
+            "writing_guidelines": a.writing_guidelines or "",
         }
         for a in agents
     ]
@@ -840,6 +843,66 @@ async def agents_delete_route(request: Request):
     from postmind.core.storage import AgentRepo, get_session
     AgentRepo(get_session()).delete(email)
     return RedirectResponse("/agents", status_code=303)
+
+
+@app.post("/agents/soul")
+async def agents_soul(request: Request):
+    form = await request.form()
+    email = (form.get("email") or "").strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email required")
+    from postmind.core.storage import AgentRepo, get_session
+    AgentRepo(get_session()).update_soul(
+        account_email=email,
+        voice_style=(form.get("voice_style") or "").strip() or None,
+        user_context=(form.get("user_context") or "").strip() or None,
+        writing_guidelines=(form.get("writing_guidelines") or "").strip() or None,
+    )
+    return RedirectResponse("/agents", status_code=303)
+
+
+@app.post("/agents/compose", response_class=HTMLResponse)
+async def agents_compose(request: Request):
+    form = await request.form()
+    email = (form.get("email") or "").strip()
+    intent = (form.get("intent") or "").strip()
+    recipient_context = (form.get("recipient_context") or "").strip()
+    thread_snippet = (form.get("thread_snippet") or "").strip()
+
+    if not email or not intent:
+        return HTMLResponse("<p class='text-red-500 text-sm'>Email and intent are required.</p>")
+
+    from postmind.core.storage import AgentRepo, get_session
+    agent = AgentRepo(get_session()).get_by_email(email)
+    soul = {}
+    if agent:
+        soul = {
+            "voice_style": agent.voice_style,
+            "user_context": agent.user_context,
+            "writing_guidelines": agent.writing_guidelines,
+        }
+
+    try:
+        from postmind.core.ai_engine import AIEngine
+        ai = AIEngine()
+        draft = ai.compose_email(
+            intent=intent,
+            recipient_context=recipient_context,
+            thread_snippet=thread_snippet,
+            soul=soul,
+        )
+        # Escape for safe HTML insertion
+        import html
+        escaped = html.escape(draft)
+        return HTMLResponse(
+            f"<pre class='whitespace-pre-wrap text-sm text-slate-800 bg-slate-50 "
+            f"border border-slate-200 rounded-lg p-4 mt-3 font-mono'>{escaped}</pre>"
+        )
+    except ValueError as exc:
+        return HTMLResponse(f"<p class='text-amber-600 text-sm mt-3'>{html.escape(str(exc))}</p>")
+    except Exception as exc:
+        import html
+        return HTMLResponse(f"<p class='text-red-500 text-sm mt-3'>Error: {html.escape(str(exc))}</p>")
 
 
 @app.post("/settings/ai-mode")

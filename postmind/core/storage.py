@@ -194,6 +194,26 @@ _engine = None
 _SessionLocal = None
 
 
+def _run_migrations(engine) -> None:
+    """Apply incremental schema changes that SQLAlchemy's create_all cannot handle."""
+    soul_columns = [
+        ("voice_style", "TEXT"),
+        ("user_context", "TEXT"),
+        ("writing_guidelines", "TEXT"),
+    ]
+    with engine.connect() as conn:
+        for col, col_type in soul_columns:
+            try:
+                conn.execute(
+                    __import__("sqlalchemy").text(
+                        f"ALTER TABLE agents ADD COLUMN {col} {col_type}"
+                    )
+                )
+                conn.commit()
+            except Exception:
+                pass  # column already exists — idempotent
+
+
 def get_engine():
     global _engine
     if _engine is None:
@@ -203,6 +223,7 @@ def get_engine():
             echo=False,
         )
         Base.metadata.create_all(_engine)
+        _run_migrations(_engine)
     return _engine
 
 
@@ -530,6 +551,11 @@ class Agent(Base):
     error_message = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
 
+    # Soul config — persistent persona that shapes email composition voice
+    voice_style = Column(String, nullable=True)    # "professional" | "casual" | "warm" | "direct" | "diplomatic"
+    user_context = Column(Text, nullable=True)     # who the user is, their role, key relationships
+    writing_guidelines = Column(Text, nullable=True)  # style rules, things to always/never do
+
 
 class AgentRepo:
     def __init__(self, session: Session):
@@ -581,6 +607,20 @@ class AgentRepo:
             agent.last_found_count = found_count
             agent.status = status
             agent.error_message = error
+            self.s.commit()
+
+    def update_soul(
+        self,
+        account_email: str,
+        voice_style: str | None = None,
+        user_context: str | None = None,
+        writing_guidelines: str | None = None,
+    ) -> None:
+        agent = self.get_by_email(account_email)
+        if agent:
+            agent.voice_style = voice_style or None
+            agent.user_context = user_context or None
+            agent.writing_guidelines = writing_guidelines or None
             self.s.commit()
 
     def delete(self, account_email: str) -> None:
