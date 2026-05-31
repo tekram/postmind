@@ -789,10 +789,12 @@ async def agents_page(request: Request):
     ctx["active"] = "agents"
     from postmind.core.storage import AgentRepo, get_session
     from postmind.core.account_registry import list_accounts
+    from postmind.config import get_settings
     agents = AgentRepo(get_session()).list_all()
     accounts = list_accounts()
     registered_emails = {a.account_email for a in agents}
     unregistered = [a for a in accounts if a.email not in registered_emails]
+    settings = get_settings()
     ctx["agents"] = [
         {
             "name": a.name,
@@ -813,7 +815,28 @@ async def agents_page(request: Request):
         for a in agents
     ]
     ctx["unregistered_accounts"] = [{"email": a.email} for a in unregistered]
+    ctx["has_accounts"] = len(accounts) > 0
+    ctx["ai_mode"] = settings.ai_mode
+    ctx["daemon_running"] = bool(_watch_thread and _watch_thread.is_alive())
+    ctx["created_name"] = request.query_params.get("created", "")
     return _resp(request, "agents.html", ctx)
+
+
+@app.get("/agents/daemon-badge", response_class=HTMLResponse)
+async def agents_daemon_badge(request: Request):
+    is_running = bool(_watch_thread and _watch_thread.is_alive())
+    if is_running:
+        return HTMLResponse(
+            '<span id="daemon-badge" hx-get="/agents/daemon-badge" hx-trigger="every 15s" hx-swap="outerHTML" '
+            'class="inline-flex items-center gap-1.5 text-xs font-medium text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-full">'
+            '<span class="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse"></span>Daemon running</span>'
+        )
+    return HTMLResponse(
+        '<span id="daemon-badge" hx-get="/agents/daemon-badge" hx-trigger="every 15s" hx-swap="outerHTML" '
+        'class="inline-flex items-center gap-1.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">'
+        '<span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>'
+        '<a href="/watch" class="underline underline-offset-2">Daemon stopped — start it to run agents</a></span>'
+    )
 
 
 @app.post("/agents/create")
@@ -826,7 +849,8 @@ async def agents_create(request: Request):
         raise HTTPException(status_code=400, detail="Email required")
     from postmind.core.storage import AgentRepo, get_session
     AgentRepo(get_session()).register(email, name, max(1, min(1440, interval)))
-    return RedirectResponse("/agents", status_code=303)
+    from urllib.parse import quote
+    return RedirectResponse(f"/agents?created={quote(name)}", status_code=303)
 
 
 @app.post("/agents/toggle")
