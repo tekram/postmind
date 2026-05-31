@@ -220,9 +220,11 @@ def _run_migrations(engine) -> None:
 def get_engine():
     global _engine
     if _engine is None:
+        from sqlalchemy.pool import NullPool
         _engine = create_engine(
             f"sqlite:///{_cfg.DB_PATH}",
             connect_args={"check_same_thread": False},
+            poolclass=NullPool,
             echo=False,
         )
         Base.metadata.create_all(_engine)

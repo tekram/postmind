@@ -222,7 +222,6 @@ async def dashboard(request: Request):
     from postmind.core.storage import AccountRepo, EmailRecord, EmailRepo, get_session
 
     account_email = _get_web_account() or ""
-    session = get_session()
 
     cached = _cache_get()
     if cached:
@@ -230,22 +229,34 @@ async def dashboard(request: Request):
         scanned_at = cached["scanned_at"]
         account_email = cached["account_email"]
         profile = cached["profile"]
-    elif account_email and EmailRepo(session).get_inbox(account_email, limit=1):
-        # No in-memory cache but local DB has data — build from DB
-        groups = fetch_sender_groups_from_db(
-            account_email=account_email,
-            scope="inbox",
-            min_count=1,
-            top_n=50,
-            sort_by="score",
-        )
-        acct_row = AccountRepo(session).get(account_email)
-        scanned_at = acct_row.last_synced_at.strftime("%-d %b %Y") if (acct_row and acct_row.last_synced_at) else "local cache"
-        profile = {}
+        total_emails = 0
     else:
-        groups = None
-        scanned_at = None
-        profile = {}
+        session = get_session()
+        try:
+            has_data = bool(account_email and EmailRepo(session).get_inbox(account_email, limit=1))
+            if has_data:
+                groups = fetch_sender_groups_from_db(
+                    account_email=account_email,
+                    scope="inbox",
+                    min_count=1,
+                    top_n=50,
+                    sort_by="score",
+                )
+                acct_row = AccountRepo(session).get(account_email)
+                scanned_at = acct_row.last_synced_at.strftime("%-d %b %Y") if (acct_row and acct_row.last_synced_at) else "local cache"
+                total_emails = (
+                    session.query(EmailRecord)
+                    .filter(EmailRecord.account_email == account_email, EmailRecord.is_inbox.is_(True))
+                    .count()
+                )
+                profile = {}
+            else:
+                groups = None
+                scanned_at = None
+                total_emails = 0
+                profile = {}
+        finally:
+            session.close()
 
     if groups:
         domain_groups = group_by_domain(groups)
@@ -253,13 +264,6 @@ async def dashboard(request: Request):
         recs = generate_recommendations(groups, top_n=5, domain_map=domain_map)
         bns = best_next_step(recs)
         total_reclaimable = reclaimable_mb(recs)
-
-        # Total emails in DB
-        total_emails = (
-            session.query(EmailRecord)
-            .filter(EmailRecord.account_email == account_email, EmailRecord.is_inbox.is_(True))
-            .count()
-        )
 
         ctx.update({
             "has_scan": True,
@@ -318,48 +322,51 @@ async def stats_data(
 
         account_email = _get_web_account() or ""
         valid_sort = sort if sort in ("score", "count", "size", "oldest") else "score"
-        session = get_session()
-
-        # Use local DB when synced data exists and no time filter (since) is applied
-        has_local_data = bool(account_email and EmailRepo(session).get_inbox(account_email, limit=1))
 
         data_source = "Gmail API"
         total_emails_in_scope = 0
 
-        if has_local_data and not since:
-            db_scope = "inbox" if scope != "anywhere" else "anywhere"
-            groups = fetch_sender_groups_from_db(
-                account_email=account_email,
-                scope=db_scope,
-                min_count=1,
-                top_n=top,
-                sort_by=valid_sort,
-            )
-            profile = {"emailAddress": account_email}
-            data_source = "local cache"
-            from postmind.core.storage import EmailRecord
-            db_q = session.query(EmailRecord).filter(EmailRecord.account_email == account_email)
-            if db_scope == "inbox":
-                db_q = db_q.filter(EmailRecord.is_inbox.is_(True))
-            total_emails_in_scope = db_q.count()
-        else:
-            client = _build_provider()
-            profile = client.get_profile()
-            account_email = profile.get("emailAddress", "")
-            query = "in:anywhere -in:trash -in:spam" if scope == "anywhere" else "in:inbox"
-            if since:
-                query += f" newer_than:{since}"
-            groups = fetch_sender_groups(
-                client,
-                query=query,
-                max_messages=1000,
-                min_count=1,
-                top_n=top,
-                sort_by=valid_sort,
-            )
-            total_emails_in_scope = sum(g.count for g in groups)
+        session = get_session()
+        try:
+            has_local_data = bool(account_email and EmailRepo(session).get_inbox(account_email, limit=1))
 
-        blocked = BlocklistRepo(session).blocked_emails(account_email)
+            if has_local_data and not since:
+                db_scope = "inbox" if scope != "anywhere" else "anywhere"
+                groups = fetch_sender_groups_from_db(
+                    account_email=account_email,
+                    scope=db_scope,
+                    min_count=1,
+                    top_n=top,
+                    sort_by=valid_sort,
+                )
+                profile = {"emailAddress": account_email}
+                data_source = "local cache"
+                from postmind.core.storage import EmailRecord
+                db_q = session.query(EmailRecord).filter(EmailRecord.account_email == account_email)
+                if db_scope == "inbox":
+                    db_q = db_q.filter(EmailRecord.is_inbox.is_(True))
+                total_emails_in_scope = db_q.count()
+            else:
+                client = _build_provider()
+                profile = client.get_profile()
+                account_email = profile.get("emailAddress", "")
+                query = "in:anywhere -in:trash -in:spam" if scope == "anywhere" else "in:inbox"
+                if since:
+                    query += f" newer_than:{since}"
+                groups = fetch_sender_groups(
+                    client,
+                    query=query,
+                    max_messages=1000,
+                    min_count=1,
+                    top_n=top,
+                    sort_by=valid_sort,
+                )
+                total_emails_in_scope = sum(g.count for g in groups)
+
+            blocked = BlocklistRepo(session).blocked_emails(account_email)
+        finally:
+            session.close()
+
         if blocked:
             groups = [g for g in groups if g.sender_email not in blocked]
 
