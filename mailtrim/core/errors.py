@@ -132,5 +132,5 @@ def friendly_error(exc: BaseException) -> tuple[str, str]:
     # ── Fallback ─────────────────────────────────────────────────────────────
     return (
         f"Unexpected error: {msg[:120]}",
-        "If this persists, report it at github.com/sadhgurutech/mailtrim/issues",
+        "If this persists, report it at github.com/tekram/mailtrim/issues",
     )

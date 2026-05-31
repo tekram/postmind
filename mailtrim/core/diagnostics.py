@@ -269,7 +269,7 @@ def run_imap_checks(server: str, user: str, password: str, port: int = 993) -> l
                     "check",
                     ok=False,
                     message=f"Check crashed: {exc}",
-                    fix="Please report this at github.com/sadhgurutech/mailtrim/issues",
+                    fix="Please report this at github.com/tekram/mailtrim/issues",
                 )
             )
     return results
@@ -354,7 +354,7 @@ def run_all(include_optional: bool = True) -> list[CheckResult]:
                     fn.__name__,
                     ok=False,
                     message=f"Check crashed: {exc}",
-                    fix="Please report this at github.com/sadhgurutech/mailtrim/issues",
+                    fix="Please report this at github.com/tekram/mailtrim/issues",
                 )
             )
     if include_optional:

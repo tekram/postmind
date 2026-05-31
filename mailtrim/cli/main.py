@@ -259,7 +259,7 @@ def _require_gmail(command_name: str) -> None:
                 "    [cyan]mailtrim purge[/cyan]   — clean by sender or domain\n"
                 "    [cyan]mailtrim undo[/cyan]    — reverse a purge\n\n"
                 "  [dim]IMAP support for this command is planned. "
-                "Follow progress at github.com/sadhgurutech/mailtrim[/dim]"
+                "Follow progress at github.com/tekram/mailtrim[/dim]"
             )
             raise typer.Exit(1)
     except typer.Exit:

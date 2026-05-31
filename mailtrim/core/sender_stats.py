@@ -505,7 +505,7 @@ def generate_share_text(
 
 # ── Stats share text ─────────────────────────────────────────────────────────
 
-_REPO_URL = "https://github.com/sadhgurutech/mailtrim"
+_REPO_URL = "https://github.com/tekram/mailtrim"
 
 # Substrings that indicate a domain carries sensitive content.
 # Domains matching any of these are silently excluded from share text.
@@ -748,7 +748,7 @@ def generate_viral_share_text(
     email_count: int,
     reclaim_pct: float = 0.0,
     elapsed_seconds: int | None = None,
-    repo_url: str = "https://github.com/sadhgurutech/mailtrim",
+    repo_url: str = "https://github.com/tekram/mailtrim",
 ) -> str:
     """
     Generate a multi-line, tweet/Slack-shaped share text designed to be
@@ -761,7 +761,7 @@ def generate_viral_share_text(
          • ~41 min of reading time reclaimed
 
       Core cleanup runs locally — no API key needed. Free forever.
-      → https://github.com/sadhgurutech/mailtrim
+      → https://github.com/tekram/mailtrim
     """
     time_part = f" in {elapsed_seconds}s" if elapsed_seconds is not None else ""
     pct_line = (

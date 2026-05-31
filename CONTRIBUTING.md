@@ -34,7 +34,7 @@ Be kind, direct, and constructive. We welcome contributors of all experience lev
 ## Development Setup
 
 ```bash
-git clone https://github.com/sadhgurutech/mailtrim
+git clone https://github.com/tekram/mailtrim
 cd mailtrim
 
 # Create and activate a virtual environment
@@ -53,6 +53,39 @@ export ANTHROPIC_API_KEY=sk-ant-...
 # Run the test suite to confirm everything works
 python -m pytest tests/ -v
 ```
+
+---
+
+## Running the Web UI
+
+mailtrim ships an optional local web interface (`mailtrim serve`) built on FastAPI + HTMX.
+
+```bash
+# Install web extras (FastAPI, uvicorn, jinja2)
+pip install -e ".[dev,web]"
+
+# Authenticate first (if you haven't already)
+mailtrim setup
+
+# Start the local server (default: http://localhost:8000)
+mailtrim serve
+
+# Pick a different port
+mailtrim serve --port 9000
+```
+
+The web UI runs **entirely locally** — no data leaves your machine. It shares the same SQLite database and configuration as the CLI commands, so any changes (e.g. blocklisting a sender) are immediately visible in both interfaces.
+
+When working on the web UI, the relevant files are:
+
+```
+mailtrim/
+├── web/
+│   ├── app.py         # FastAPI application and route handlers
+│   └── templates/     # Jinja2 + HTMX templates (one per page/component)
+```
+
+The test suite does **not** require the web extras — all web-layer tests use FastAPI's `TestClient` which is included with `fastapi[testing]` or via `httpx`. If you add new routes, add corresponding tests in `tests/test_web_*.py`.
 
 ---
 
