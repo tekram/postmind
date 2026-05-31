@@ -161,3 +161,168 @@ def test_avoidance_view_tracking():
     repo.mark_acted_on("avoid1")
     avoided_after = repo.find_avoided("test@gmail.com")
     assert len(avoided_after) == 0
+
+
+# ── upsert_many bulk optimization ─────────────────────────────────────────────
+
+
+def test_upsert_many_inserts_all():
+    """upsert_many should insert all records in a single pass."""
+    from mailtrim.core.storage import EmailRecord, EmailRepo, get_session
+
+    session = get_session()
+    repo = EmailRepo(session)
+
+    records = [
+        EmailRecord(
+            account_email="bulk@test.com",
+            gmail_id=f"bulk_{i}",
+            thread_id=f"t{i}",
+            subject=f"Subject {i}",
+            sender_email="sender@example.com",
+            sender_name="Sender",
+            snippet="",
+            label_ids_json="[]",
+            internal_date=1_700_000_000_000 + i,
+            size_estimate=1024 * i,
+            is_unread=True,
+            is_inbox=True,
+        )
+        for i in range(50)
+    ]
+    repo.upsert_many(records)
+
+    for i in range(50):
+        rec = repo.get(f"bulk_{i}")
+        assert rec is not None, f"Record bulk_{i} missing after upsert_many"
+        assert rec.subject == f"Subject {i}"
+
+
+def test_upsert_many_updates_on_conflict():
+    """upsert_many on an existing gmail_id should UPDATE the row, not insert a duplicate."""
+    from mailtrim.core.storage import EmailRecord, EmailRepo, get_session
+
+    session = get_session()
+    repo = EmailRepo(session)
+
+    original = EmailRecord(
+        account_email="conflict@test.com",
+        gmail_id="conflict_id",
+        thread_id="t1",
+        subject="Original Subject",
+        sender_email="a@b.com",
+        sender_name="A",
+        snippet="",
+        label_ids_json="[]",
+        internal_date=1_700_000_000_000,
+        size_estimate=100,
+        is_unread=True,
+        is_inbox=True,
+    )
+    repo.upsert_many([original])
+
+    updated = EmailRecord(
+        account_email="conflict@test.com",
+        gmail_id="conflict_id",
+        thread_id="t1",
+        subject="Updated Subject",
+        sender_email="a@b.com",
+        sender_name="A",
+        snippet="",
+        label_ids_json="[]",
+        internal_date=1_700_000_001_000,
+        size_estimate=200,
+        is_unread=False,
+        is_inbox=True,
+    )
+    repo.upsert_many([updated])
+
+    rec = repo.get("conflict_id")
+    assert rec is not None
+    assert rec.subject == "Updated Subject"
+    # There should be exactly one row with this gmail_id
+    from mailtrim.core.storage import EmailRecord as ER
+    count = session.query(ER).filter_by(gmail_id="conflict_id").count()
+    assert count == 1
+
+
+def test_upsert_many_empty_list_no_crash():
+    """upsert_many([]) must be a no-op — no exception raised."""
+    from mailtrim.core.storage import EmailRepo, get_session
+
+    repo = EmailRepo(get_session())
+    repo.upsert_many([])  # should not raise
+
+
+def test_existing_gmail_ids_returns_set():
+    """existing_gmail_ids should return the set of gmail_ids for an account."""
+    from mailtrim.core.storage import EmailRecord, EmailRepo, get_session
+
+    session = get_session()
+    repo = EmailRepo(session)
+
+    for i in range(3):
+        repo.upsert(
+            EmailRecord(
+                account_email="ids@test.com",
+                gmail_id=f"exist_{i}",
+                thread_id=f"t{i}",
+                subject="",
+                sender_email="x@y.com",
+                sender_name="",
+                snippet="",
+                label_ids_json="[]",
+                internal_date=0,
+                size_estimate=0,
+                is_unread=False,
+                is_inbox=True,
+            )
+        )
+
+    existing = repo.existing_gmail_ids("ids@test.com")
+    assert isinstance(existing, set)
+    assert existing == {"exist_0", "exist_1", "exist_2"}
+
+
+def test_existing_gmail_ids_ignores_other_accounts():
+    """existing_gmail_ids must only return IDs for the requested account."""
+    from mailtrim.core.storage import EmailRecord, EmailRepo, get_session
+
+    session = get_session()
+    repo = EmailRepo(session)
+
+    repo.upsert(
+        EmailRecord(
+            account_email="account_a@test.com",
+            gmail_id="id_a",
+            thread_id="t1",
+            subject="",
+            sender_email="x@y.com",
+            sender_name="",
+            snippet="",
+            label_ids_json="[]",
+            internal_date=0,
+            size_estimate=0,
+            is_unread=False,
+            is_inbox=True,
+        )
+    )
+    repo.upsert(
+        EmailRecord(
+            account_email="account_b@test.com",
+            gmail_id="id_b",
+            thread_id="t2",
+            subject="",
+            sender_email="x@y.com",
+            sender_name="",
+            snippet="",
+            label_ids_json="[]",
+            internal_date=0,
+            size_estimate=0,
+            is_unread=False,
+            is_inbox=True,
+        )
+    )
+
+    assert repo.existing_gmail_ids("account_a@test.com") == {"id_a"}
+    assert repo.existing_gmail_ids("account_b@test.com") == {"id_b"}

@@ -1173,6 +1173,173 @@ def fetch_sender_groups(
     return result[:top_n]
 
 
+# ── Promotional email detection ───────────────────────────────────────────────
+
+_PROMO_SENDER_PREFIXES: frozenset[str] = frozenset(
+    {
+        "noreply",
+        "no-reply",
+        "donotreply",
+        "do-not-reply",
+        "newsletter",
+        "newsletters",
+        "marketing",
+        "promotions",
+        "deals",
+        "offers",
+        "updates",
+        "notifications",
+        "news",
+        "info",
+        "hello",
+        "hi",
+        "team",
+        "support",
+    }
+)
+
+_PROMO_ESP_DOMAINS: frozenset[str] = frozenset(
+    {
+        "mailchimp.com",
+        "mc.us",
+        "sendgrid.net",
+        "sendgrid.com",
+        "klaviyo.com",
+        "constantcontact.com",
+        "mailgun.org",
+        "sparkpostmail.com",
+        "amazonses.com",
+        "ses.amazonaws.com",
+        "campaign-archive.com",
+        "list-manage.com",
+        "createsend.com",
+        "exacttarget.com",
+        "salesforce.com",
+        "hubspot.com",
+        "marketo.com",
+        "eloqua.com",
+        "brevo.com",
+        "sendinblue.com",
+        "drip.com",
+        "convertkit.com",
+        "aweber.com",
+        "getresponse.com",
+        "activecampaign.com",
+        "mailerlite.com",
+        "moosend.com",
+        "omnisend.com",
+    }
+)
+
+_PROMO_GMAIL_LABELS: frozenset[str] = frozenset(
+    {"CATEGORY_PROMOTIONS", "CATEGORY_UPDATES", "CATEGORY_SOCIAL"}
+)
+
+
+def is_promotional(record) -> bool:
+    """Rule-based promotional email classifier — no LLM required.
+
+    Returns True when any of the following signals are present:
+    1. List-Unsubscribe header (RFC 2369 — mass-send indicator, ~0% false-positive rate)
+    2. Gmail category label CATEGORY_PROMOTIONS / CATEGORY_UPDATES / CATEGORY_SOCIAL
+    3. Sender address local-part matches a known bulk-sender prefix
+    4. Sender domain is a known Email Service Provider (ESP)
+    """
+    # Signal 1: List-Unsubscribe header — strongest single signal
+    if record.list_unsubscribe and record.list_unsubscribe.strip():
+        return True
+
+    # Signal 2: Gmail category labels already stored in DB
+    try:
+        import json as _json
+        labels = set(_json.loads(record.label_ids_json or "[]"))
+        if labels & _PROMO_GMAIL_LABELS:
+            return True
+    except Exception:
+        pass
+
+    # Signal 3: sender address prefix
+    sender = (record.sender_email or "").lower()
+    if "@" in sender:
+        local, domain = sender.split("@", 1)
+        if local in _PROMO_SENDER_PREFIXES:
+            return True
+        # Signal 4: known ESP domain (exact match or subdomain)
+        for esp in _PROMO_ESP_DOMAINS:
+            if domain == esp or domain.endswith(f".{esp}"):
+                return True
+
+    return False
+
+
+def fetch_sender_groups_from_db(
+    account_email: str,
+    scope: str = "anywhere",
+    min_count: int = 2,
+    top_n: int = 30,
+    sort_by: SortKey = "score",
+    promo_only: bool = False,
+) -> list[SenderGroup]:
+    """Build sender groups from locally synced DB — no Gmail API calls.
+
+    Requires prior ``mailtrim sync`` to populate the local database.
+    Use ``scope="inbox"`` to restrict to inbox-only records.
+    Use ``promo_only=True`` to filter to promotional emails only (no LLM needed).
+    """
+    from mailtrim.core.gmail_client import Message, MessageHeader
+    from mailtrim.core.storage import EmailRecord, get_session
+
+    session = get_session()
+    q = session.query(EmailRecord).filter(EmailRecord.account_email == account_email)
+    if scope == "inbox":
+        q = q.filter(EmailRecord.is_inbox.is_(True))
+    records = q.all()
+
+    if promo_only:
+        records = [r for r in records if is_promotional(r)]
+
+    if not records:
+        return []
+
+    accumulators: dict[str, _Accumulator] = {}
+    for rec in records:
+        key = rec.sender_email
+        if not key:
+            continue
+        if key not in accumulators:
+            accumulators[key] = _Accumulator(
+                sender_email=key, sender_name=rec.sender_name or ""
+            )
+        msg = Message(
+            id=rec.gmail_id,
+            thread_id=rec.thread_id,
+            label_ids=rec.label_ids,
+            snippet=rec.snippet or "",
+            headers=MessageHeader(
+                subject=rec.subject or "",
+                from_=f"{rec.sender_name} <{rec.sender_email}>",
+                list_unsubscribe=rec.list_unsubscribe or "",
+            ),
+            size_estimate=rec.size_estimate or 0,
+            internal_date=rec.internal_date or 0,
+        )
+        accumulators[key].add(msg)
+
+    result = [acc.to_group() for acc in accumulators.values() if acc.count >= min_count]
+    compute_impact_scores(result)
+
+    if sort_by == "oldest":
+        result.sort(key=lambda g: g.earliest_date)
+    elif sort_by == "size":
+        result.sort(key=lambda g: g.total_size_bytes, reverse=True)
+    elif sort_by == "count":
+        result.sort(key=lambda g: g.count, reverse=True)
+    else:
+        result.sort(key=lambda g: g.impact_score, reverse=True)
+
+    return result[:top_n]
+
+
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 

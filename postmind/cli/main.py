@@ -1057,6 +1057,16 @@ def stats(
         "--since",
         help="Only scan emails received within the last N days. Format: 30d, 7d.",
     ),
+    from_cache: bool = typer.Option(
+        False,
+        "--from-cache",
+        help="Use locally synced DB instead of Gmail API (run 'mailtrim sync' first).",
+    ),
+    promo_only: bool = typer.Option(
+        False,
+        "--promo-only",
+        help="Show only promotional senders (List-Unsubscribe, ESP domains, category labels). No AI needed.",
+    ),
 ):
     """
     Inbox decision engine — reclaimable space, confidence-scored recommendations, top senders.
@@ -1149,15 +1159,27 @@ def stats(
             profile = client.get_profile()
         except Exception as exc:
             _handle_error(exc, verbose=verbose)
+        account_email = profile.get("emailAddress", "")
         p.update(t, description="Fetching top senders…")
-        groups = fetch_sender_groups(
-            client,
-            query=mail_query,
-            max_messages=max_scan,
-            min_count=1,
-            top_n=top_n,
-            sort_by=sort_by if sort_by in ("score", "count", "size", "oldest") else "score",
-        )
+        if from_cache:
+            from mailtrim.core.sender_stats import fetch_sender_groups_from_db
+            groups = fetch_sender_groups_from_db(
+                account_email,
+                scope=scope,
+                min_count=1,
+                top_n=top_n,
+                sort_by=sort_by if sort_by in ("score", "count", "size", "oldest") else "score",
+                promo_only=promo_only,
+            )
+        else:
+            groups = fetch_sender_groups(
+                client,
+                query=mail_query,
+                max_messages=max_scan,
+                min_count=1,
+                top_n=top_n,
+                sort_by=sort_by if sort_by in ("score", "count", "size", "oldest") else "score",
+            )
         p.update(t, description="Scoring recommendations…")
         domain_groups = group_by_domain(groups)
         domain_map_lookup = {d.domain: d for d in domain_groups}
@@ -1940,37 +1962,138 @@ def quickstart(
 
 @app.command()
 def sync(
-    limit: int = typer.Option(200, "--limit", "-n", help="Number of messages to sync."),
+    limit: int = typer.Option(0, "--limit", "-n", help="Max new messages to sync (0 = all)."),
     query: str = typer.Option("in:inbox", "--query", "-q", help="Gmail query to sync."),
     scope: str = typer.Option(
         "inbox",
         "--scope",
         help="Mail scope: 'inbox' (default) or 'anywhere' (includes archived, sent, all mail).",
     ),
+    deep: bool = typer.Option(
+        False,
+        "--deep",
+        help="Full-mailbox sync — auto-paginates through yearly date ranges to handle 50k+ mailboxes.",
+    ),
+    skip_existing: bool = typer.Option(
+        True,
+        "--skip-existing/--no-skip-existing",
+        help="Skip messages already in local DB. Default: on (fast re-sync).",
+    ),
 ):
     """
     Sync mail metadata to local database for fast repeated queries.
 
     Run before stats or triage when you want to avoid re-fetching from Gmail.
+    Use --deep to sync an entire large mailbox (50k+ emails) in one command.
 
     Examples:
       postmind sync
       postmind sync --limit 500
       postmind sync --query "in:inbox is:unread"
       postmind sync --scope anywhere
+      postmind sync --deep                         # full mailbox, all years
+      postmind sync --deep --scope anywhere        # everything including archived
     """
     _require_gmail("sync")
-    from postmind.core.storage import EmailRecord, EmailRepo, get_session
+    import json as _json
+    import time as _time
 
-    if scope == "anywhere" and query == "in:inbox":
-        query = "in:anywhere -in:trash -in:spam"
-    elif scope == "anywhere":
-        query = f"in:anywhere -in:trash -in:spam {query}"
+    from postmind.core.storage import EmailRecord, EmailRepo, UndoLogRepo, get_session
+
+    # Date ranges for --deep mode: covers full mailbox history year by year
+    _DEEP_RANGES = [
+        ("older_than:10y", "10y+"),
+        ("older_than:5y newer_than:10y", "5–10y"),
+        ("older_than:3y newer_than:5y", "3–5y"),
+        ("older_than:2y newer_than:3y", "2–3y"),
+        ("older_than:1y newer_than:2y", "1–2y"),
+        ("older_than:6m newer_than:1y", "6–12mo"),
+        ("newer_than:6m", "<6mo"),
+    ]
+
+    def _build_query(base_query: str, date_filter: str = "") -> str:
+        parts = []
+        if scope == "anywhere":
+            parts.append("in:anywhere -in:trash -in:spam")
+        if date_filter:
+            parts.append(date_filter)
+        if base_query not in ("in:inbox", ""):
+            parts.append(base_query)
+        elif not parts:
+            parts.append("in:inbox")
+        return " ".join(parts)
+
+    def _sync_batch(
+        ids: list[str],
+        repo: EmailRepo,
+        existing_ids: set[str],
+        progress,
+        task,
+        account_email: str,
+    ) -> tuple[int, int]:
+        """Fetch metadata and save a list of IDs. Returns (synced, skipped)."""
+        new_ids = [i for i in ids if i not in existing_ids] if skip_existing else ids
+        skipped = len(ids) - len(new_ids)
+
+        chunk_size = 50
+        synced = 0
+        for i in range(0, len(new_ids), chunk_size):
+            chunk_ids = new_ids[i : i + chunk_size]
+            try:
+                messages = client.get_messages_metadata_batch(chunk_ids)
+            except Exception:
+                _time.sleep(2)
+                try:
+                    messages = client.get_messages_metadata_batch(chunk_ids)
+                except Exception:
+                    progress.update(task, advance=len(chunk_ids))
+                    continue
+
+            records = [
+                EmailRecord(
+                    account_email=account_email,
+                    gmail_id=msg.id,
+                    thread_id=msg.thread_id,
+                    subject=msg.headers.subject,
+                    sender_email=msg.sender_email,
+                    sender_name=msg.sender_name,
+                    snippet=msg.snippet,
+                    label_ids_json=_json.dumps(msg.label_ids),
+                    internal_date=msg.internal_date,
+                    size_estimate=msg.size_estimate,
+                    is_unread=msg.is_unread,
+                    is_inbox=msg.is_inbox,
+                    list_unsubscribe=msg.headers.list_unsubscribe,
+                )
+                for msg in messages
+            ]
+            repo.upsert_many(records)
+            existing_ids.update(r.gmail_id for r in records)
+            synced += len(records)
+            progress.update(task, advance=len(chunk_ids))
+
+        return synced, skipped
 
     client = _get_client()
     account_email = _get_account_email(client)
     session = get_session()
     repo = EmailRepo(session)
+
+    # Load existing IDs from DB once for fast dedup
+    from sqlalchemy import select
+    from mailtrim.core.storage import EmailRecord as _ER
+
+    existing_ids: set[str] = set()
+    if skip_existing:
+        rows = session.execute(
+            select(_ER.gmail_id).where(_ER.account_email == account_email)
+        ).scalars().all()
+        existing_ids = set(rows)
+
+    total_synced = 0
+    total_skipped = 0
+
+    ranges = _DEEP_RANGES if deep else [("", "")]
 
     with Progress(
         SpinnerColumn(),
@@ -1979,41 +2102,41 @@ def sync(
         TaskProgressColumn(),
         console=console,
     ) as progress:
-        task = progress.add_task("Fetching message IDs...", total=None)
-        ids = client.list_message_ids(query=query, max_results=limit)
-        progress.update(task, description=f"Fetching {len(ids)} messages...", total=len(ids))
+        for date_filter, label in ranges:
+            q = _build_query(query, date_filter)
+            range_label = f" [{label}]" if deep else ""
+            task = progress.add_task(f"Fetching IDs{range_label}…", total=None)
 
-        messages = []
-        chunk_size = 50
-        for i in range(0, len(ids), chunk_size):
-            chunk = client.get_messages_batch(ids[i : i + chunk_size])
-            messages.extend(chunk)
-            progress.update(task, advance=len(chunk))
+            try:
+                ids = client.list_message_ids(query=q, max_results=limit if limit > 0 else None)
+            except Exception as exc:
+                console.print(f"[yellow]Warning: could not fetch IDs for {q}: {exc}[/yellow]")
+                progress.remove_task(task)
+                continue
 
-    records = []
-    for msg in messages:
-        rec = EmailRecord(
-            account_email=account_email,
-            gmail_id=msg.id,
-            thread_id=msg.thread_id,
-            subject=msg.headers.subject,
-            sender_email=msg.sender_email,
-            sender_name=msg.sender_name,
-            snippet=msg.snippet,
-            label_ids_json=__import__("json").dumps(msg.label_ids),
-            internal_date=msg.internal_date,
-            size_estimate=msg.size_estimate,
-            is_unread=msg.is_unread,
-            is_inbox=msg.is_inbox,
-            list_unsubscribe=msg.headers.list_unsubscribe,
+            if not ids:
+                progress.remove_task(task)
+                continue
+
+            progress.update(
+                task,
+                description=f"Syncing{range_label} — {len(ids):,} found…",
+                total=len(ids),
+            )
+            synced, skipped = _sync_batch(ids, repo, existing_ids, progress, task, account_email)
+            total_synced += synced
+            total_skipped += skipped
+
+    skip_note = f", {total_skipped:,} already cached" if skip_existing and total_skipped else ""
+    console.print(
+        f"[green]Synced {total_synced:,} messages[/green]{skip_note} "
+        f"for [bold]{account_email}[/bold]"
+    )
+    if skip_existing and existing_ids:
+        console.print(
+            f"[dim]Total in local DB: {len(existing_ids):,} messages. "
+            "Run with --no-skip-existing to force re-sync.[/dim]"
         )
-        records.append(rec)
-
-    repo.upsert_many(records)
-    console.print(f"[green]Synced {len(records)} messages[/green] for [bold]{account_email}[/bold]")
-
-    # Housekeeping: purge expired undo log entries silently
-    from postmind.core.storage import UndoLogRepo
 
     purged = UndoLogRepo(session).purge_expired()
     if purged:
@@ -3019,6 +3142,16 @@ def purge(
         "--since",
         help="Only scan emails received within the last N days. Format: 30d, 7d.",
     ),
+    from_cache: bool = typer.Option(
+        False,
+        "--from-cache",
+        help="Use locally synced DB for scanning (no quota). Run 'mailtrim sync' first.",
+    ),
+    promo_only: bool = typer.Option(
+        False,
+        "--promo-only",
+        help="Restrict to promotional senders only (List-Unsubscribe, ESP domains, category labels). No AI needed.",
+    ),
 ):
     """
     Move top email senders to Trash — with a 30-day undo window.
@@ -3130,14 +3263,30 @@ def purge(
                 f"[red]Invalid --sort value '{sort_by}'. Choose: {', '.join(valid_sorts)}[/red]"
             )
             raise typer.Exit(1)
-        groups = fetch_sender_groups(
-            client,
-            query=query,
-            max_messages=max_scan,
-            min_count=min_count if not domain else 1,
-            top_n=top,
-            sort_by=sort_by,
-        )
+        if from_cache:
+            from mailtrim.core.sender_stats import fetch_sender_groups_from_db
+            groups = fetch_sender_groups_from_db(
+                account_email,
+                scope=scope,
+                min_count=min_count if not domain else 1,
+                top_n=top,
+                sort_by=sort_by,
+                promo_only=promo_only,
+            )
+            if domain:
+                groups = [
+                    g for g in groups
+                    if g.domain == domain or g.sender_email.endswith(f"@{domain}")
+                ]
+        else:
+            groups = fetch_sender_groups(
+                client,
+                query=query,
+                max_messages=max_scan,
+                min_count=min_count if not domain else 1,
+                top_n=top,
+                sort_by=sort_by,
+            )
         progress.update(t, description=f"Found {len(groups)} senders.")
 
     # Filter protected senders before displaying anything

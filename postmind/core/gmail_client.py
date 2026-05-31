@@ -259,6 +259,20 @@ class GmailClient:
 
         return results
 
+    def get_messages_metadata_batch(self, message_ids: list[str]) -> list[Message]:
+        """Fetch message metadata only — no body. ~5x faster than get_messages_batch."""
+        settings = get_settings()
+        results: list[Message] = []
+        for chunk in _chunks(message_ids, settings.gmail_batch_size):
+            results.extend(
+                self._fetch_batch(
+                    chunk,
+                    format="metadata",
+                    metadata_headers=["From", "Subject", "Date", "List-Unsubscribe"],
+                )
+            )
+        return results
+
     def _fetch_batch(
         self,
         message_ids: list[str],
