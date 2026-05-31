@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}Agents — mailtrim{% endblock %}
+{% block content %}
+
+<div class="p-8 max-w-3xl">
+
+  <h1 class="text-2xl font-semibold text-slate-900 mb-1">Heartbeat Agents</h1>
+  <p class="text-slate-500 text-sm mb-6">
+    Each agent monitors one inbox on a schedule — classify, triage, and apply rules automatically.
+  </p>
+
+  <!-- Agent cards -->
+  {% if agents %}
+  <div class="space-y-3 mb-6">
+    {% for agent in agents %}
+    <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-4">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <!-- Status dot -->
+          <div class="shrink-0">
+            {% if not agent.is_active %}
+            <span class="w-2.5 h-2.5 rounded-full bg-slate-300 inline-block"></span>
+            {% elif agent.status == 'error' %}
+            <span class="w-2.5 h-2.5 rounded-full bg-red-400 inline-block"></span>
+            {% elif agent.status == 'running' %}
+            <span class="w-2.5 h-2.5 rounded-full bg-teal-400 animate-pulse inline-block"></span>
+            {% else %}
+            <span class="w-2.5 h-2.5 rounded-full bg-teal-400 inline-block"></span>
+            {% endif %}
+          </div>
+          <div>
+            <p class="text-sm font-semibold text-slate-900">{{ agent.name }}</p>
+            <p class="text-xs text-slate-400">{{ agent.email }}</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-4 text-xs text-slate-500">
+          <span>every {{ agent.interval }} min</span>
+          <span class="text-slate-300">·</span>
+          <span>last run {{ agent.last_run_at }}</span>
+          {% if agent.last_found > 0 %}
+          <span class="text-slate-300">·</span>
+          <span class="text-teal-600 font-medium">{{ agent.last_found }} found</span>
+          {% endif %}
+        </div>
+        <div class="flex items-center gap-2 ml-4">
+          <!-- Pause/Resume toggle -->
+          <form method="POST" action="/agents/toggle">
+            <input type="hidden" name="email" value="{{ agent.email }}">
+            <input type="hidden" name="active" value="{{ 'false' if agent.is_active else 'true' }}">
+            <button type="submit"
+                    class="text-xs px-3 py-1.5 rounded-lg border transition-colors
+                           {% if agent.is_active %}text-slate-600 border-slate-200 hover:bg-slate-50{% else %}text-teal-600 border-teal-200 hover:bg-teal-50{% endif %}">
+              {{ 'Pause' if agent.is_active else 'Resume' }}
+            </button>
+          </form>
+          <!-- Delete -->
+          <form method="POST" action="/agents/delete"
+                onsubmit="return confirm('Delete agent for {{ agent.email }}?')">
+            <input type="hidden" name="email" value="{{ agent.email }}">
+            <button type="submit"
+                    class="text-xs text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-lg border border-red-200 hover:border-red-300 transition-colors">
+              Delete
+            </button>
+          </form>
+        </div>
+      </div>
+      {% if agent.error %}
+      <p class="text-xs text-red-500 mt-2 ml-6">{{ agent.error }}</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-8 text-center mb-6">
+    <p class="text-slate-400 text-sm">No agents yet.</p>
+    <p class="text-slate-400 text-xs mt-1">Create an agent below to start monitoring an inbox automatically.</p>
+  </div>
+  {% endif %}
+
+  <!-- Create agent form -->
+  <div class="bg-white border border-slate-200 rounded-xl shadow-sm">
+    <div class="px-5 py-4 border-b border-slate-100">
+      <h2 class="font-medium text-slate-800 text-sm">Create agent</h2>
+    </div>
+    <div class="p-5">
+      <form method="POST" action="/agents/create" class="space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Account</label>
+            <select name="email" required
+                    class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/30">
+              {% if unregistered_accounts %}
+                {% for acct in unregistered_accounts %}
+                <option value="{{ acct.email }}">{{ acct.email }}</option>
+                {% endfor %}
+              {% else %}
+                <option value="" disabled selected>All accounts have agents</option>
+              {% endif %}
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Agent name</label>
+            <input type="text" name="name" placeholder="Work, Personal…"
+                   class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/30">
+          </div>
+        </div>
+        <div class="flex items-end gap-4">
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Interval (minutes)</label>
+            <select name="interval"
+                    class="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/30">
+              <option value="5">Every 5 min</option>
+              <option value="15">Every 15 min</option>
+              <option value="30" selected>Every 30 min</option>
+              <option value="60">Every hour</option>
+              <option value="360">Every 6 hours</option>
+            </select>
+          </div>
+          <button type="submit"
+                  {% if not unregistered_accounts %}disabled{% endif %}
+                  class="bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+            Create agent
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- How to start -->
+  <div class="mt-5 bg-slate-50 border border-slate-200 rounded-xl p-4">
+    <p class="text-slate-600 text-xs font-medium mb-1.5">Running agents</p>
+    <p class="text-slate-500 text-xs mb-2">Agents run when you start the heartbeat daemon:</p>
+    <code class="block text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-700">mailtrim watch</code>
+    <p class="text-slate-400 text-xs mt-2">Or install as a background service that starts on login: <code class="font-mono">mailtrim service install</code></p>
+  </div>
+
+</div>
+
+{% endblock %}
