@@ -43,6 +43,25 @@
         </span>
         {% endif %}
       </div>
+      <!-- Account display / switcher -->
+      {% if accounts %}
+      <div class="mt-2">
+        {% if multi_account %}
+        <form method="POST" action="/accounts/switch">
+          <select name="email" onchange="this.form.submit()"
+                  class="w-full text-xs bg-slate-800 text-slate-300 border border-slate-700 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-teal-500/30 cursor-pointer">
+            {% for acct in accounts %}
+            <option value="{{ acct.email }}" {% if acct.email == active_account_email %}selected{% endif %}>
+              {{ acct.display_name[:26] }}{% if acct.provider == 'imap' %} (IMAP){% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </form>
+        {% else %}
+        <p class="text-slate-600 text-xs truncate" title="{{ active_account_email }}">{{ active_account_email }}</p>
+        {% endif %}
+      </div>
+      {% endif %}
     </div>
 
     <!-- Nav -->

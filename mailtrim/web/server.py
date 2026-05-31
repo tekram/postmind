@@ -433,9 +433,16 @@ async def undo_page(request: Request):
 async def undo_restore(request: Request, entry_id: int):
     def _do_undo():
         from mailtrim.core.bulk_engine import BulkEngine
-        from mailtrim.core.gmail_client import GmailClient
+        from mailtrim.core.storage import UndoLogRepo, get_session
 
-        client = GmailClient()
+        # Security check: ensure the undo entry belongs to the current account
+        entry = UndoLogRepo(get_session()).get(entry_id)
+        if entry and hasattr(entry, 'account_email'):
+            current_acct = _get_web_account()
+            if current_acct and entry.account_email and entry.account_email != current_acct:
+                raise HTTPException(status_code=404, detail="Operation not found")
+
+        client = _build_provider()
         account_email = client.get_email_address()
         engine = BulkEngine(client, account_email)
         return engine.undo(entry_id)
@@ -443,6 +450,8 @@ async def undo_restore(request: Request, entry_id: int):
     try:
         loop = asyncio.get_event_loop()
         count = await loop.run_in_executor(_executor, _do_undo)
+    except HTTPException:
+        raise
     except Exception as exc:
         return _resp(request, "error.html", {"error": str(exc)})
 
@@ -459,12 +468,15 @@ async def settings_page(request: Request):
     ctx["success"] = request.query_params.get("success")
 
     try:
+        from mailtrim.config import load_account_config
         s = get_settings()
+        email = _get_web_account()
+        acct_cfg = load_account_config(email) if email else {}
         ctx.update({
             "ai_mode": s.ai_mode,
-            "provider": s.provider,
-            "imap_server": s.imap_server,
-            "imap_user": s.imap_user,
+            "provider": acct_cfg.get("provider", s.provider),
+            "imap_server": acct_cfg.get("imap_server", s.imap_server),
+            "imap_user": acct_cfg.get("imap_user", s.imap_user),
             "undo_days": s.undo_window_days,
             "has_api_key": bool(s.anthropic_api_key),
             "ollama_base_url": s.ollama_base_url,
@@ -482,9 +494,21 @@ async def settings_page(request: Request):
     ctx.update({
         "data_dir": str(DATA_DIR),
         "credentials_exist": CREDENTIALS_PATH.exists(),
-        "token_exists": TOKEN_PATH.exists(),
+        "token_exists": _is_authed(),
     })
     return _resp(request, "settings.html", ctx)
+
+
+@app.post("/accounts/switch")
+async def web_switch_account(request: Request):
+    global _active_web_account
+    form = await request.form()
+    email = (form.get("email") or "").strip()
+    from mailtrim.core.account_registry import list_accounts
+    if email and any(a.email == email for a in list_accounts()):
+        _active_web_account = email
+        _scan_cache.clear()
+    return RedirectResponse("/", status_code=303)
 
 
 @app.post("/settings/ai-mode")
