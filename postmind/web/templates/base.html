@@ -66,6 +66,13 @@
 
     <!-- Nav -->
     <nav class="flex-1 p-3 space-y-0.5 overflow-y-auto">
+      <a href="/agent"
+         class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors
+                {% if active == 'agent' %}text-white bg-slate-800{% else %}text-teal-300 hover:text-white hover:bg-slate-800/60{% endif %}">
+        <span class="text-base leading-none shrink-0 w-4 text-center">✦</span>
+        Super Agent
+      </a>
+
       <a href="/"
          class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors
                 {% if active == 'dashboard' %}text-white bg-slate-800{% else %}text-slate-400 hover:text-white hover:bg-slate-800/60{% endif %}">

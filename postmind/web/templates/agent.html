@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block title %}Super Agent — postmind{% endblock %}
+{% block content %}
+<div class="flex flex-col h-screen">
+
+  <!-- Header -->
+  <div class="px-8 pt-7 pb-4 border-b border-slate-200 bg-white">
+    <div class="flex items-center gap-2.5">
+      <span class="text-teal-500 text-xl leading-none">✦</span>
+      <h1 class="text-xl font-semibold text-slate-900">Super Agent</h1>
+      {% if chat_mode == 'cloud' %}
+      <span class="inline-flex items-center gap-1.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>Cloud AI</span>
+      {% elif chat_mode == 'local' %}
+      <span class="inline-flex items-center gap-1.5 text-xs font-medium text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-teal-400"></span>Local AI</span>
+      {% else %}
+      <span class="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">AI off</span>
+      {% endif %}
+    </div>
+    <p class="text-slate-500 text-sm mt-1">Describe what you want — I'll analyze, clean up, and automate your inbox. Nothing destructive happens without your confirmation.</p>
+  </div>
+
+  <!-- Conversation -->
+  <div id="agent-messages" class="flex-1 overflow-y-auto px-8 py-6 space-y-4 bg-slate-50"></div>
+
+  <!-- Composer -->
+  <div class="border-t border-slate-200 bg-white px-8 py-4">
+    <div id="agent-examples" class="flex flex-wrap gap-2 mb-3">
+      {% for ex in [
+        "What's eating my storage?",
+        "Find my largest emails",
+        "Delete everything from no-reply senders",
+        "Create an agent that archives newsletters weekly"
+      ] %}
+      <button class="agent-example text-xs text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-full px-3 py-1.5 transition-colors">{{ ex }}</button>
+      {% endfor %}
+    </div>
+    <form id="agent-form" class="flex items-end gap-2">
+      <textarea id="agent-input" rows="1" placeholder="Ask the Super Agent…"
+                class="flex-1 resize-none text-sm text-slate-800 placeholder-slate-400 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400 max-h-36"></textarea>
+      <button type="submit" id="agent-send"
+              class="shrink-0 h-11 px-5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium flex items-center gap-2 disabled:opacity-40 transition-colors">
+        Run
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </button>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  const KEY = "postmind_agent_v1";
+  const msgs = document.getElementById("agent-messages");
+  const form = document.getElementById("agent-form");
+  const input = document.getElementById("agent-input");
+  const sendBtn = document.getElementById("agent-send");
+
+  let history = [];
+  try { history = JSON.parse(localStorage.getItem(KEY) || "[]"); } catch (e) { history = []; }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(history.slice(-24))); } catch (e) {} }
+
+  function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+  function fmt(s) {
+    return esc(s)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/`(.+?)`/g, '<code class="bg-slate-100 rounded px-1 text-[12px]">$1</code>')
+      .replace(/\n/g, "<br>");
+  }
+
+  function actionsHtml(actions) {
+    if (!actions || !actions.length) return "";
+    let h = '<div class="flex flex-wrap gap-2 mt-2">';
+    for (const a of actions) {
+      h += '<a href="' + esc(a.href) + '" class="inline-flex items-center gap-1 text-sm font-medium text-teal-700 bg-teal-50 border border-teal-200 hover:bg-teal-100 px-3 py-1.5 rounded-lg transition-colors">' + esc(a.label) + ' &rarr;</a>';
+    }
+    return h + "</div>";
+  }
+
+  function cardHtml(card) {
+    const f = card.fields || {};
+    if (card.type === "create_agent") {
+      const cb = (name, on) => '<label class="flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" name="' + name + '" ' + (on ? "checked" : "") + ' class="rounded text-teal-600"> ' + name.replace("run_", "") + "</label>";
+      return '<form method="POST" action="/agent/create-agent" class="mt-2 border border-teal-200 bg-white rounded-xl p-4 shadow-sm max-w-md">' +
+        '<p class="text-sm font-semibold text-slate-800 mb-2">✦ ' + esc(card.title) + '</p>' +
+        '<input type="hidden" name="email" value="' + esc(f.email) + '">' +
+        '<div class="space-y-2 text-sm">' +
+          '<div class="flex items-center gap-2"><span class="text-slate-400 w-20 text-xs">Name</span><input name="name" value="' + esc(f.name) + '" class="flex-1 border border-slate-200 rounded-lg px-2 py-1 text-sm"></div>' +
+          '<div class="flex items-center gap-2"><span class="text-slate-400 w-20 text-xs">Every (min)</span><input name="interval_minutes" type="number" value="' + esc(f.interval_minutes) + '" class="w-24 border border-slate-200 rounded-lg px-2 py-1 text-sm"></div>' +
+          '<div class="flex items-center gap-2"><span class="text-slate-400 w-20 text-xs">Account</span><span class="text-slate-600 text-xs">' + esc(f.email) + '</span></div>' +
+          '<div class="flex flex-wrap gap-3 pt-1">' + cb("run_rules", f.run_rules) + cb("run_followups", f.run_followups) + cb("run_avoidance", f.run_avoidance) + '</div>' +
+        '</div>' +
+        '<button type="submit" class="mt-3 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg">Create agent</button>' +
+      '</form>';
+    }
+    if (card.type === "create_rule") {
+      let warn = "";
+      if (f.warnings && f.warnings.length) {
+        warn = '<ul class="mt-1.5 text-xs text-amber-700 list-disc ml-4">' + f.warnings.map(w => "<li>" + esc(w) + "</li>").join("") + "</ul>";
+      }
+      return '<form method="POST" action="/agent/create-rule" class="mt-2 border border-teal-200 bg-white rounded-xl p-4 shadow-sm max-w-md">' +
+        '<p class="text-sm font-semibold text-slate-800 mb-1">✦ ' + esc(card.title) + '</p>' +
+        '<p class="text-sm text-slate-600">' + esc(f.explanation) + '</p>' +
+        '<div class="mt-2 text-xs text-slate-500 space-y-0.5">' +
+          '<div><span class="text-slate-400">Query:</span> <code class="bg-slate-100 rounded px-1">' + esc(f.gmail_query) + '</code></div>' +
+          '<div><span class="text-slate-400">Action:</span> ' + esc(f.action) + '</div>' +
+        '</div>' + warn +
+        '<input type="hidden" name="natural_language" value="' + esc(f.natural_language) + '">' +
+        '<button type="submit" class="mt-3 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg">Create rule</button>' +
+      '</form>';
+    }
+    return "";
+  }
+
+  function bubble(role, content, actions, cards) {
+    const wrap = document.createElement("div");
+    if (role === "user") {
+      wrap.className = "flex justify-end";
+      wrap.innerHTML = '<div class="bg-teal-600 text-white text-sm rounded-2xl rounded-br-md px-4 py-2.5 max-w-[80%] whitespace-pre-wrap">' + fmt(content) + "</div>";
+    } else {
+      wrap.className = "flex flex-col items-start gap-1 max-w-[80%]";
+      let html = '<div class="bg-white border border-slate-200 text-slate-800 text-sm rounded-2xl rounded-bl-md px-4 py-2.5 shadow-sm">' + fmt(content) + "</div>";
+      html += actionsHtml(actions);
+      if (cards && cards.length) html += cards.map(cardHtml).join("");
+      wrap.innerHTML = html;
+    }
+    msgs.appendChild(wrap);
+    msgs.scrollTop = msgs.scrollHeight;
+    return wrap;
+  }
+
+  function greeting() {
+    bubble("assistant", "Hi — I'm your Super Agent. Tell me an outcome and I'll handle the steps. Try one of the examples below, or ask anything about your inbox.");
+  }
+
+  function render() {
+    msgs.innerHTML = "";
+    if (!history.length) { greeting(); return; }
+    history.forEach(m => bubble(m.role, m.content, m.actions, m.cards));
+  }
+  render();
+
+  input.addEventListener("input", () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 144) + "px"; });
+  input.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
+  document.querySelectorAll(".agent-example").forEach(b => b.addEventListener("click", () => { input.value = b.textContent; input.focus(); }));
+
+  async function send(text) {
+    history.push({ role: "user", content: text });
+    bubble("user", text);
+    save();
+    sendBtn.disabled = true;
+    const typing = bubble("assistant", "Thinking…");
+    typing.querySelector("div").classList.add("animate-pulse");
+    try {
+      const res = await fetch("/agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: history.map(m => ({ role: m.role, content: m.content })) }),
+      });
+      const data = await res.json();
+      typing.remove();
+      bubble("assistant", data.reply, data.actions, data.cards);
+      history.push({ role: "assistant", content: data.reply, actions: data.actions, cards: data.cards });
+      save();
+    } catch (e) {
+      typing.remove();
+      bubble("assistant", "Sorry — I couldn't reach the agent. Is the server still running?");
+    } finally {
+      sendBtn.disabled = false;
+      input.focus();
+    }
+  }
+
+  form.addEventListener("submit", e => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = ""; input.style.height = "auto";
+    send(text);
+  });
+})();
+</script>
+{% endblock %}
