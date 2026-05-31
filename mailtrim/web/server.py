@@ -29,6 +29,8 @@ _CACHE_TTL = 300  # 5 minutes
 # In-memory sync task state: task_id → state dict
 _sync_tasks: dict[str, dict] = {}
 
+_active_web_account: str | None = None  # email override set by the web UI switcher
+
 _executor = ThreadPoolExecutor(max_workers=4)
 
 
@@ -36,24 +38,42 @@ _executor = ThreadPoolExecutor(max_workers=4)
 
 
 def _cache_set(groups, profile: dict, account_email: str) -> None:
-    _scan_cache["latest"] = {
+    email = _get_web_account() or "default"
+    _scan_cache[email] = {
         "groups": groups,
         "profile": profile,
         "account_email": account_email,
-        "scanned_at": datetime.now(timezone.utc).strftime("%H:%M"),
+        "scanned_at": datetime.now(timezone.utc).strftime("%H:%M UTC"),
         "expires": time.time() + _CACHE_TTL,
     }
 
 
 def _cache_get() -> dict | None:
-    entry = _scan_cache.get("latest")
+    email = _get_web_account() or "default"
+    entry = _scan_cache.get(email)
     if entry and time.time() < entry["expires"]:
         return entry
     return None
 
 
+def _get_web_account() -> str | None:
+    """Return the email address the web UI is currently scoped to."""
+    from mailtrim.config import get_active_account
+    return _active_web_account or get_active_account()
+
+
 def _is_authed() -> bool:
-    return TOKEN_PATH.exists()
+    from mailtrim.config import token_path_for, TOKEN_PATH
+    email = _get_web_account()
+    if not email:
+        return TOKEN_PATH.exists()  # legacy fallback for unmigrated installs
+    from mailtrim.core.account_registry import list_accounts
+    acct = next((a for a in list_accounts() if a.email == email), None)
+    if not acct:
+        return TOKEN_PATH.exists()
+    if acct.provider == "imap":
+        return True  # IMAP auth checked at connection time
+    return token_path_for(email).exists()
 
 
 def _ai_mode() -> str:
@@ -72,11 +92,20 @@ def _provider_name() -> str:
 
 def _base() -> dict:
     """Base template context — request passed separately to TemplateResponse."""
+    from mailtrim.core.account_registry import list_accounts
+    accounts = list_accounts()
+    current_email = _get_web_account()
     return {
         "version": __version__,
         "ai_mode": _ai_mode(),
         "provider": _provider_name(),
         "is_authed": _is_authed(),
+        "accounts": [
+            {"email": a.email, "display_name": a.display_name, "provider": a.provider}
+            for a in accounts
+        ],
+        "active_account_email": current_email,
+        "multi_account": len(accounts) > 1,
     }
 
 
@@ -86,22 +115,32 @@ def _resp(request: Request, name: str, ctx: dict, status: int = 200) -> HTMLResp
 
 
 def _build_provider():
-    import os
-
+    from mailtrim.config import load_account_config
     from mailtrim.core.providers.factory import get_provider
 
-    s = get_settings()
-    if s.provider == "imap":
+    email = _get_web_account()
+    if email:
+        cfg = load_account_config(email)
+        provider_name = cfg.get("provider", "gmail")
+    else:
+        # Legacy fallback — read from global settings
+        provider_name = get_settings().provider
+        cfg = {}
+
+    if provider_name == "imap":
+        import os
         pw = os.environ.get("MAILTRIM_IMAP_PASSWORD", "")
+        s = get_settings()
         return get_provider(
             "imap",
-            imap_server=s.imap_server,
-            imap_user=s.imap_user,
+            imap_server=cfg.get("imap_server") or s.imap_server,
+            imap_user=cfg.get("imap_user") or s.imap_user,
             imap_password=pw,
-            imap_port=s.imap_port,
-            imap_folder=s.imap_folder,
+            imap_port=cfg.get("imap_port") or s.imap_port,
+            imap_folder=cfg.get("imap_folder") or s.imap_folder,
         )
-    return get_provider("gmail")
+
+    return get_provider("gmail", account_email=email)
 
 
 def _enrich_groups(groups) -> list[dict]:
@@ -333,7 +372,7 @@ async def purge_confirm(request: Request):
     try:
         loop = asyncio.get_event_loop()
         undo_id, count = await loop.run_in_executor(_executor, _do_purge)
-        _scan_cache.clear()
+        _scan_cache.pop(_get_web_account() or "default", None)
     except Exception as exc:
         return _resp(request, "error.html", {"error": str(exc)})
 

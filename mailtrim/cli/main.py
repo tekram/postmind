@@ -25,6 +25,134 @@ app = typer.Typer(
 )
 console = Console()
 
+# ── accounts sub-app ─────────────────────────────────────────────────────────
+
+accounts_app = typer.Typer(name="accounts", help="Manage multiple email accounts.", no_args_is_help=True)
+app.add_typer(accounts_app, name="accounts")
+
+
+@accounts_app.command(name="list")
+def accounts_list() -> None:
+    """List all registered accounts."""
+    from mailtrim.core.account_registry import list_accounts, get_active
+    from mailtrim.config import token_path_for
+    accounts = list_accounts()
+    if not accounts:
+        console.print("[yellow]No accounts registered.[/yellow]  Run [cyan]mailtrim setup[/cyan] to add one.")
+        return
+    active = get_active()
+    table = Table(show_header=True, header_style="bold", border_style="dim")
+    table.add_column("", width=2)
+    table.add_column("Email")
+    table.add_column("Provider", width=8)
+    table.add_column("Token", width=10)
+    for a in accounts:
+        marker = "[green]>[/green]" if active and a.email == active.email else " "
+        if a.provider == "imap":
+            token_status = "[dim]n/a[/dim]"
+        else:
+            token_status = "[green]ok[/green]" if token_path_for(a.email).exists() else "[red]missing[/red]"
+        table.add_row(marker, a.email, a.provider, token_status)
+    console.print(table)
+    console.print("[dim]Active account marked with >[/dim]")
+
+
+@accounts_app.command(name="switch")
+def accounts_switch(
+    email: str = typer.Argument(..., help="Account email address to switch to.")
+) -> None:
+    """Switch the active account."""
+    from mailtrim.core.account_registry import switch_to
+    try:
+        switch_to(email)
+        console.print(f"[green]✓[/green] Active account set to [bold]{email}[/bold]")
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+
+
+@accounts_app.command(name="add")
+def accounts_add(
+    provider: str = typer.Option("gmail", "--provider", "-p", help="gmail or imap"),
+    make_active: bool = typer.Option(True, "--set-active/--no-set-active"),
+) -> None:
+    """Add and authenticate a new Gmail or IMAP account."""
+    if provider == "gmail":
+        from mailtrim.core.gmail_client import authenticate
+        from mailtrim.config import CREDENTIALS_PATH, TOKENS_DIR
+        if not CREDENTIALS_PATH.exists():
+            console.print("[red]credentials.json not found.[/red]  Download it from Google Cloud Console and save to ~/.mailtrim/credentials.json")
+            raise typer.Exit(1)
+        console.print("Opening browser for Gmail authentication…")
+        import tempfile, shutil
+        tmp_token = TOKENS_DIR / "_tmp_new_account.json"
+        try:
+            creds = authenticate(token_path=tmp_token)
+            from googleapiclient.discovery import build
+            svc = build("gmail", "v1", credentials=creds, cache_discovery=False)
+            profile = svc.users().getProfile(userId="me").execute()
+            email = profile["emailAddress"]
+        except Exception as e:
+            console.print(f"[red]Authentication failed:[/red] {e}")
+            if tmp_token.exists():
+                tmp_token.unlink()
+            raise typer.Exit(1)
+        from mailtrim.config import token_path_for
+        dest = token_path_for(email)
+        shutil.move(str(tmp_token), str(dest))
+        dest.chmod(0o600)
+        from mailtrim.core.account_registry import register_gmail, list_accounts
+        register_gmail(email)
+        if make_active:
+            from mailtrim.config import set_active_account
+            set_active_account(email)
+        console.print(f"[green]✓[/green] Account [bold]{email}[/bold] added.")
+        if make_active:
+            console.print("  Set as active account.")
+    else:
+        console.print("[yellow]IMAP account add via CLI not yet implemented.[/yellow]  Run [cyan]mailtrim setup[/cyan] instead.")
+
+
+@accounts_app.command(name="remove")
+def accounts_remove(
+    email: str = typer.Argument(..., help="Account email address to remove."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+) -> None:
+    """Remove a registered account and delete its token."""
+    from mailtrim.core.account_registry import list_accounts
+    from mailtrim.core.storage import AccountRepo, get_session
+    from mailtrim.config import token_path_for, get_active_account, set_active_account
+
+    accounts = list_accounts()
+    if not any(a.email == email for a in accounts):
+        console.print(f"[red]Account not found:[/red] {email}")
+        raise typer.Exit(1)
+
+    if not yes:
+        confirmed = typer.confirm(f"Remove account {email} and delete its token?")
+        if not confirmed:
+            raise typer.Abort()
+
+    # Delete token file
+    token_file = token_path_for(email)
+    if token_file.exists():
+        token_file.unlink()
+
+    # Deactivate in DB
+    AccountRepo(get_session()).deactivate(email)
+
+    # If this was the active account, clear active_account file
+    if get_active_account() == email:
+        remaining = [a for a in accounts if a.email != email]
+        if remaining:
+            set_active_account(remaining[0].email)
+        else:
+            from mailtrim.config import ACTIVE_ACCOUNT_PATH
+            if ACTIVE_ACCOUNT_PATH.exists():
+                ACTIVE_ACCOUNT_PATH.unlink()
+
+    console.print(f"[green]✓[/green] Account [bold]{email}[/bold] removed.")
+
 
 @app.callback(invoke_without_command=True)
 def _main(
@@ -32,10 +160,32 @@ def _main(
     version: bool = typer.Option(
         False, "--version", "-V", is_eager=True, help="Show version and exit."
     ),
+    account: Optional[str] = typer.Option(
+        None,
+        "--account", "-a",
+        help="Email address of the account to operate on. Defaults to the active account.",
+        is_eager=True,
+    ),
 ) -> None:
+    # Silently migrate legacy token.json on startup
+    try:
+        from mailtrim.core.account_registry import migrate_legacy_token
+        migrate_legacy_token()
+    except Exception:
+        pass
+
     if version:
         typer.echo(f"mailtrim {__version__}")
         raise typer.Exit()
+    if account:
+        from mailtrim.core.account_registry import list_accounts
+        _accounts = list_accounts()
+        if _accounts and not any(a.email == account for a in _accounts):
+            console.print(f"[red]Unknown account:[/red] {account}")
+            console.print("  Run [cyan]mailtrim accounts list[/cyan] to see registered accounts.")
+            raise typer.Exit(1)
+        import os as _os
+        _os.environ["_MAILTRIM_OVERRIDE_ACCOUNT"] = account
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
 
@@ -276,22 +426,37 @@ def _resolve_imap_settings(
     imap_folder: str = "INBOX",
 ) -> tuple[str, str, str, int, str]:
     """
-    Merge CLI flag values with persisted settings from ~/.mailtrim/.env.
+    Merge CLI flag values with per-account config, then global .env settings.
 
-    Priority: CLI flag > persisted config (.env) > fallback to "gmail".
+    Priority: CLI flag > per-account config > global .env config > fallback to "gmail".
 
     When the resolved provider is "gmail", all IMAP-specific values are zeroed
     so they can never trigger an IMAP password prompt or connection attempt.
 
     Returns (provider, imap_server, imap_user, imap_port, imap_folder).
     """
+    # Load per-account config for the active account
+    _acct_cfg: dict = {}
+    try:
+        from mailtrim.config import get_active_account, load_account_config
+        _active_email = get_active_account()
+        if _active_email:
+            _acct_cfg = load_account_config(_active_email)
+    except Exception:
+        pass
+
     try:
         s = get_settings()
     except Exception:
         s = None
 
-    # Three-tier fallback: CLI flag → persisted config → default "gmail"
-    resolved_provider = provider or (s.provider if s else "") or "gmail"
+    # Four-tier fallback: CLI flag → per-account config → global .env → default "gmail"
+    resolved_provider = (
+        provider
+        or _acct_cfg.get("provider", "")
+        or (s.provider if s else "")
+        or "gmail"
+    )
 
     # IMAP-specific settings are only meaningful when the resolved provider is IMAP.
     # Zeroing them out for Gmail prevents stale IMAP config from a previous setup
@@ -299,13 +464,29 @@ def _resolve_imap_settings(
     if resolved_provider != "imap":
         return resolved_provider, "", "", 993, "INBOX"
 
-    resolved_server = imap_server or (s.imap_server if s else "")
-    resolved_user = imap_user or (s.imap_user if s else "")
+    resolved_server = (
+        imap_server
+        or _acct_cfg.get("imap_server", "")
+        or (s.imap_server if s else "")
+    )
+    resolved_user = (
+        imap_user
+        or _acct_cfg.get("imap_user", "")
+        or (s.imap_user if s else "")
+    )
     # For port/folder, treat CLI defaults (993/"INBOX") as "not specified" so
     # settings values configured during setup take precedence.
-    resolved_port = imap_port if (imap_port != 993 or not s or not s.imap_port) else s.imap_port
+    _acct_port = _acct_cfg.get("imap_port", 0)
+    _acct_folder = _acct_cfg.get("imap_folder", "")
+    resolved_port = (
+        imap_port if imap_port != 993
+        else _acct_port if _acct_port
+        else (s.imap_port if s and s.imap_port else 993)
+    )
     resolved_folder = (
-        imap_folder if (imap_folder != "INBOX" or not s or not s.imap_folder) else s.imap_folder
+        imap_folder if imap_folder != "INBOX"
+        else _acct_folder if _acct_folder
+        else (s.imap_folder if s and s.imap_folder else "INBOX")
     )
 
     return resolved_provider, resolved_server, resolved_user, resolved_port, resolved_folder
@@ -422,6 +603,14 @@ def setup():
                     "  Setup will continue — run [bold]mailtrim setup[/bold] again if "
                     "commands later prompt for an IMAP password."
                 )
+            # Register in account registry (Phase 4)
+            try:
+                from mailtrim.core.account_registry import register_gmail
+                from mailtrim.config import set_active_account
+                register_gmail(email)
+                set_active_account(email)
+            except Exception:
+                pass  # Registry errors are non-fatal during setup
         except Exception as exc:
             console.print(f"  [red]✗  Authentication failed:[/red] {str(exc)[:100]}")
             console.print()
