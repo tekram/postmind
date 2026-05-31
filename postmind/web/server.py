@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -11,7 +12,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from postmind import __version__
@@ -1958,24 +1959,22 @@ Live inbox snapshot:
 {overview}"""
 
 
-@app.post("/agent")
-async def agent_endpoint(request: Request):
-    try:
-        body = await request.json()
-    except Exception:
-        return {"reply": "Sorry — I couldn't read that request.", "actions": [], "cards": []}
+def _parse_agent_messages(body) -> list[dict]:
+    """Extract and clamp the chat history from a request body."""
     if not isinstance(body, dict):
         body = {}
     raw_messages = body.get("messages", [])
-    messages = [
+    return [
         {"role": m["role"], "content": str(m["content"])[:4000]}
         for m in raw_messages
         if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content")
     ][-12:]
-    if not messages:
-        return {"reply": "Tell me what you'd like to do — e.g. “what's eating my storage?”, “delete everything from blah.com”, or “create an agent that archives newsletters weekly.”", "actions": [], "cards": []}
 
-    mode = _chat_mode()
+
+def _agent_mode_guidance(mode: str) -> dict | None:
+    """For off/local/non-cloud modes, return the guidance payload to return as-is.
+
+    ``None`` means cloud mode — proceed with the agent loop."""
     if mode == "off":
         return {
             "reply": "The assistant's AI is off (your data stays fully local). Choose a local or cloud backend under Settings → Chat Assistant to use the Super Agent.",
@@ -1988,6 +1987,223 @@ async def agent_endpoint(request: Request):
             "actions": [{"label": "Open Settings", "href": "/settings"}],
             "cards": [],
         }
+    return None
+
+
+def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], cards: list[dict]):
+    """Build the Super Agent tool-executor closure.
+
+    Shared by the non-streaming ``POST /agent`` and the streaming
+    ``POST /agent/stream``. READ tools return a summary string; WRITE tools append
+    a staged confirm card (``cards``) or deep-link action (``actions``) — both
+    accumulators are mutated in place — and return a summary string for the model.
+    """
+    from urllib.parse import urlencode
+
+    from postmind.core import agent_tools
+
+    def _executor_tool(name: str, tool_input: dict) -> str:
+        if name == "get_inbox_overview":
+            return _chat_overview_text(account_email)
+        if name == "search_senders":
+            return _chat_search_senders(tool_input.get("query", ""), account_email)
+        if name == "analyze_storage":
+            from postmind.core.sender_stats import fetch_sender_groups_from_db
+            from postmind.core.storage import EmailRepo, get_session
+            cached = _cache_get()
+            if cached:
+                groups = cached["groups"]
+            elif account_email and EmailRepo(get_session()).get_inbox(account_email, limit=1):
+                groups = fetch_sender_groups_from_db(account_email=account_email, scope="inbox", min_count=1, top_n=500, sort_by="size")
+            else:
+                return "No scan data available — ask the user to open Stats or run a Sync first."
+            return agent_tools.summarize_storage(groups, tool_input.get("group_by", "sender"), int(tool_input.get("top_n", 10) or 10))
+        if name == "find_largest_messages":
+            try:
+                provider = _build_provider()
+                return agent_tools.find_largest_messages(provider, tool_input.get("query", ""), int(tool_input.get("limit", 10) or 10))
+            except Exception as exc:
+                return f"Couldn't fetch message sizes: {exc}"
+        if name == "list_automation":
+            from postmind.core.storage import AgentRepo, RuleRepo, get_session
+            session = get_session()
+            agent = AgentRepo(session).get_by_email(account_email) if account_email else None
+            rules = RuleRepo(session).list_active(account_email) if account_email else []
+            parts = []
+            if agent:
+                parts.append(f"Heartbeat agent '{agent.name}' every {agent.interval_minutes}m (active={agent.is_active}, rules={agent.run_rules}).")
+            else:
+                parts.append("No heartbeat agent yet.")
+            if rules:
+                parts.append("Active rules: " + "; ".join(f"{r.name} → {r.action}" for r in rules[:5]))
+            else:
+                parts.append("No active rules.")
+            return " ".join(parts)
+        if name == "stage_trash":
+            matched, err = _chat_resolve_senders(tool_input.get("senders") or [], tool_input.get("query", ""), account_email)
+            if err:
+                return err
+            if not matched:
+                return "No matching senders found in the current scan — nothing staged."
+            total = sum(g.count for g in matched)
+            mb = sum(g.total_size_bytes for g in matched) / (1024 * 1024)
+            href = "/purge/preview?" + urlencode([("senders", g.sender_email) for g in matched])
+            if not any(a.get("href") == href for a in actions):
+                actions.append({"label": f"Review & confirm ({total} emails)", "href": href})
+            names = ", ".join(g.sender_email for g in matched[:5]) + ("…" if len(matched) > 5 else "")
+            return f"Staged {len(matched)} sender(s) — {total} emails, ~{mb:.0f} MB ({names}). The user must confirm in the preview before anything moves to Trash."
+        if name in ("stage_archive", "stage_label", "stage_mark_read"):
+            action = {"stage_archive": "archive", "stage_label": "label", "stage_mark_read": "mark_read"}[name]
+            provider = None
+            try:
+                provider = _build_provider()
+            except Exception:
+                provider = None
+            if provider is not None and not provider.supports("labels"):
+                return f"This account's provider does not support {action.replace('_', ' ')} — only Gmail does. Try trashing instead."
+            label_name = (tool_input.get("label_name") or "").strip()
+            if action == "label" and not label_name:
+                return "A label name is required to stage a label action."
+            staged, blocked, sensitive, err = _resolve_action_targets(
+                tool_input.get("senders") or [], tool_input.get("query", ""), account_email
+            )
+            if err:
+                return err
+            if not staged:
+                extra = f" ({len(blocked)} protected sender(s) skipped)" if blocked else ""
+                return f"No matching senders to {action.replace('_', ' ')}{extra} — nothing staged."
+            total = sum(g.count for g in staged)
+            cards.append({
+                "type": "bulk_action",
+                "title": {"archive": "Archive emails", "label": f"Label emails “{label_name}”", "mark_read": "Mark emails as read"}[action],
+                "fields": {
+                    "action": action,
+                    "label_name": label_name,
+                    "targets": _enrich_targets(staged),
+                    "total_count": total,
+                    "blocked": blocked,
+                    "sensitive": sensitive,
+                    "undoable": True,
+                },
+            })
+            note = f" ({len(blocked)} protected skipped)" if blocked else ""
+            return f"Staged a {action.replace('_', ' ')} of {len(staged)} sender(s), {total} emails{note}. Showed a confirmation card; nothing happens until the user confirms. Reversible for 30 days."
+        if name == "stage_unsubscribe":
+            staged, blocked, sensitive, err = _resolve_action_targets(
+                tool_input.get("senders") or [], tool_input.get("query", ""), account_email
+            )
+            if err:
+                return err
+            if not staged:
+                extra = f" ({len(blocked)} protected sender(s) skipped)" if blocked else ""
+                return f"No matching senders to unsubscribe from{extra} — nothing staged."
+            total = sum(g.count for g in staged)
+            cards.append({
+                "type": "unsubscribe",
+                "title": "Unsubscribe from senders",
+                "fields": {
+                    "targets": _enrich_targets(staged),
+                    "total_count": total,
+                    "blocked": blocked,
+                    "sensitive": sensitive,
+                },
+            })
+            note = f" ({len(blocked)} protected skipped)" if blocked else ""
+            return f"Staged unsubscribe from {len(staged)} sender(s){note}. Showed a confirmation card. Unsubscribe is external and NOT undoable; trashing the back-catalog is optional and undoable. Nothing happens until the user confirms."
+        if name == "draft_email":
+            from postmind.core.storage import AgentRepo, get_session
+            soul = {}
+            agent = AgentRepo(get_session()).get_by_email(account_email) if account_email else None
+            if agent:
+                soul = {"voice_style": agent.voice_style, "user_context": agent.user_context, "writing_guidelines": agent.writing_guidelines}
+            try:
+                draft = ai.compose_email(
+                    intent=tool_input.get("intent", ""),
+                    recipient_context=tool_input.get("recipient_context", ""),
+                    thread_snippet=tool_input.get("thread_snippet", ""),
+                    soul=soul,
+                )
+            except ValueError as exc:
+                return str(exc)
+            subject, body = _split_draft(draft)
+            cards.append({
+                "type": "send_email",
+                "title": "Review draft & send",
+                "fields": {"to": (tool_input.get("to") or "").strip(), "subject": subject, "body": body},
+            })
+            return f"Drafted the email and showed an editable card. Subject: {subject}. The user can edit and must click Send — nothing is sent automatically."
+        if name == "send_email":
+            cards.append({
+                "type": "send_email",
+                "title": "Review & send",
+                "fields": {
+                    "to": (tool_input.get("to") or "").strip(),
+                    "subject": (tool_input.get("subject") or "").strip(),
+                    "body": (tool_input.get("body") or "").strip(),
+                },
+            })
+            return "Showed an editable send-email card. Always-confirm: nothing is sent until the user clicks Send."
+        if name == "create_agent":
+            email = (tool_input.get("email") or account_email or "").strip()
+            if not email:
+                return "No account to attach the agent to — ask the user to connect an account first."
+            card = {
+                "type": "create_agent",
+                "title": "Create heartbeat agent",
+                "fields": {
+                    "email": email,
+                    "name": (tool_input.get("name") or email.split("@")[0].title()),
+                    "interval_minutes": int(tool_input.get("interval_minutes", 30) or 30),
+                    "voice_style": tool_input.get("voice_style", "") or "",
+                    "user_context": tool_input.get("user_context", "") or "",
+                    "run_rules": bool(tool_input.get("run_rules", True)),
+                    "run_followups": bool(tool_input.get("run_followups", True)),
+                    "run_avoidance": bool(tool_input.get("run_avoidance", False)),
+                },
+            }
+            cards.append(card)
+            return f"Staged a heartbeat agent for {email} (every {card['fields']['interval_minutes']}m). Showed the user a confirmation card."
+        if name == "create_rule":
+            nl = (tool_input.get("natural_language") or "").strip()
+            if not nl:
+                return "Need the rule in plain English."
+            if not account_email:
+                return "No active account — ask the user to connect one first."
+            try:
+                nl_rule = ai.translate_rule(nl)
+            except Exception as exc:
+                return f"Couldn't translate that rule: {exc}"
+            cards.append({
+                "type": "create_rule",
+                "title": "Create rule",
+                "fields": {
+                    "natural_language": nl,
+                    "gmail_query": nl_rule.gmail_query,
+                    "action": nl_rule.action,
+                    "explanation": nl_rule.explanation,
+                    "warnings": nl_rule.warnings or [],
+                },
+            })
+            return f"Staged a rule: {nl_rule.explanation} (query: {nl_rule.gmail_query}, action: {nl_rule.action}). Showed the user a confirmation card."
+        return f"Unknown tool: {name}"
+
+    return _executor_tool
+
+
+@app.post("/agent")
+async def agent_endpoint(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return {"reply": "Sorry — I couldn't read that request.", "actions": [], "cards": []}
+    messages = _parse_agent_messages(body)
+    if not messages:
+        return {"reply": "Tell me what you'd like to do — e.g. “what's eating my storage?”, “delete everything from blah.com”, or “create an agent that archives newsletters weekly.”", "actions": [], "cards": []}
+
+    mode = _chat_mode()
+    guidance = _agent_mode_guidance(mode)
+    if guidance is not None:
+        return guidance
 
     account_email = _get_web_account() or ""
     actions: list[dict] = []
@@ -1995,204 +2211,17 @@ async def agent_endpoint(request: Request):
     engine_kwargs = _chat_engine_kwargs()
 
     def _run():
-        from urllib.parse import urlencode
-
         from postmind.core import agent_tools
         from postmind.core.ai_engine import AIEngine
 
         ai = AIEngine(**engine_kwargs)
         system = _build_agent_system(account_email, mode)
-
-        def _executor_tool(name: str, tool_input: dict) -> str:
-            if name == "get_inbox_overview":
-                return _chat_overview_text(account_email)
-            if name == "search_senders":
-                return _chat_search_senders(tool_input.get("query", ""), account_email)
-            if name == "analyze_storage":
-                from postmind.core.sender_stats import fetch_sender_groups_from_db
-                from postmind.core.storage import EmailRepo, get_session
-                cached = _cache_get()
-                if cached:
-                    groups = cached["groups"]
-                elif account_email and EmailRepo(get_session()).get_inbox(account_email, limit=1):
-                    groups = fetch_sender_groups_from_db(account_email=account_email, scope="inbox", min_count=1, top_n=500, sort_by="size")
-                else:
-                    return "No scan data available — ask the user to open Stats or run a Sync first."
-                return agent_tools.summarize_storage(groups, tool_input.get("group_by", "sender"), int(tool_input.get("top_n", 10) or 10))
-            if name == "find_largest_messages":
-                try:
-                    provider = _build_provider()
-                    return agent_tools.find_largest_messages(provider, tool_input.get("query", ""), int(tool_input.get("limit", 10) or 10))
-                except Exception as exc:
-                    return f"Couldn't fetch message sizes: {exc}"
-            if name == "list_automation":
-                from postmind.core.storage import AgentRepo, RuleRepo, get_session
-                session = get_session()
-                agent = AgentRepo(session).get_by_email(account_email) if account_email else None
-                rules = RuleRepo(session).list_active(account_email) if account_email else []
-                parts = []
-                if agent:
-                    parts.append(f"Heartbeat agent '{agent.name}' every {agent.interval_minutes}m (active={agent.is_active}, rules={agent.run_rules}).")
-                else:
-                    parts.append("No heartbeat agent yet.")
-                if rules:
-                    parts.append("Active rules: " + "; ".join(f"{r.name} → {r.action}" for r in rules[:5]))
-                else:
-                    parts.append("No active rules.")
-                return " ".join(parts)
-            if name == "stage_trash":
-                matched, err = _chat_resolve_senders(tool_input.get("senders") or [], tool_input.get("query", ""), account_email)
-                if err:
-                    return err
-                if not matched:
-                    return "No matching senders found in the current scan — nothing staged."
-                total = sum(g.count for g in matched)
-                mb = sum(g.total_size_bytes for g in matched) / (1024 * 1024)
-                href = "/purge/preview?" + urlencode([("senders", g.sender_email) for g in matched])
-                if not any(a.get("href") == href for a in actions):
-                    actions.append({"label": f"Review & confirm ({total} emails)", "href": href})
-                names = ", ".join(g.sender_email for g in matched[:5]) + ("…" if len(matched) > 5 else "")
-                return f"Staged {len(matched)} sender(s) — {total} emails, ~{mb:.0f} MB ({names}). The user must confirm in the preview before anything moves to Trash."
-            if name in ("stage_archive", "stage_label", "stage_mark_read"):
-                action = {"stage_archive": "archive", "stage_label": "label", "stage_mark_read": "mark_read"}[name]
-                provider = None
-                try:
-                    provider = _build_provider()
-                except Exception:
-                    provider = None
-                if provider is not None and not provider.supports("labels"):
-                    return f"This account's provider does not support {action.replace('_', ' ')} — only Gmail does. Try trashing instead."
-                label_name = (tool_input.get("label_name") or "").strip()
-                if action == "label" and not label_name:
-                    return "A label name is required to stage a label action."
-                staged, blocked, sensitive, err = _resolve_action_targets(
-                    tool_input.get("senders") or [], tool_input.get("query", ""), account_email
-                )
-                if err:
-                    return err
-                if not staged:
-                    extra = f" ({len(blocked)} protected sender(s) skipped)" if blocked else ""
-                    return f"No matching senders to {action.replace('_', ' ')}{extra} — nothing staged."
-                total = sum(g.count for g in staged)
-                cards.append({
-                    "type": "bulk_action",
-                    "title": {"archive": "Archive emails", "label": f"Label emails “{label_name}”", "mark_read": "Mark emails as read"}[action],
-                    "fields": {
-                        "action": action,
-                        "label_name": label_name,
-                        "targets": _enrich_targets(staged),
-                        "total_count": total,
-                        "blocked": blocked,
-                        "sensitive": sensitive,
-                        "undoable": True,
-                    },
-                })
-                note = f" ({len(blocked)} protected skipped)" if blocked else ""
-                return f"Staged a {action.replace('_', ' ')} of {len(staged)} sender(s), {total} emails{note}. Showed a confirmation card; nothing happens until the user confirms. Reversible for 30 days."
-            if name == "stage_unsubscribe":
-                staged, blocked, sensitive, err = _resolve_action_targets(
-                    tool_input.get("senders") or [], tool_input.get("query", ""), account_email
-                )
-                if err:
-                    return err
-                if not staged:
-                    extra = f" ({len(blocked)} protected sender(s) skipped)" if blocked else ""
-                    return f"No matching senders to unsubscribe from{extra} — nothing staged."
-                total = sum(g.count for g in staged)
-                cards.append({
-                    "type": "unsubscribe",
-                    "title": "Unsubscribe from senders",
-                    "fields": {
-                        "targets": _enrich_targets(staged),
-                        "total_count": total,
-                        "blocked": blocked,
-                        "sensitive": sensitive,
-                    },
-                })
-                note = f" ({len(blocked)} protected skipped)" if blocked else ""
-                return f"Staged unsubscribe from {len(staged)} sender(s){note}. Showed a confirmation card. Unsubscribe is external and NOT undoable; trashing the back-catalog is optional and undoable. Nothing happens until the user confirms."
-            if name == "draft_email":
-                from postmind.core.storage import AgentRepo, get_session
-                soul = {}
-                agent = AgentRepo(get_session()).get_by_email(account_email) if account_email else None
-                if agent:
-                    soul = {"voice_style": agent.voice_style, "user_context": agent.user_context, "writing_guidelines": agent.writing_guidelines}
-                try:
-                    draft = ai.compose_email(
-                        intent=tool_input.get("intent", ""),
-                        recipient_context=tool_input.get("recipient_context", ""),
-                        thread_snippet=tool_input.get("thread_snippet", ""),
-                        soul=soul,
-                    )
-                except ValueError as exc:
-                    return str(exc)
-                subject, body = _split_draft(draft)
-                cards.append({
-                    "type": "send_email",
-                    "title": "Review draft & send",
-                    "fields": {"to": (tool_input.get("to") or "").strip(), "subject": subject, "body": body},
-                })
-                return f"Drafted the email and showed an editable card. Subject: {subject}. The user can edit and must click Send — nothing is sent automatically."
-            if name == "send_email":
-                cards.append({
-                    "type": "send_email",
-                    "title": "Review & send",
-                    "fields": {
-                        "to": (tool_input.get("to") or "").strip(),
-                        "subject": (tool_input.get("subject") or "").strip(),
-                        "body": (tool_input.get("body") or "").strip(),
-                    },
-                })
-                return "Showed an editable send-email card. Always-confirm: nothing is sent until the user clicks Send."
-            if name == "create_agent":
-                email = (tool_input.get("email") or account_email or "").strip()
-                if not email:
-                    return "No account to attach the agent to — ask the user to connect an account first."
-                card = {
-                    "type": "create_agent",
-                    "title": "Create heartbeat agent",
-                    "fields": {
-                        "email": email,
-                        "name": (tool_input.get("name") or email.split("@")[0].title()),
-                        "interval_minutes": int(tool_input.get("interval_minutes", 30) or 30),
-                        "voice_style": tool_input.get("voice_style", "") or "",
-                        "user_context": tool_input.get("user_context", "") or "",
-                        "run_rules": bool(tool_input.get("run_rules", True)),
-                        "run_followups": bool(tool_input.get("run_followups", True)),
-                        "run_avoidance": bool(tool_input.get("run_avoidance", False)),
-                    },
-                }
-                cards.append(card)
-                return f"Staged a heartbeat agent for {email} (every {card['fields']['interval_minutes']}m). Showed the user a confirmation card."
-            if name == "create_rule":
-                nl = (tool_input.get("natural_language") or "").strip()
-                if not nl:
-                    return "Need the rule in plain English."
-                if not account_email:
-                    return "No active account — ask the user to connect one first."
-                try:
-                    nl_rule = ai.translate_rule(nl)
-                except Exception as exc:
-                    return f"Couldn't translate that rule: {exc}"
-                cards.append({
-                    "type": "create_rule",
-                    "title": "Create rule",
-                    "fields": {
-                        "natural_language": nl,
-                        "gmail_query": nl_rule.gmail_query,
-                        "action": nl_rule.action,
-                        "explanation": nl_rule.explanation,
-                        "warnings": nl_rule.warnings or [],
-                    },
-                })
-                return f"Staged a rule: {nl_rule.explanation} (query: {nl_rule.gmail_query}, action: {nl_rule.action}). Showed the user a confirmation card."
-            return f"Unknown tool: {name}"
-
+        executor_tool = _build_agent_tool_executor(account_email, ai, actions, cards)
         return ai.chat(
             messages,
             system=system,
             tools=agent_tools.ALL_TOOLS,
-            tool_executor=_executor_tool,
+            tool_executor=executor_tool,
             max_tool_iterations=12,
         )
 
@@ -2203,6 +2232,118 @@ async def agent_endpoint(request: Request):
         return {"reply": f"Sorry — I hit an error: {exc}", "actions": [], "cards": []}
 
     return {"reply": reply, "actions": actions, "cards": cards}
+
+
+def _sse(payload: dict) -> str:
+    """Format a structured event as one SSE message."""
+    return "data: " + json.dumps(payload) + "\n\n"
+
+
+@app.post("/agent/stream")
+async def agent_stream_endpoint(request: Request):
+    """Streaming sibling of ``/agent`` — Server-Sent Events.
+
+    Emits the same event protocol that ``AIEngine.chat_stream`` yields
+    (``text_delta`` / ``tool_start`` / ``tool_result``), then a final ``final``
+    event carrying the accumulated ``actions`` and ``cards`` so the client can
+    render confirm cards exactly like the non-streaming path, then ``done``.
+
+    Off/local modes emit a single ``guidance`` event mirroring the non-streaming
+    JSON, then ``done``.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    messages = _parse_agent_messages(body)
+    mode = _chat_mode()
+
+    async def _empty_stream(payload: dict):
+        yield _sse({"type": "guidance", **payload})
+        yield _sse({"type": "done"})
+
+    if not messages:
+        return StreamingResponse(
+            _empty_stream({
+                "reply": "Tell me what you'd like to do — e.g. “what's eating my storage?”, “delete everything from blah.com”, or “create an agent that archives newsletters weekly.”",
+                "actions": [],
+                "cards": [],
+            }),
+            media_type="text/event-stream",
+        )
+
+    guidance = _agent_mode_guidance(mode)
+    if guidance is not None:
+        return StreamingResponse(_empty_stream(guidance), media_type="text/event-stream")
+
+    account_email = _get_web_account() or ""
+    actions: list[dict] = []
+    cards: list[dict] = []
+    engine_kwargs = _chat_engine_kwargs()
+
+    # Bridge the sync chat_stream generator (run in the thread pool) to the async
+    # SSE response via a queue. A sentinel marks completion.
+    loop = asyncio.get_event_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+    _SENTINEL = object()
+
+    def _produce():
+        from postmind.core import agent_tools
+        from postmind.core.ai_engine import AIEngine
+
+        def _put(item):
+            loop.call_soon_threadsafe(queue.put_nowait, item)
+
+        try:
+            ai = AIEngine(**engine_kwargs)
+            system = _build_agent_system(account_email, mode)
+            executor_tool = _build_agent_tool_executor(account_email, ai, actions, cards)
+            for event in ai.chat_stream(
+                messages,
+                system=system,
+                tools=agent_tools.ALL_TOOLS,
+                tool_executor=executor_tool,
+                max_tool_iterations=12,
+            ):
+                # tool_start carries raw tool input; the client only needs the name.
+                if event.get("type") == "tool_start":
+                    _put({"type": "tool_start", "name": event.get("name", "")})
+                else:
+                    _put(event)
+        except Exception as exc:
+            _put({"type": "text_delta", "text": f"Sorry — I hit an error: {exc}"})
+            _put({"type": "done"})
+        finally:
+            _put(_SENTINEL)
+
+    async def _event_stream():
+        future = loop.run_in_executor(_executor, _produce)
+        try:
+            while True:
+                item = await queue.get()
+                if item is _SENTINEL:
+                    break
+                if await request.is_disconnected():
+                    break
+                yield _sse(item)
+            # Final event with the accumulated actions/cards for confirm rendering.
+            if not await request.is_disconnected():
+                yield _sse({"type": "final", "actions": actions, "cards": cards})
+                yield _sse({"type": "done"})
+        finally:
+            # On client disconnect we may break before the sentinel; ensure the
+            # producer task is awaited so its thread isn't orphaned.
+            if not future.done():
+                try:
+                    await asyncio.wrap_future(future)
+                except Exception:
+                    pass
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/agent/create-agent")

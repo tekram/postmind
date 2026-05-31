@@ -182,6 +182,91 @@
     return wrap;
   }
 
+  // ── Streaming UI helpers ──────────────────────────────────────────────────
+  const TOOL_META = {
+    get_inbox_overview: { icon: "📥", label: "Reading inbox overview" },
+    search_senders: { icon: "🔍", label: "Searching senders" },
+    analyze_storage: { icon: "💾", label: "Analyzing storage" },
+    find_largest_messages: { icon: "📦", label: "Finding largest emails" },
+    list_automation: { icon: "⚙️", label: "Checking automation" },
+    stage_trash: { icon: "🗑️", label: "Staging trash" },
+    stage_archive: { icon: "🗂️", label: "Staging archive" },
+    stage_label: { icon: "🏷️", label: "Staging label" },
+    stage_mark_read: { icon: "✓", label: "Staging mark-as-read" },
+    stage_unsubscribe: { icon: "✉️", label: "Staging unsubscribe" },
+    draft_email: { icon: "✍️", label: "Drafting email" },
+    send_email: { icon: "📨", label: "Preparing to send" },
+    create_agent: { icon: "✦", label: "Creating agent" },
+    create_rule: { icon: "📐", label: "Creating rule" },
+  };
+
+  // Build a streaming assistant container: a steps timeline + a text bubble.
+  function streamBubble() {
+    const wrap = document.createElement("div");
+    wrap.className = "flex flex-col items-start gap-1 max-w-[80%]";
+    const steps = document.createElement("div");
+    steps.className = "flex flex-col gap-1 w-full";
+    const bub = document.createElement("div");
+    bub.className = "bg-white border border-slate-200 text-slate-800 text-sm rounded-2xl rounded-bl-md px-4 py-2.5 shadow-sm hidden";
+    const textEl = document.createElement("div");
+    bub.appendChild(textEl);
+    wrap.appendChild(steps);
+    wrap.appendChild(bub);
+    msgs.appendChild(wrap);
+    msgs.scrollTop = msgs.scrollHeight;
+
+    let pendingStep = null;
+
+    return {
+      wrap, steps, bub, textEl,
+      toolStart(name) {
+        const meta = TOOL_META[name] || { icon: "•", label: name };
+        const step = document.createElement("div");
+        step.className = "flex items-center gap-2 text-xs text-slate-500 bg-white border border-slate-200 rounded-lg px-3 py-1.5 shadow-sm";
+        step.innerHTML =
+          '<span class="text-sm">' + meta.icon + '</span>' +
+          '<span class="font-medium text-slate-600">' + esc(meta.label) + '</span>' +
+          '<span class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse step-spinner"></span>' +
+          '<span class="text-slate-400 step-result"></span>';
+        steps.appendChild(step);
+        msgs.scrollTop = msgs.scrollHeight;
+        pendingStep = step;
+      },
+      toolResult(summary) {
+        if (!pendingStep) return;
+        const sp = pendingStep.querySelector(".step-spinner");
+        if (sp) sp.remove();
+        const oneLine = String(summary || "").split("\n")[0].slice(0, 120);
+        const res = pendingStep.querySelector(".step-result");
+        if (res) res.textContent = oneLine ? "→ " + oneLine : "→ done";
+        const check = document.createElement("span");
+        check.className = "text-teal-500";
+        check.textContent = "✓";
+        pendingStep.insertBefore(check, res);
+        pendingStep = null;
+        msgs.scrollTop = msgs.scrollHeight;
+      },
+      appendText(t) {
+        if (this.bub.classList.contains("hidden")) this.bub.classList.remove("hidden");
+        this._raw = (this._raw || "") + t;
+        this.textEl.innerHTML = fmt(this._raw);
+        msgs.scrollTop = msgs.scrollHeight;
+      },
+      finalize(actions, cards) {
+        let extra = actionsHtml(actions);
+        if (cards && cards.length) extra += cards.map(cardHtml).join("");
+        if (extra) {
+          const div = document.createElement("div");
+          div.innerHTML = extra;
+          while (div.firstChild) this.wrap.appendChild(div.firstChild);
+        }
+        msgs.scrollTop = msgs.scrollHeight;
+      },
+      remove() { this.wrap.remove(); },
+      text() { return this._raw || ""; },
+    };
+  }
+
   function greeting() {
     bubble("assistant", "Hi — I'm your Super Agent. Tell me an outcome and I'll handle the steps. Try one of the examples below, or ask anything about your inbox.");
   }
@@ -197,18 +282,20 @@
   input.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
   document.querySelectorAll(".agent-example").forEach(b => b.addEventListener("click", () => { input.value = b.textContent; input.focus(); }));
 
-  async function send(text) {
-    history.push({ role: "user", content: text });
-    bubble("user", text);
-    save();
-    sendBtn.disabled = true;
+  function payload() {
+    return JSON.stringify({ messages: history.map(m => ({ role: m.role, content: m.content })) });
+  }
+
+  // Non-streaming fallback (used when streaming isn't available or fails before
+  // any bytes arrive).
+  async function sendFallback() {
     const typing = bubble("assistant", "Thinking…");
     typing.querySelector("div").classList.add("animate-pulse");
     try {
       const res = await fetch("/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history.map(m => ({ role: m.role, content: m.content })) }),
+        body: payload(),
       });
       const data = await res.json();
       typing.remove();
@@ -218,6 +305,82 @@
     } catch (e) {
       typing.remove();
       bubble("assistant", "Sorry — I couldn't reach the agent. Is the server still running?");
+    }
+  }
+
+  async function sendStream() {
+    const view = streamBubble();
+    let receivedAny = false;
+    let finalActions = [], finalCards = [];
+    let guidance = null;
+    let buf = "";
+    try {
+      const res = await fetch("/agent/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
+        body: payload(),
+      });
+      if (!res.ok || !res.body || typeof ReadableStream === "undefined") throw new Error("no-stream");
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        // SSE frames are separated by a blank line.
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) !== -1) {
+          const frame = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const line = frame.split("\n").find(l => l.startsWith("data:"));
+          if (!line) continue;
+          let ev;
+          try { ev = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
+          receivedAny = true;
+          if (ev.type === "text_delta") view.appendText(ev.text || "");
+          else if (ev.type === "tool_start") view.toolStart(ev.name);
+          else if (ev.type === "tool_result") view.toolResult(ev.summary);
+          else if (ev.type === "final") { finalActions = ev.actions || []; finalCards = ev.cards || []; }
+          else if (ev.type === "guidance") { guidance = ev; }
+          // ev.type === "done" → nothing more
+        }
+      }
+    } catch (e) {
+      if (!receivedAny) {
+        // Nothing streamed — fall back to the plain endpoint.
+        view.remove();
+        await sendFallback();
+        return;
+      }
+      view.appendText("\n\n(connection interrupted)");
+    }
+
+    if (guidance) {
+      // off/local mode guidance — render like a normal reply.
+      view.remove();
+      bubble("assistant", guidance.reply, guidance.actions, guidance.cards);
+      history.push({ role: "assistant", content: guidance.reply, actions: guidance.actions, cards: guidance.cards });
+      save();
+      return;
+    }
+
+    view.finalize(finalActions, finalCards);
+    // Persist only the final text/actions/cards, not the intermediate stream.
+    history.push({ role: "assistant", content: view.text(), actions: finalActions, cards: finalCards });
+    save();
+  }
+
+  async function send(text) {
+    history.push({ role: "user", content: text });
+    bubble("user", text);
+    save();
+    sendBtn.disabled = true;
+    try {
+      if (typeof fetch === "function" && typeof ReadableStream !== "undefined") {
+        await sendStream();
+      } else {
+        await sendFallback();
+      }
     } finally {
       sendBtn.disabled = false;
       input.focus();

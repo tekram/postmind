@@ -436,6 +436,140 @@ then the body. No preamble, no sign-off commentary.
 
         return "I wasn't able to finish that — could you rephrase or break it into smaller steps?"
 
+    # ── Streaming assistant (cloud only) ──────────────────────────────────────
+
+    def chat_stream(
+        self,
+        messages: list[dict],
+        system: str,
+        tools: list[dict] | None = None,
+        tool_executor=None,
+        max_tokens: int = 1024,
+        max_tool_iterations: int = 6,
+    ):
+        """Stream a multi-turn tool-use conversation as structured events.
+
+        This is the streaming sibling of :meth:`chat`. It is **cloud-only** —
+        Ollama tool-use streaming is unreliable, so callers should fall back to a
+        single non-streaming call in local mode.
+
+        Yields dicts with a ``"type"`` discriminator:
+          - ``{"type": "text_delta", "text": str}`` — a chunk of assistant text.
+          - ``{"type": "tool_start", "name": str, "input": dict}`` — a tool is
+            about to run (its input JSON has been fully accumulated).
+          - ``{"type": "tool_result", "name": str, "summary": str}`` — the tool
+            ran; ``summary`` is the (truncated) string the model will see.
+          - ``{"type": "done"}`` — the loop finished (final assistant turn or the
+            iteration cap was hit).
+
+        Mirrors :meth:`_chat_cloud`: same prompt caching on the system prompt and
+        the last tool, same iteration cap, same assistant-tool_use → user-tool_result
+        message shape.
+        """
+        if self._mode != "cloud":
+            raise ValueError(
+                "chat_stream requires cloud AI mode (Anthropic). "
+                "Use chat() for local/off mode."
+            )
+
+        system_blocks = [
+            {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
+        ]
+        cached_tools = None
+        if tools:
+            cached_tools = [dict(t) for t in tools]
+            cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
+
+        convo = [{"role": m["role"], "content": m["content"]} for m in messages]
+
+        for _ in range(max_tool_iterations):
+            kwargs = {
+                "model": self._cloud_model,
+                "max_tokens": max_tokens,
+                "system": system_blocks,
+                "messages": convo,
+            }
+            if cached_tools:
+                kwargs["tools"] = cached_tools
+
+            # Per-iteration accumulation of streamed content blocks.
+            # index -> {"type": "text"|"tool_use", "text": str, "name", "id", "json": str}
+            blocks: dict[int, dict] = {}
+
+            with self._anthropic.messages.stream(**kwargs) as stream:
+                for event in stream:
+                    etype = getattr(event, "type", None)
+                    if etype == "content_block_start":
+                        block = event.content_block
+                        btype = getattr(block, "type", None)
+                        if btype == "text":
+                            blocks[event.index] = {"type": "text", "text": ""}
+                        elif btype == "tool_use":
+                            blocks[event.index] = {
+                                "type": "tool_use",
+                                "name": getattr(block, "name", ""),
+                                "id": getattr(block, "id", ""),
+                                "json": "",
+                            }
+                    elif etype == "content_block_delta":
+                        delta = event.delta
+                        dtype = getattr(delta, "type", None)
+                        cur = blocks.get(event.index)
+                        if cur is None:
+                            continue
+                        if dtype == "text_delta":
+                            text = getattr(delta, "text", "") or ""
+                            cur["text"] += text
+                            if text:
+                                yield {"type": "text_delta", "text": text}
+                        elif dtype == "input_json_delta":
+                            cur["json"] += getattr(delta, "partial_json", "") or ""
+
+                # Final accumulated message (authoritative content + stop_reason).
+                final = stream.get_final_message()
+
+            if final.stop_reason != "tool_use":
+                yield {"type": "done"}
+                return
+
+            # Append the assistant turn verbatim, then run each tool and build the
+            # tool_result user turn — same shape as _chat_cloud.
+            convo.append({"role": "assistant", "content": final.content})
+            tool_results = []
+            for block in final.content:
+                if block.type != "tool_use":
+                    continue
+                yield {"type": "tool_start", "name": block.name, "input": block.input}
+                try:
+                    result = (
+                        tool_executor(block.name, block.input)
+                        if tool_executor
+                        else "Tool unavailable."
+                    )
+                except Exception as exc:  # surface failures to the model, don't crash
+                    result = f"Error running {block.name}: {exc}"
+                result = str(result)
+                yield {
+                    "type": "tool_result",
+                    "name": block.name,
+                    "summary": result[:500],
+                }
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result,
+                    }
+                )
+            convo.append({"role": "user", "content": tool_results})
+
+        # Iteration cap hit.
+        yield {
+            "type": "text_delta",
+            "text": "I wasn't able to finish that — could you rephrase or break it into smaller steps?",
+        }
+        yield {"type": "done"}
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
