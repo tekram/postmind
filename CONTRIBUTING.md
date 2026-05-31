@@ -35,7 +35,7 @@ Be kind, direct, and constructive. We welcome contributors of all experience lev
 
 ```bash
 git clone https://github.com/tekram/postmind
-cd mailtrim
+cd postmind
 
 # Create and activate a virtual environment
 python3 -m venv venv
