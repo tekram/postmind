@@ -15,6 +15,53 @@ CREDENTIALS_PATH = DATA_DIR / "credentials.json"  # OAuth client secret (downloa
 TOKEN_PATH = DATA_DIR / "token.json"  # OAuth access/refresh token (generated)
 UNDO_LOG_DIR = DATA_DIR / "undo_logs"
 
+TOKENS_DIR = DATA_DIR / "tokens"
+ACCOUNTS_DIR = DATA_DIR / "accounts"
+ACTIVE_ACCOUNT_PATH = DATA_DIR / "active_account"
+
+
+def token_path_for(email: str) -> Path:
+    """Return the per-account OAuth token path."""
+    safe = email.lower().replace("/", "_")
+    return TOKENS_DIR / f"{safe}.json"
+
+
+def get_active_account() -> str | None:
+    """Return the active account email. Env var override takes precedence (for --account flag)."""
+    override = os.environ.get("_MAILTRIM_OVERRIDE_ACCOUNT")
+    if override:
+        return override.strip() or None
+    try:
+        return ACTIVE_ACCOUNT_PATH.read_text().strip() or None
+    except FileNotFoundError:
+        return None
+
+
+def set_active_account(email: str) -> None:
+    ACTIVE_ACCOUNT_PATH.write_text(email.strip() + "\n")
+    ACTIVE_ACCOUNT_PATH.chmod(0o600)
+
+
+def load_account_config(email: str) -> dict:
+    """Return per-account config (provider, imap settings). Defaults to gmail."""
+    safe = email.lower().replace("/", "_")
+    p = ACCOUNTS_DIR / f"{safe}.json"
+    if not p.exists():
+        return {"provider": "gmail"}
+    import json as _json
+    return _json.loads(p.read_text())
+
+
+def save_account_config(email: str, config: dict) -> None:
+    """Persist per-account config (provider, imap settings) to disk."""
+    ACCOUNTS_DIR.mkdir(parents=True, exist_ok=True)
+    ACCOUNTS_DIR.chmod(0o700)
+    safe = email.lower().replace("/", "_")
+    p = ACCOUNTS_DIR / f"{safe}.json"
+    import json as _json
+    p.write_text(_json.dumps(config, indent=2))
+    p.chmod(0o600)
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -80,5 +127,7 @@ def get_settings() -> Settings:
         # Credentials and tokens stored here are sensitive.
         DATA_DIR.chmod(0o700)
         UNDO_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        TOKENS_DIR.mkdir(parents=True, exist_ok=True)
+        TOKENS_DIR.chmod(0o700)
         _settings = Settings()
     return _settings

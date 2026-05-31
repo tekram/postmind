@@ -138,12 +138,16 @@ class Thread:
 
 def authenticate(
     credentials_path: Path = CREDENTIALS_PATH,
-    token_path: Path = TOKEN_PATH,
+    token_path: Path | None = None,
 ) -> Credentials:
     """
     Run OAuth2 flow (opens browser on first run) and return valid credentials.
     The token file is written with mode 0o600 (owner read/write only).
     """
+    if token_path is None:
+        from mailtrim.config import get_active_account, token_path_for, TOKEN_PATH
+        active = get_active_account()
+        token_path = token_path_for(active) if active else TOKEN_PATH
     settings = get_settings()
     scopes = settings.gmail_scopes
     creds: Credentials | None = None

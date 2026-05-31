@@ -464,3 +464,52 @@ class BlocklistRepo:
             self.s.query(SenderBlocklist.sender_email).filter_by(account_email=account_email).all()
         )
         return {r.sender_email for r in rows}
+
+
+class AccountRepo:
+    def __init__(self, session: Session):
+        self.s = session
+
+    def register(
+        self,
+        email: str,
+        provider: str = "gmail",
+        display_name: str = "",
+    ) -> "Account":
+        existing = self.s.query(Account).filter_by(email=email).first()
+        if existing:
+            existing.is_active = True
+            self.s.commit()
+            return existing
+        from datetime import datetime, timezone
+        acct = Account(
+            email=email,
+            display_name=display_name or email,
+            added_at=datetime.now(timezone.utc),
+            is_active=True,
+        )
+        self.s.add(acct)
+        self.s.commit()
+        return acct
+
+    def list_all(self) -> list["Account"]:
+        return self.s.query(Account).order_by(Account.added_at).all()
+
+    def get(self, email: str) -> "Account | None":
+        return self.s.query(Account).filter_by(email=email).first()
+
+    def deactivate(self, email: str) -> None:
+        acct = self.get(email)
+        if acct:
+            acct.is_active = False
+            self.s.commit()
+
+    def update_last_synced(self, email: str) -> None:
+        from datetime import datetime, timezone
+        acct = self.get(email)
+        if acct:
+            acct.last_synced_at = datetime.now(timezone.utc)
+            self.s.commit()
+
+    def count(self) -> int:
+        return self.s.query(Account).count()

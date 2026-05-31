@@ -12,6 +12,7 @@ from mailtrim.core.providers.base import EmailProvider
 def get_provider(
     provider: str = "gmail",
     *,
+    account_email: str | None = None,
     # IMAP-specific
     imap_server: str = "",
     imap_user: str = "",
@@ -24,6 +25,7 @@ def get_provider(
 
     Args:
         provider:      "gmail" or "imap"
+        account_email: Optional account email; when provided for Gmail, loads that account's token
         imap_server:   Required when provider="imap"
         imap_user:     Required when provider="imap"
         imap_password: Required when provider="imap"
@@ -36,6 +38,11 @@ def get_provider(
     if provider == "gmail":
         from mailtrim.core.providers.gmail import GmailProvider
 
+        if account_email:
+            from mailtrim.core.gmail_client import GmailClient, authenticate
+            from mailtrim.config import token_path_for
+            creds = authenticate(token_path=token_path_for(account_email))
+            return GmailProvider(client=GmailClient(creds=creds))
         return GmailProvider()
 
     if provider == "imap":
