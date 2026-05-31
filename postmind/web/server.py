@@ -8,6 +8,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -1722,6 +1723,69 @@ def _chat_resolve_senders(emails: list[str], query: str, account_email: str):
     return matched, None
 
 
+def _resolve_action_targets(emails: list[str], query: str, account_email: str):
+    """Resolve targets for a WRITE action and apply safety filters.
+
+    Returns ``(staged, blocked, sensitive, err)`` where:
+    - ``staged``    — SenderGroups safe to act on (blocked senders removed).
+    - ``blocked``   — sender emails skipped because they are on the BlocklistRepo.
+    - ``sensitive`` — staged sender emails flagged "sensitive" (bank/legal/health);
+                      surfaced as a warning and pre-unchecked on the confirm card.
+    - ``err``       — error text if no scan data is available.
+
+    Centralises the BlocklistRepo + risk guards so every stage_* tool and every
+    confirm endpoint applies them identically (no duplicated logic).
+    """
+    from postmind.core.sender_stats import classify_sender_risk
+    from postmind.core.storage import BlocklistRepo, get_session
+
+    matched, err = _chat_resolve_senders(emails or [], query or "", account_email)
+    if err:
+        return [], [], [], err
+
+    blocked_set = BlocklistRepo(get_session()).blocked_emails(account_email) if account_email else set()
+    staged = []
+    blocked = []
+    sensitive = []
+    for g in matched:
+        if g.sender_email in blocked_set:
+            blocked.append(g.sender_email)
+            continue
+        staged.append(g)
+        if classify_sender_risk(g) == "sensitive":
+            sensitive.append(g.sender_email)
+    return staged, blocked, sensitive, None
+
+
+def _enrich_targets(groups) -> list[dict]:
+    """Compact per-sender summary for an action card (server-resolved targets)."""
+    from postmind.core.sender_stats import classify_sender_risk
+
+    out = []
+    for g in groups:
+        size = f"{g.total_size_mb:.1f} MB" if g.total_size_mb >= 0.1 else f"{g.total_size_bytes // 1024} KB"
+        out.append({
+            "sender_email": g.sender_email,
+            "sender_name": g.display_name,
+            "count": g.count,
+            "size_str": size,
+            "sensitive": classify_sender_risk(g) == "sensitive",
+        })
+    return out
+
+
+def _split_draft(draft: str) -> tuple[str, str]:
+    """Split a composed draft ('Subject: ...\\n\\n<body>') into (subject, body)."""
+    text = (draft or "").strip()
+    subject = ""
+    body = text
+    if text.lower().startswith("subject:"):
+        first, _, rest = text.partition("\n")
+        subject = first.split(":", 1)[1].strip()
+        body = rest.lstrip("\n")
+    return subject, body
+
+
 def _build_chat_system(page: str, account_email: str, ai_mode: str) -> str:
     here = _PAGES.get(page, "the app")
     overview = _chat_overview_text(account_email)
@@ -1872,14 +1936,21 @@ agents and rules).
 
 Operating rules:
 - Use READ tools freely to gather facts before acting. Quote real numbers.
-- You CANNOT delete, archive, or create anything directly. WRITE tools (stage_trash, \
-create_agent, create_rule) only STAGE an action and show the user a confirmation card or \
-button — the user must confirm. Never claim an action is done; say you've prepared it for \
-their confirmation.
-- All deletes go to Trash and are undoable for 30 days. Protected senders are skipped \
-automatically.
-- Be concise. After staging something, tell the user what to click. Ask a brief \
-clarifying question only when genuinely ambiguous (e.g. which account).
+- You CANNOT delete, archive, label, mark-read, unsubscribe, send, or create anything \
+directly. The WRITE tools — stage_trash, stage_archive, stage_label, stage_mark_read, \
+stage_unsubscribe, send_email, create_agent, create_rule — only STAGE an action and show \
+the user a confirmation card or button. NOTHING happens until the user clicks Confirm on \
+that card. Never claim an action is done; say you've prepared it for their confirmation.
+- draft_email writes a draft (text only, sends nothing); to actually send, follow it with \
+send_email, which still requires confirmation. There is no auto-send.
+- Trash, archive, label, and mark-read all go through the same confirm card and are \
+undoable for 30 days. Unsubscribe is external and NOT undoable — say so; the optional \
+trash of the back-catalog IS undoable.
+- Protected senders are skipped automatically; sensitive senders (banks, legal, health) \
+are flagged and pre-unchecked on the card.
+- Be concise. After staging something, tell the user to review and confirm the card. Ask a \
+brief clarifying question only when genuinely ambiguous (e.g. which account, or the label \
+name).
 
 Active account: {account_email or 'none connected yet'}. AI mode: {mode}.
 
@@ -1982,6 +2053,97 @@ async def agent_endpoint(request: Request):
                     actions.append({"label": f"Review & confirm ({total} emails)", "href": href})
                 names = ", ".join(g.sender_email for g in matched[:5]) + ("…" if len(matched) > 5 else "")
                 return f"Staged {len(matched)} sender(s) — {total} emails, ~{mb:.0f} MB ({names}). The user must confirm in the preview before anything moves to Trash."
+            if name in ("stage_archive", "stage_label", "stage_mark_read"):
+                action = {"stage_archive": "archive", "stage_label": "label", "stage_mark_read": "mark_read"}[name]
+                provider = None
+                try:
+                    provider = _build_provider()
+                except Exception:
+                    provider = None
+                if provider is not None and not provider.supports("labels"):
+                    return f"This account's provider does not support {action.replace('_', ' ')} — only Gmail does. Try trashing instead."
+                label_name = (tool_input.get("label_name") or "").strip()
+                if action == "label" and not label_name:
+                    return "A label name is required to stage a label action."
+                staged, blocked, sensitive, err = _resolve_action_targets(
+                    tool_input.get("senders") or [], tool_input.get("query", ""), account_email
+                )
+                if err:
+                    return err
+                if not staged:
+                    extra = f" ({len(blocked)} protected sender(s) skipped)" if blocked else ""
+                    return f"No matching senders to {action.replace('_', ' ')}{extra} — nothing staged."
+                total = sum(g.count for g in staged)
+                cards.append({
+                    "type": "bulk_action",
+                    "title": {"archive": "Archive emails", "label": f"Label emails “{label_name}”", "mark_read": "Mark emails as read"}[action],
+                    "fields": {
+                        "action": action,
+                        "label_name": label_name,
+                        "targets": _enrich_targets(staged),
+                        "total_count": total,
+                        "blocked": blocked,
+                        "sensitive": sensitive,
+                        "undoable": True,
+                    },
+                })
+                note = f" ({len(blocked)} protected skipped)" if blocked else ""
+                return f"Staged a {action.replace('_', ' ')} of {len(staged)} sender(s), {total} emails{note}. Showed a confirmation card; nothing happens until the user confirms. Reversible for 30 days."
+            if name == "stage_unsubscribe":
+                staged, blocked, sensitive, err = _resolve_action_targets(
+                    tool_input.get("senders") or [], tool_input.get("query", ""), account_email
+                )
+                if err:
+                    return err
+                if not staged:
+                    extra = f" ({len(blocked)} protected sender(s) skipped)" if blocked else ""
+                    return f"No matching senders to unsubscribe from{extra} — nothing staged."
+                total = sum(g.count for g in staged)
+                cards.append({
+                    "type": "unsubscribe",
+                    "title": "Unsubscribe from senders",
+                    "fields": {
+                        "targets": _enrich_targets(staged),
+                        "total_count": total,
+                        "blocked": blocked,
+                        "sensitive": sensitive,
+                    },
+                })
+                note = f" ({len(blocked)} protected skipped)" if blocked else ""
+                return f"Staged unsubscribe from {len(staged)} sender(s){note}. Showed a confirmation card. Unsubscribe is external and NOT undoable; trashing the back-catalog is optional and undoable. Nothing happens until the user confirms."
+            if name == "draft_email":
+                from postmind.core.storage import AgentRepo, get_session
+                soul = {}
+                agent = AgentRepo(get_session()).get_by_email(account_email) if account_email else None
+                if agent:
+                    soul = {"voice_style": agent.voice_style, "user_context": agent.user_context, "writing_guidelines": agent.writing_guidelines}
+                try:
+                    draft = ai.compose_email(
+                        intent=tool_input.get("intent", ""),
+                        recipient_context=tool_input.get("recipient_context", ""),
+                        thread_snippet=tool_input.get("thread_snippet", ""),
+                        soul=soul,
+                    )
+                except ValueError as exc:
+                    return str(exc)
+                subject, body = _split_draft(draft)
+                cards.append({
+                    "type": "send_email",
+                    "title": "Review draft & send",
+                    "fields": {"to": (tool_input.get("to") or "").strip(), "subject": subject, "body": body},
+                })
+                return f"Drafted the email and showed an editable card. Subject: {subject}. The user can edit and must click Send — nothing is sent automatically."
+            if name == "send_email":
+                cards.append({
+                    "type": "send_email",
+                    "title": "Review & send",
+                    "fields": {
+                        "to": (tool_input.get("to") or "").strip(),
+                        "subject": (tool_input.get("subject") or "").strip(),
+                        "body": (tool_input.get("body") or "").strip(),
+                    },
+                })
+                return "Showed an editable send-email card. Always-confirm: nothing is sent until the user clicks Send."
             if name == "create_agent":
                 email = (tool_input.get("email") or account_email or "").strip()
                 if not email:
@@ -2092,3 +2254,222 @@ async def agent_create_rule(request: Request):
     except Exception as exc:
         return _resp(request, "error.html", {"error": f"Couldn't create rule: {exc}"})
     return RedirectResponse("/agents", status_code=303)
+
+
+# ── Generalized reversible bulk actions (archive / label / mark_read) ──────────
+
+_AGENT_ACTIONS = {"archive", "label", "mark_read"}
+
+
+def _render_action_preview(request: Request, action: str, senders: list[str], label_name: str = "") -> HTMLResponse:
+    """Confirm-first preview for a reversible bulk action. Re-resolves the target
+    set server-side from the scan cache — model text is never trusted for targets."""
+    if action not in _AGENT_ACTIONS:
+        return _resp(request, "error.html", {"error": f"Unknown action '{action}'."})
+    if not senders:
+        return RedirectResponse("/agent", status_code=303)
+
+    account_email = _get_web_account() or ""
+    staged, blocked, sensitive, err = _resolve_action_targets(senders, "", account_email)
+    if err:
+        return _resp(request, "error.html", {"error": err})
+    if not staged:
+        return _resp(request, "error.html", {"error": "None of those senders are in the current scan (or all are protected). Re-run Stats and try again."})
+
+    total_count = sum(g.count for g in staged)
+    total_mb = round(sum(g.total_size_bytes for g in staged) / (1024 * 1024), 1)
+    ctx = _base()
+    ctx.update({
+        "active": "agent",
+        "action": action,
+        "label_name": label_name,
+        "selected": _enrich_targets(staged),
+        "senders": [g.sender_email for g in staged],
+        "total_count": total_count,
+        "total_mb": total_mb,
+        "blocked": blocked,
+        "sensitive": sensitive,
+        "undo_days": get_settings().undo_window_days,
+    })
+    return _resp(request, "agent_action_preview.html", ctx)
+
+
+@app.get("/agent/action/preview", response_class=HTMLResponse)
+async def agent_action_preview_get(request: Request):
+    p = request.query_params
+    return _render_action_preview(request, p.get("action", ""), p.getlist("senders"), p.get("label_name", ""))
+
+
+@app.post("/agent/action/preview", response_class=HTMLResponse)
+async def agent_action_preview_post(request: Request):
+    form = await request.form()
+    return _render_action_preview(request, form.get("action", ""), form.getlist("senders"), form.get("label_name", ""))
+
+
+@app.post("/agent/action/confirm", response_class=HTMLResponse)
+async def agent_action_confirm(request: Request):
+    form = await request.form()
+    action = form.get("action", "")
+    senders = form.getlist("senders")
+    label_name = (form.get("label_name") or "").strip()
+
+    if action not in _AGENT_ACTIONS:
+        return _resp(request, "error.html", {"error": f"Unknown action '{action}'."})
+    if action == "label" and not label_name:
+        return _resp(request, "error.html", {"error": "A label name is required."})
+    if not senders:
+        return RedirectResponse("/agent", status_code=303)
+
+    account_email = _get_web_account() or ""
+    # Re-resolve server-side: filters protected senders and binds the execution
+    # to OUR resolved message IDs, not free-form model/form text.
+    staged, _blocked, _sensitive, err = _resolve_action_targets(senders, "", account_email)
+    if err:
+        return _resp(request, "error.html", {"error": err})
+    if not staged:
+        return _resp(request, "error.html", {"error": "Scan data expired or all senders protected. Re-run Stats."})
+
+    def _do_action():
+        from postmind.core.storage import UndoLogRepo, get_session
+
+        client = _build_provider()
+        if action in ("archive", "label", "mark_read") and not client.supports("labels"):
+            raise ValueError("This account's provider does not support this action — only Gmail does.")
+        all_ids = [mid for g in staged for mid in g.message_ids]
+        params = {"label_name": label_name} if action == "label" else {}
+
+        # Record undo BEFORE acting so it is always reversible.
+        entry = UndoLogRepo(get_session()).record(
+            account_email=account_email,
+            operation=action,
+            message_ids=all_ids,
+            description=(
+                f"{action} {len(all_ids)} emails from {len(staged)} sender(s): "
+                + ", ".join(g.sender_email for g in staged[:3])
+                + ("…" if len(staged) > 3 else "")
+            ),
+            metadata={"senders": [g.sender_email for g in staged], "action_params": params},
+        )
+
+        if action == "archive":
+            client.batch_archive(all_ids)
+        elif action == "mark_read":
+            client.batch_label(all_ids, remove=["UNREAD"])
+        elif action == "label":
+            gc = getattr(client, "gmail_client", None)
+            if gc is None:
+                raise ValueError("Labels require a Gmail account.")
+            label_id = gc.get_or_create_label(label_name)
+            client.batch_label(all_ids, add=[label_id])
+        return entry.id, len(all_ids)
+
+    try:
+        loop = asyncio.get_event_loop()
+        undo_id, count = await loop.run_in_executor(_executor, _do_action)
+        _scan_cache.pop(_get_web_account() or "default", None)
+    except Exception as exc:
+        return _resp(request, "error.html", {"error": str(exc)})
+
+    return RedirectResponse(f"/undo?acted={count}&action={action}&undo_id={undo_id}", status_code=303)
+
+
+# ── Unsubscribe (real engine, optional back-catalog trash) ─────────────────────
+
+
+@app.post("/agent/unsubscribe/confirm", response_class=HTMLResponse)
+async def agent_unsubscribe_confirm(request: Request):
+    form = await request.form()
+    senders = form.getlist("senders")
+    also_trash = form.get("also_trash") == "on"
+    if not senders:
+        return RedirectResponse("/agent", status_code=303)
+
+    account_email = _get_web_account() or ""
+    staged, _blocked, _sensitive, err = _resolve_action_targets(senders, "", account_email)
+    if err:
+        return _resp(request, "error.html", {"error": err})
+    if not staged:
+        return _resp(request, "error.html", {"error": "Scan data expired or all senders protected. Re-run Stats."})
+
+    def _do_unsub():
+        from postmind.core.storage import UndoLogRepo, get_session
+        from postmind.core.unsubscribe import UnsubscribeEngine
+
+        client = _build_provider()
+        if not client.supports("unsubscribe"):
+            raise ValueError("This account's provider does not support unsubscribe — only Gmail does.")
+        gc = getattr(client, "gmail_client", None)
+        if gc is None:
+            raise ValueError("Unsubscribe requires a Gmail account.")
+        acct = client.get_email_address()
+
+        # Fetch one representative message per sender (with List-Unsubscribe headers).
+        messages = []
+        for g in staged:
+            ids = g.message_ids[:1]
+            if not ids:
+                continue
+            msgs = client.get_messages_batch(ids)
+            if msgs:
+                messages.append(msgs[0])
+
+        engine = UnsubscribeEngine(gc, acct)
+        results = engine.batch_unsubscribe(messages)
+        ok = sum(1 for r in results if r.success)
+
+        undo_id = None
+        trashed = 0
+        if also_trash:
+            all_ids = [mid for g in staged for mid in g.message_ids]
+            if all_ids:
+                entry = UndoLogRepo(get_session()).record(
+                    account_email=acct,
+                    operation="trash",
+                    message_ids=all_ids,
+                    description=f"Trash back-catalog of {len(staged)} unsubscribed sender(s)",
+                    metadata={"senders": [g.sender_email for g in staged]},
+                )
+                client.batch_trash(all_ids)
+                undo_id = entry.id
+                trashed = len(all_ids)
+        return ok, len(results), undo_id, trashed
+
+    try:
+        loop = asyncio.get_event_loop()
+        ok, total, undo_id, trashed = await loop.run_in_executor(_executor, _do_unsub)
+        _scan_cache.pop(_get_web_account() or "default", None)
+    except Exception as exc:
+        return _resp(request, "error.html", {"error": str(exc)})
+
+    if undo_id is not None:
+        return RedirectResponse(f"/undo?unsubscribed={ok}&of={total}&purged={trashed}&undo_id={undo_id}", status_code=303)
+    return RedirectResponse(f"/agent?unsubscribed={ok}&of={total}", status_code=303)
+
+
+# ── Send email (always-confirm) ────────────────────────────────────────────────
+
+
+@app.post("/agent/send", response_class=HTMLResponse)
+async def agent_send(request: Request):
+    form = await request.form()
+    to = (form.get("to") or "").strip()
+    subject = (form.get("subject") or "").strip()
+    body = (form.get("body") or "").strip()
+    if not to or "@" not in to:
+        return _resp(request, "error.html", {"error": "A valid recipient address is required."})
+    if not body:
+        return _resp(request, "error.html", {"error": "Email body is empty."})
+
+    def _do_send():
+        client = _build_provider()
+        gc = getattr(client, "gmail_client", None)
+        if gc is None:
+            raise ValueError("Sending mail requires a Gmail account.")
+        return gc.send(to=to, subject=subject, body=body)
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(_executor, _do_send)
+    except Exception as exc:
+        return _resp(request, "error.html", {"error": f"Couldn't send: {exc}"})
+    return RedirectResponse(f"/agent?sent={quote(to)}", status_code=303)

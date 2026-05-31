@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% set verb = {"archive": "Archive", "label": "Label", "mark_read": "Mark as read"}[action] %}
+{% block title %}Confirm {{ verb }} — postmind{% endblock %}
+{% block content %}
+
+<div class="p-8 max-w-2xl">
+
+  <a href="/agent" class="inline-flex items-center gap-1.5 text-slate-500 hover:text-slate-700 text-sm mb-6 transition-colors">
+    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+    </svg>
+    Back to Super Agent
+  </a>
+
+  <h1 class="text-2xl font-semibold text-slate-900 mb-1">Confirm {{ verb|lower }}{% if action == 'label' %} “{{ label_name }}”{% endif %}</h1>
+  <p class="text-slate-500 text-sm mb-6">
+    Reversible — undo within {{ undo_days }} days from <strong>Undo History</strong>. Nothing is permanently deleted.
+  </p>
+
+  <div class="bg-teal-50 border border-teal-200 rounded-xl p-5 mb-6">
+    <div class="flex items-center gap-6">
+      <div class="text-center">
+        <p class="text-3xl font-bold text-teal-700">{{ total_count }}</p>
+        <p class="text-teal-600 text-xs mt-0.5">emails</p>
+      </div>
+      <div class="text-teal-300 text-2xl">·</div>
+      <div class="text-center">
+        <p class="text-3xl font-bold text-teal-700">{{ selected | length }}</p>
+        <p class="text-teal-600 text-xs mt-0.5">sender{{ 's' if selected|length != 1 else '' }}</p>
+      </div>
+    </div>
+  </div>
+
+  {% if sensitive %}
+  <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-4 text-sm text-amber-800">
+    Some senders look sensitive (bank, legal, health) — they are pre-unchecked. Re-check only if you're sure.
+  </div>
+  {% endif %}
+  {% if blocked %}
+  <div class="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 mb-4 text-sm text-slate-600">
+    Skipped {{ blocked|length }} protected sender(s): {{ blocked|join(', ') }}
+  </div>
+  {% endif %}
+
+  <form action="/agent/action/confirm" method="POST" id="confirm-form">
+    <input type="hidden" name="action" value="{{ action }}">
+    {% if action == 'label' %}<input type="hidden" name="label_name" value="{{ label_name }}">{% endif %}
+
+    <div class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden mb-6">
+      <div class="px-5 py-3 border-b border-slate-100 bg-slate-50">
+        <p class="text-xs font-medium text-slate-500 uppercase tracking-wide">Senders</p>
+      </div>
+      {% for s in selected %}
+      <label class="px-5 py-3.5 border-b border-slate-100 last:border-0 flex items-center justify-between cursor-pointer hover:bg-slate-50">
+        <div class="flex items-center gap-3 min-w-0 flex-1">
+          <input type="checkbox" name="senders" value="{{ s.sender_email }}" {{ '' if s.sensitive else 'checked' }} class="rounded text-teal-600">
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-slate-800 truncate">{{ s.sender_name }}
+              {% if s.sensitive %}<span class="ml-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">sensitive</span>{% endif %}
+            </p>
+            <p class="text-xs text-slate-400">{{ s.sender_email }}</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-4 ml-4 shrink-0 text-sm text-slate-600">
+          <span>{{ s.count }} emails</span>
+          <span class="font-medium">{{ s.size_str }}</span>
+        </div>
+      </label>
+      {% endfor %}
+    </div>
+
+    <div class="flex items-center gap-3">
+      <button type="submit" class="bg-teal-600 hover:bg-teal-700 text-white font-medium px-6 py-2.5 rounded-lg text-sm transition-colors">
+        {{ verb }} selected
+      </button>
+      <a href="/agent" class="text-slate-500 hover:text-slate-700 font-medium px-4 py-2.5 rounded-lg text-sm hover:bg-slate-100 transition-colors">
+        Cancel
+      </a>
+    </div>
+  </form>
+
+</div>
+
+{% endblock %}

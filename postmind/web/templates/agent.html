@@ -91,6 +91,61 @@
         '<button type="submit" class="mt-3 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg">Create agent</button>' +
       '</form>';
     }
+    if (card.type === "bulk_action") {
+      const verb = { archive: "Archive", label: "Apply label", mark_read: "Mark read" }[f.action] || "Confirm";
+      let rows = (f.targets || []).map(t =>
+        '<label class="flex items-center justify-between gap-2 py-1.5 cursor-pointer">' +
+          '<span class="flex items-center gap-2 min-w-0">' +
+            '<input type="checkbox" name="senders" value="' + esc(t.sender_email) + '" ' + (t.sensitive ? "" : "checked") + ' class="rounded text-teal-600">' +
+            '<span class="text-xs text-slate-700 truncate">' + esc(t.sender_email) +
+              (t.sensitive ? ' <span class="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">sensitive</span>' : "") +
+            '</span>' +
+          '</span>' +
+          '<span class="text-[11px] text-slate-400 shrink-0">' + esc(t.count) + ' · ' + esc(t.size_str) + '</span>' +
+        '</label>'
+      ).join("");
+      let blocked = (f.blocked && f.blocked.length) ? '<p class="text-[11px] text-slate-400 mt-1">Skipped ' + f.blocked.length + ' protected sender(s).</p>' : "";
+      return '<form method="POST" action="/agent/action/confirm" class="mt-2 border border-teal-200 bg-white rounded-xl p-4 shadow-sm max-w-md">' +
+        '<p class="text-sm font-semibold text-slate-800 mb-1">✦ ' + esc(card.title) + '</p>' +
+        '<p class="text-xs text-slate-500 mb-2">' + esc(f.total_count) + ' emails · reversible, undoable for 30 days.</p>' +
+        '<input type="hidden" name="action" value="' + esc(f.action) + '">' +
+        (f.action === "label" ? '<input type="hidden" name="label_name" value="' + esc(f.label_name) + '">' : "") +
+        '<div class="max-h-44 overflow-y-auto border-y border-slate-100 py-1">' + rows + '</div>' + blocked +
+        '<button type="submit" class="mt-3 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg">' + verb + ' selected</button>' +
+      '</form>';
+    }
+    if (card.type === "unsubscribe") {
+      let rows = (f.targets || []).map(t =>
+        '<label class="flex items-center justify-between gap-2 py-1.5 cursor-pointer">' +
+          '<span class="flex items-center gap-2 min-w-0">' +
+            '<input type="checkbox" name="senders" value="' + esc(t.sender_email) + '" checked class="rounded text-teal-600">' +
+            '<span class="text-xs text-slate-700 truncate">' + esc(t.sender_email) +
+              (t.sensitive ? ' <span class="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">sensitive</span>' : "") +
+            '</span>' +
+          '</span>' +
+          '<span class="text-[11px] text-slate-400 shrink-0">' + esc(t.count) + ' emails</span>' +
+        '</label>'
+      ).join("");
+      return '<form method="POST" action="/agent/unsubscribe/confirm" class="mt-2 border border-teal-200 bg-white rounded-xl p-4 shadow-sm max-w-md">' +
+        '<p class="text-sm font-semibold text-slate-800 mb-1">✦ ' + esc(card.title) + '</p>' +
+        '<p class="text-xs text-amber-700 mb-2">Unsubscribe is external and <strong>cannot be undone</strong>. Trashing the back-catalog (optional) is undoable.</p>' +
+        '<div class="max-h-44 overflow-y-auto border-y border-slate-100 py-1">' + rows + '</div>' +
+        '<label class="flex items-center gap-1.5 text-xs text-slate-600 mt-2"><input type="checkbox" name="also_trash" class="rounded text-teal-600"> Also move existing emails to Trash (undoable)</label>' +
+        '<button type="submit" class="mt-3 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg">Unsubscribe</button>' +
+      '</form>';
+    }
+    if (card.type === "send_email") {
+      return '<form method="POST" action="/agent/send" class="mt-2 border border-teal-200 bg-white rounded-xl p-4 shadow-sm max-w-md">' +
+        '<p class="text-sm font-semibold text-slate-800 mb-2">✦ ' + esc(card.title) + '</p>' +
+        '<div class="space-y-2 text-sm">' +
+          '<div class="flex items-center gap-2"><span class="text-slate-400 w-16 text-xs">To</span><input name="to" value="' + esc(f.to || "") + '" placeholder="recipient@example.com" class="flex-1 border border-slate-200 rounded-lg px-2 py-1 text-sm"></div>' +
+          '<div class="flex items-center gap-2"><span class="text-slate-400 w-16 text-xs">Subject</span><input name="subject" value="' + esc(f.subject || "") + '" class="flex-1 border border-slate-200 rounded-lg px-2 py-1 text-sm"></div>' +
+          '<textarea name="body" rows="6" class="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm">' + esc(f.body || "") + '</textarea>' +
+        '</div>' +
+        '<p class="text-[11px] text-slate-400 mt-2">Nothing is sent until you click Send. Review the recipient and content first.</p>' +
+        '<button type="submit" class="mt-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg">Send</button>' +
+      '</form>';
+    }
     if (card.type === "create_rule") {
       let warn = "";
       if (f.warnings && f.warnings.length) {

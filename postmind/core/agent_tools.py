@@ -77,6 +77,79 @@ WRITE_TOOLS: list[dict] = [
         },
     },
     {
+        "name": "stage_archive",
+        "description": "Stage a bulk ARCHIVE (remove from inbox, keep searchable) of senders. You do NOT archive — you stage a confirmation card. Reversible (restores to inbox) and undoable for 30 days. Provide explicit sender emails and/or a substring query to match senders from the current scan.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senders": {"type": "array", "items": {"type": "string"}, "description": "Exact sender email addresses to stage."},
+                "query": {"type": "string", "description": "Match senders by name/email/domain substring."},
+            },
+        },
+    },
+    {
+        "name": "stage_label",
+        "description": "Stage applying a LABEL to all email from senders. You do NOT label — you stage a confirmation card. Reversible (removes the label) and undoable for 30 days. Provide a label_name plus explicit sender emails and/or a substring query.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senders": {"type": "array", "items": {"type": "string"}, "description": "Exact sender email addresses to stage."},
+                "query": {"type": "string", "description": "Match senders by name/email/domain substring."},
+                "label_name": {"type": "string", "description": "The label to apply (created if it doesn't exist)."},
+            },
+            "required": ["label_name"],
+        },
+    },
+    {
+        "name": "stage_mark_read",
+        "description": "Stage marking all email from senders as READ. You do NOT mark — you stage a confirmation card. Reversible (marks unread again) and undoable for 30 days. Provide explicit sender emails and/or a substring query.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senders": {"type": "array", "items": {"type": "string"}, "description": "Exact sender email addresses to stage."},
+                "query": {"type": "string", "description": "Match senders by name/email/domain substring."},
+            },
+        },
+    },
+    {
+        "name": "stage_unsubscribe",
+        "description": "Stage UNSUBSCRIBING from senders (real List-Unsubscribe / one-click / headless). You do NOT unsubscribe — you stage a confirmation card listing each sender. Unsubscribe is an external, NOT-undoable action; optionally also trash the existing back-catalog (the trash IS undoable). Provide explicit sender emails and/or a substring query.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senders": {"type": "array", "items": {"type": "string"}, "description": "Exact sender email addresses to stage."},
+                "query": {"type": "string", "description": "Match senders by name/email/domain substring."},
+            },
+        },
+    },
+    {
+        "name": "draft_email",
+        "description": "Draft an email in the user's voice (soul-aware). Returns the Subject and body as text and shows the user an editable draft card. This produces text only — it sends nothing. To actually send, follow up with send_email once the user approves.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "intent": {"type": "string", "description": "What the email should accomplish."},
+                "recipient_context": {"type": "string", "description": "Who it's to and any relevant context."},
+                "thread_snippet": {"type": "string", "description": "The message being replied to, if any."},
+                "to": {"type": "string", "description": "Recipient email address, if known."},
+            },
+            "required": ["intent"],
+        },
+    },
+    {
+        "name": "send_email",
+        "description": "Stage SENDING an email. You do NOT send — you emit a card with editable to/subject/body that the user must confirm. Always-confirm; there is no auto-send. Use after draft_email or when the user gives explicit recipient/subject/body.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "Recipient email address."},
+                "subject": {"type": "string", "description": "Email subject line."},
+                "body": {"type": "string", "description": "Email body (plain text)."},
+            },
+            "required": ["to", "subject", "body"],
+        },
+    },
+    {
         "name": "create_agent",
         "description": "Stage creation of a heartbeat agent (a background watcher) for an account. Emits a confirmation card; the agent is only created when the user confirms. Use for 'create an email agent that …'. Pair with create_rule for actions like archiving newsletters.",
         "input_schema": {
