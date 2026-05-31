@@ -705,6 +705,11 @@ def stats(
         "--from-cache",
         help="Use locally synced DB instead of Gmail API (run 'mailtrim sync' first).",
     ),
+    promo_only: bool = typer.Option(
+        False,
+        "--promo-only",
+        help="Show only promotional senders (List-Unsubscribe, ESP domains, category labels). No AI needed.",
+    ),
 ):
     """
     Inbox decision engine — reclaimable space, confidence-scored recommendations, top senders.
@@ -807,6 +812,7 @@ def stats(
                 min_count=1,
                 top_n=top_n,
                 sort_by=sort_by if sort_by in ("score", "count", "size", "oldest") else "score",
+                promo_only=promo_only,
             )
         else:
             groups = fetch_sender_groups(
@@ -2784,6 +2790,11 @@ def purge(
         "--from-cache",
         help="Use locally synced DB for scanning (no quota). Run 'mailtrim sync' first.",
     ),
+    promo_only: bool = typer.Option(
+        False,
+        "--promo-only",
+        help="Restrict to promotional senders only (List-Unsubscribe, ESP domains, category labels). No AI needed.",
+    ),
 ):
     """
     Move top email senders to Trash — with a 30-day undo window.
@@ -2903,6 +2914,7 @@ def purge(
                 min_count=min_count if not domain else 1,
                 top_n=top,
                 sort_by=sort_by,
+                promo_only=promo_only,
             )
             if domain:
                 groups = [
