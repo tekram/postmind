@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-import anthropic
-
 from mailtrim.config import get_settings
 from mailtrim.core.gmail_client import Message
 
@@ -70,25 +68,67 @@ present in the email. Be concise and direct.\
 class AIEngine:
     def __init__(self, api_key: str | None = None):
         settings = get_settings()
-        key = api_key or settings.anthropic_api_key
-        if not key:
+        self._mode = settings.ai_mode
+
+        if self._mode == "cloud":
+            import anthropic
+
+            key = api_key or settings.anthropic_api_key
+            if not key:
+                raise ValueError(
+                    "ANTHROPIC_API_KEY is not set. "
+                    "Set it as an environment variable before running this command."
+                )
+            self._anthropic = anthropic.Anthropic(api_key=key)
+            self._cloud_model = settings.ai_model
+
+        elif self._mode == "local":
+            self._ollama_url = settings.ollama_base_url.rstrip("/")
+            self._ollama_model = settings.ollama_model
+
+        else:
             raise ValueError(
-                "ANTHROPIC_API_KEY is not set. "
-                "Set it as an environment variable before running this command."
+                f"AI mode is '{self._mode}'. Enable cloud or local AI mode to use AI features."
             )
-        self._client = anthropic.Anthropic(api_key=key)
-        self._model = settings.ai_model
+
+        self._max_batch = settings.ai_max_classify_batch
+
+    def _complete(self, system: str, prompt: str, max_tokens: int = 2048) -> str:
+        """Send a prompt to the configured backend and return the text response."""
+        if self._mode == "cloud":
+            response = self._anthropic.messages.create(
+                model=self._cloud_model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return response.content[0].text.strip()
+
+        # local — Ollama
+        import httpx
+
+        resp = httpx.post(
+            f"{self._ollama_url}/api/chat",
+            json={
+                "model": self._ollama_model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+                "stream": False,
+            },
+            timeout=120.0,
+        )
+        resp.raise_for_status()
+        return resp.json()["message"]["content"].strip()
 
     # ── Classification ───────────────────────────────────────────────────────
 
     def classify_emails(self, messages: list[Message]) -> list[ClassifiedEmail]:
         """Classify a batch of emails. Returns one ClassifiedEmail per message."""
-        settings = get_settings()
         results: list[ClassifiedEmail] = []
-
-        for chunk in _chunks(messages, settings.ai_max_classify_batch):
+        for chunk in _chunks(messages, self._max_batch):
             results.extend(self._classify_batch(chunk))
-
         return results
 
     def _classify_batch(self, messages: list[Message]) -> list[ClassifiedEmail]:
@@ -115,14 +155,8 @@ Respond with a JSON array of objects, one per email, in the same order. Nothing 
 
 {chr(10).join(email_summaries)}\
 """
-        response = self._client.messages.create(
-            model=self._model,
-            max_tokens=2048,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        raw = self._complete(SYSTEM_PROMPT, prompt)
 
-        raw = response.content[0].text.strip()
         # Strip markdown code fences if present
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
@@ -163,14 +197,7 @@ Respond with a single JSON object with these fields:
 
 Respond with valid JSON only. No markdown.\
 """
-        response = self._client.messages.create(
-            model=self._model,
-            max_tokens=1024,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        raw = response.content[0].text.strip()
+        raw = self._complete(SYSTEM_PROMPT, prompt, max_tokens=1024)
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
 
@@ -203,14 +230,7 @@ Respond with a JSON object:
 
 Respond with valid JSON only.\
 """
-        response = self._client.messages.create(
-            model=self._model,
-            max_tokens=512,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        raw = response.content[0].text.strip()
+        raw = self._complete(SYSTEM_PROMPT, prompt, max_tokens=512)
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
 
@@ -249,13 +269,7 @@ Write a brief (under 200 words) digest in plain text. Structure:
 
 Be honest and helpful, not cheerful or corporate.\
 """
-        response = self._client.messages.create(
-            model=self._model,
-            max_tokens=512,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.content[0].text.strip()
+        return self._complete(SYSTEM_PROMPT, prompt, max_tokens=512)
 
     # ── Avoidance analysis ───────────────────────────────────────────────────
 
@@ -271,13 +285,7 @@ Snippet: {msg.snippet[:400]}
 
 Be direct and empathetic. No filler words.\
 """
-        response = self._client.messages.create(
-            model=self._model,
-            max_tokens=150,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.content[0].text.strip()
+        return self._complete(SYSTEM_PROMPT, prompt, max_tokens=150)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

@@ -34,10 +34,31 @@
         <label class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors
                       {% if ai_mode == 'local' %}border-teal-500 bg-teal-50{% else %}border-slate-200 hover:border-slate-300{% endif %}">
           <input type="radio" name="mode" value="local" {% if ai_mode == 'local' %}checked{% endif %}
-                 class="mt-0.5 text-teal-600">
-          <div>
+                 class="mt-0.5 text-teal-600" id="mode-local">
+          <div class="flex-1">
             <p class="text-sm font-medium text-slate-800">Local</p>
-            <p class="text-xs text-slate-500 mt-0.5">Runs AI on your machine via Ollama or llama.cpp. Nothing leaves your device.</p>
+            <p class="text-xs text-slate-500 mt-0.5">Runs AI on your machine via Ollama. Nothing leaves your device.</p>
+            <!-- Ollama config — shown when local is selected -->
+            <div id="ollama-config" class="mt-3 space-y-2 {% if ai_mode != 'local' %}hidden{% endif %}">
+              <div class="flex items-center gap-2">
+                <label class="text-xs text-slate-500 w-24 shrink-0">Ollama URL</label>
+                <input type="text" name="ollama_base_url"
+                       value="{{ ollama_base_url }}"
+                       placeholder="http://localhost:11434"
+                       class="flex-1 text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500/30 text-slate-800 font-mono bg-white">
+              </div>
+              <div class="flex items-center gap-2">
+                <label class="text-xs text-slate-500 w-24 shrink-0">Model</label>
+                <input type="text" name="ollama_model"
+                       value="{{ ollama_model }}"
+                       placeholder="llama3.2"
+                       class="flex-1 text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500/30 text-slate-800 font-mono bg-white">
+              </div>
+              <p class="text-xs text-slate-400">
+                Run <code class="bg-slate-100 px-1 rounded font-mono">ollama pull llama3.2</code> to download the model.
+                Any model listed by <code class="bg-slate-100 px-1 rounded font-mono">ollama list</code> works.
+              </p>
+            </div>
           </div>
         </label>
 
@@ -145,5 +166,13 @@
   </div>
 
 </div>
+
+<script>
+  document.querySelectorAll('input[name="mode"]').forEach(function(radio) {
+    radio.addEventListener('change', function() {
+      document.getElementById('ollama-config').classList.toggle('hidden', this.value !== 'local');
+    });
+  });
+</script>
 
 {% endblock %}

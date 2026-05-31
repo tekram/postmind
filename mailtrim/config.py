@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     # "cloud" → external API calls allowed (Anthropic); sends email data externally
     ai_mode: str = "off"
 
+    # Ollama (local AI backend)
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "llama3.2"
+
     # Rate limiting
     gmail_batch_size: int = 50  # Max messages per Gmail batch request
     ai_max_classify_batch: int = 20  # Emails per AI classification call

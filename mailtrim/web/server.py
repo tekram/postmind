@@ -428,12 +428,16 @@ async def settings_page(request: Request):
             "imap_user": s.imap_user,
             "undo_days": s.undo_window_days,
             "has_api_key": bool(s.anthropic_api_key),
+            "ollama_base_url": s.ollama_base_url,
+            "ollama_model": s.ollama_model,
         })
     except Exception:
         ctx.update({
             "ai_mode": "off", "provider": "gmail",
             "imap_server": "", "imap_user": "",
             "undo_days": 30, "has_api_key": False,
+            "ollama_base_url": "http://localhost:11434",
+            "ollama_model": "llama3.2",
         })
 
     ctx.update({
@@ -452,19 +456,25 @@ async def update_ai_mode(request: Request):
     if mode not in ("off", "local", "cloud"):
         raise HTTPException(status_code=400, detail="Invalid AI mode")
 
+    updates: dict[str, str] = {"MAILTRIM_AI_MODE": mode}
+
+    if mode == "local":
+        url = (form.get("ollama_base_url") or "http://localhost:11434").strip()
+        model = (form.get("ollama_model") or "llama3.2").strip()
+        updates["MAILTRIM_OLLAMA_BASE_URL"] = url
+        updates["MAILTRIM_OLLAMA_MODEL"] = model
+
     env_file = DATA_DIR / ".env"
     lines: list[str] = env_file.read_text().splitlines(keepends=True) if env_file.exists() else []
 
-    key = "MAILTRIM_AI_MODE"
-    new_line = f"{key}={mode}\n"
-    updated = False
-    for i, line in enumerate(lines):
-        if line.startswith(f"{key}="):
-            lines[i] = new_line
-            updated = True
-            break
-    if not updated:
-        lines.append(new_line)
+    for key, value in updates.items():
+        new_line = f"{key}={value}\n"
+        for i, line in enumerate(lines):
+            if line.startswith(f"{key}="):
+                lines[i] = new_line
+                break
+        else:
+            lines.append(new_line)
 
     env_file.write_text("".join(lines))
 
@@ -710,7 +720,7 @@ async def triage_page(request: Request):
     ctx = _base()
     ctx["active"] = "triage"
 
-    if _ai_mode() != "cloud":
+    if _ai_mode() == "off":
         return _resp(request, "triage.html", {**ctx, "ai_off": True, "results": []})
 
     if not _is_authed():

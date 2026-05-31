@@ -23,17 +23,18 @@
   <!-- AI not enabled -->
   <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-10 text-center max-w-lg mx-auto">
     <div class="text-4xl mb-4">🤖</div>
-    <h2 class="text-lg font-semibold text-slate-800">Cloud AI required</h2>
+    <h2 class="text-lg font-semibold text-slate-800">AI required</h2>
     <p class="text-slate-500 text-sm mt-2 max-w-sm mx-auto">
-      Triage uses Claude to classify your emails. Enable cloud AI mode and add your Anthropic API key.
+      Triage uses AI to classify your emails. Enable cloud mode (Anthropic API) or local mode (Ollama) in Settings.
     </p>
     <div class="mt-6 space-y-3">
       <a href="/settings"
          class="block bg-teal-600 hover:bg-teal-700 text-white font-medium px-6 py-2.5 rounded-lg text-sm transition-colors">
-        Enable Cloud AI in Settings
+        Configure AI in Settings
       </a>
       <p class="text-slate-400 text-xs">
-        Only email subjects + snippets (≤300 chars) are sent — never full body.
+        Cloud mode sends subjects + snippets (≤300 chars) to Anthropic — never full body.<br>
+        Local mode (Ollama) stays 100% on your machine.
         <a href="/settings" class="underline hover:text-slate-600">Privacy details</a>
       </p>
     </div>
