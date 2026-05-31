@@ -24,6 +24,28 @@ _TEMPLATES_DIR = _THIS_DIR / "templates"
 app = FastAPI(title="postmind", docs_url=None, redoc_url=None)
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
+
+@app.middleware("http")
+async def _same_origin_guard(request: Request, call_next):
+    """Block cross-origin state-changing requests (CSRF defense).
+
+    postmind serves on localhost with ambient auth (token file + active account)
+    and no per-request CSRF token, so a malicious page the user visits could
+    auto-submit a cross-origin form to e.g. /agent/send. We reject any mutating
+    request whose Origin/Referer host doesn't match the server host. Requests with
+    neither header (curl, the CLI, tests) are allowed — those aren't browser CSRF.
+    """
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        from urllib.parse import urlparse
+        from starlette.responses import PlainTextResponse
+
+        origin = request.headers.get("origin") or request.headers.get("referer")
+        if origin:
+            src = urlparse(origin).netloc
+            if src and src != request.url.netloc:
+                return PlainTextResponse("Cross-origin request blocked.", status_code=403)
+    return await call_next(request)
+
 # In-memory scan cache — keyed by "latest", short TTL
 _scan_cache: dict[str, dict] = {}
 _CACHE_TTL = 300  # 5 minutes
@@ -464,17 +486,25 @@ async def purge_confirm(request: Request):
     if not cached:
         return _resp(request, "error.html", {"error": "Scan data expired. Please re-run Stats."})
 
+    from postmind.core.storage import BlocklistRepo, get_session as _gs
     groups = cached["groups"]
-    selected_groups = [g for g in groups if g.sender_email in senders]
     account_email = cached["account_email"]
+    # Enforce protected senders at confirm time (not just at stage time): a sender
+    # blocked after the cache was populated must never be trashed.
+    blocked_set = BlocklistRepo(_gs()).blocked_emails(account_email) if account_email else set()
+    selected_groups = [g for g in groups if g.sender_email in senders and g.sender_email not in blocked_set]
+
+    if not selected_groups:
+        return _resp(request, "error.html", {"error": "Nothing to purge — selected senders are protected or no longer in the scan."})
 
     def _do_purge():
         from postmind.core.storage import UndoLogRepo, get_session
 
         client = _build_provider()
         all_ids = [mid for g in selected_groups for mid in g.message_ids]
-        client.batch_trash(all_ids)
 
+        # Record undo BEFORE the destructive call so a crash/partial failure still
+        # leaves a reversible log entry (matches BulkEngine.execute ordering).
         entry = UndoLogRepo(get_session()).record(
             account_email=account_email,
             operation="trash",
@@ -486,6 +516,7 @@ async def purge_confirm(request: Request):
             ),
             metadata={"senders": [g.sender_email for g in selected_groups]},
         )
+        client.batch_trash(all_ids)
         return entry.id, len(all_ids)
 
     try:
@@ -2596,8 +2627,11 @@ async def agent_send(request: Request):
     to = (form.get("to") or "").strip()
     subject = (form.get("subject") or "").strip()
     body = (form.get("body") or "").strip()
-    if not to or "@" not in to:
-        return _resp(request, "error.html", {"error": "A valid recipient address is required."})
+    # Exactly one well-formed recipient — reject comma/whitespace-separated lists
+    # so a confirmed single-recipient draft can't fan out to extra addresses.
+    import re as _re
+    if not _re.fullmatch(r"[^\s@,]+@[^\s@,]+\.[^\s@,]+", to):
+        return _resp(request, "error.html", {"error": "A single valid recipient address is required."})
     if not body:
         return _resp(request, "error.html", {"error": "Email body is empty."})
 
