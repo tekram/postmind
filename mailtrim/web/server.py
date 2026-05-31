@@ -29,6 +29,8 @@ _CACHE_TTL = 300  # 5 minutes
 # In-memory sync task state: task_id → state dict
 _sync_tasks: dict[str, dict] = {}
 
+_oauth_tasks: dict[str, dict] = {}  # task_id → {status, email, error}
+
 _active_web_account: str | None = None  # email override set by the web UI switcher
 
 _executor = ThreadPoolExecutor(max_workers=4)
@@ -184,6 +186,10 @@ def _enrich_groups(groups) -> list[dict]:
 async def dashboard(request: Request):
     ctx = _base()
     ctx["active"] = "dashboard"
+
+    from mailtrim.core.account_registry import list_accounts as _list_accts
+    if not _list_accts() and not _is_authed():
+        return RedirectResponse("/onboarding", status_code=302)
 
     cached = _cache_get()
     if cached:
@@ -509,6 +515,267 @@ async def web_switch_account(request: Request):
         _active_web_account = email
         _scan_cache.clear()
     return RedirectResponse("/", status_code=303)
+
+
+@app.get("/accounts", response_class=HTMLResponse)
+async def accounts_page(request: Request):
+    from mailtrim.core.account_registry import list_accounts
+    from mailtrim.config import token_path_for
+    from mailtrim.core.storage import AccountRepo, get_session
+    all_db = {r.email: r for r in AccountRepo(get_session()).list_all()}
+    accounts_detail = []
+    for a in list_accounts():
+        db_row = all_db.get(a.email)
+        token_ok = token_path_for(a.email).exists() if a.provider == "gmail" else True
+        last_sync = db_row.last_synced_at if db_row else None
+        accounts_detail.append({
+            "email": a.email,
+            "display_name": a.display_name,
+            "provider": a.provider,
+            "token_ok": token_ok,
+            "last_synced": last_sync.strftime("%b %d, %H:%M") if last_sync else "Never",
+            "imap_server": a.imap_server,
+            "is_active_web": a.email == _get_web_account(),
+        })
+    ctx = _base()
+    ctx.update({
+        "active": "accounts",
+        "accounts_detail": accounts_detail,
+        "added": request.query_params.get("added"),
+        "removed": request.query_params.get("removed"),
+    })
+    return _resp(request, "accounts.html", ctx)
+
+
+@app.post("/accounts/remove")
+async def accounts_remove(request: Request):
+    global _active_web_account
+    form = await request.form()
+    email = (form.get("email") or "").strip()
+    if not email:
+        raise HTTPException(status_code=400)
+    from mailtrim.core.storage import AccountRepo, get_session
+    from mailtrim.config import token_path_for
+    token = token_path_for(email)
+    if token.exists():
+        token.unlink()
+    AccountRepo(get_session()).deactivate(email)
+    if _active_web_account == email:
+        _active_web_account = None
+    _scan_cache.pop(email, None)
+    return RedirectResponse("/accounts?removed=1", status_code=303)
+
+
+@app.get("/accounts/add", response_class=HTMLResponse)
+async def accounts_add_page(request: Request):
+    ctx = _base()
+    ctx["active"] = "accounts"
+    ctx["tab"] = request.query_params.get("tab", "gmail")
+    ctx["has_credentials"] = CREDENTIALS_PATH.exists()
+    return _resp(request, "accounts_add.html", ctx)
+
+
+@app.post("/accounts/add/gmail/start", response_class=HTMLResponse)
+async def gmail_add_start(request: Request):
+    if not CREDENTIALS_PATH.exists():
+        return HTMLResponse('<p class="text-red-600 text-sm">credentials.json not found in ~/.mailtrim/. Download it from Google Cloud Console first.</p>')
+    task_id = uuid.uuid4().hex[:10]
+    _oauth_tasks[task_id] = {"status": "running", "email": None, "error": None}
+
+    def _run_oauth():
+        state = _oauth_tasks[task_id]
+        try:
+            import shutil
+            from mailtrim.core.gmail_client import authenticate
+            from mailtrim.config import TOKENS_DIR, token_path_for, set_active_account
+            from mailtrim.core.account_registry import register_gmail
+            tmp = TOKENS_DIR / f"_tmp_{task_id}.json"
+            creds = authenticate(token_path=tmp)
+            from googleapiclient.discovery import build
+            svc = build("gmail", "v1", credentials=creds, cache_discovery=False)
+            profile = svc.users().getProfile(userId="me").execute()
+            email = profile["emailAddress"]
+            dest = token_path_for(email)
+            shutil.move(str(tmp), str(dest))
+            dest.chmod(0o600)
+            register_gmail(email)
+            set_active_account(email)
+            state["status"] = "done"
+            state["email"] = email
+        except Exception as exc:
+            state["status"] = "error"
+            state["error"] = str(exc)
+
+    _executor.submit(_run_oauth)
+    return HTMLResponse(f"""<div id="oauth-status"
+     hx-get="/accounts/add/gmail/poll/{task_id}"
+     hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML">
+  <p class="text-slate-500 text-sm animate-pulse">Opening browser for Google sign-in…</p>
+</div>""")
+
+
+@app.get("/accounts/add/gmail/poll/{task_id}", response_class=HTMLResponse)
+async def gmail_add_poll(task_id: str):
+    state = _oauth_tasks.get(task_id, {"status": "error", "error": "Task expired"})
+    if state["status"] == "done":
+        email = state["email"]
+        _scan_cache.clear()
+        return HTMLResponse(f"""<div class="bg-green-50 border border-green-200 rounded-xl p-4">
+  <p class="text-green-800 font-medium text-sm">&#10003; Account added: {email}</p>
+  <a href="/accounts" class="text-teal-600 text-sm font-medium mt-2 inline-block">View accounts &rarr;</a>
+</div>""")
+    if state["status"] == "error":
+        return HTMLResponse(f"""<div class="bg-red-50 border border-red-200 rounded-xl p-4">
+  <p class="text-red-800 text-sm font-medium">Authentication failed</p>
+  <p class="text-red-600 text-xs mt-1">{state["error"]}</p>
+</div>""")
+    return HTMLResponse(f"""<div id="oauth-status"
+     hx-get="/accounts/add/gmail/poll/{task_id}"
+     hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML">
+  <p class="text-slate-500 text-sm animate-pulse">Waiting for browser sign-in&hellip;</p>
+</div>""")
+
+
+@app.post("/accounts/add/imap", response_class=HTMLResponse)
+async def imap_add(request: Request):
+    form = await request.form()
+    server = (form.get("imap_server") or "").strip()
+    user = (form.get("imap_user") or "").strip()
+    password = (form.get("imap_password") or "").strip()
+    port = int(form.get("imap_port") or "993")
+    folder = (form.get("imap_folder") or "INBOX").strip() or "INBOX"
+    display_name = (form.get("display_name") or "").strip()
+    if not server or not user or not password:
+        ctx = _base()
+        ctx.update({"active": "accounts", "tab": "imap", "has_credentials": CREDENTIALS_PATH.exists(), "error": "Server, username, and password are required."})
+        return _resp(request, "accounts_add.html", ctx)
+
+    def _test_and_register():
+        from mailtrim.core.providers.factory import get_provider
+        from mailtrim.core.account_registry import register_imap
+        from mailtrim.config import set_active_account
+        provider = get_provider("imap", imap_server=server, imap_user=user, imap_password=password, imap_port=port, imap_folder=folder)
+        provider.get_profile()
+        register_imap(user, server, user, port, folder, display_name or user)
+        set_active_account(user)
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(_executor, _test_and_register)
+    except Exception as exc:
+        ctx = _base()
+        ctx.update({"active": "accounts", "tab": "imap", "has_credentials": CREDENTIALS_PATH.exists(), "error": str(exc)})
+        return _resp(request, "accounts_add.html", ctx)
+    return RedirectResponse("/accounts?added=1", status_code=303)
+
+
+# ── Onboarding ────────────────────────────────────────────────────────────────
+
+
+@app.get("/onboarding", response_class=HTMLResponse)
+async def onboarding(request: Request):
+    from mailtrim.core.account_registry import list_accounts
+    step = int(request.query_params.get("step", "1"))
+    ctx = _base()
+    ctx.update({
+        "step": step,
+        "has_credentials": CREDENTIALS_PATH.exists(),
+        "has_accounts": len(list_accounts()) > 0,
+    })
+    return _resp(request, "onboarding.html", ctx)
+
+
+@app.post("/onboarding/upload-credentials", response_class=HTMLResponse)
+async def upload_credentials(request: Request):
+    form = await request.form()
+    file = form.get("credentials_file")
+    if not file or not hasattr(file, "read"):
+        return RedirectResponse("/onboarding?step=1&error=no_file", status_code=303)
+    content = await file.read()
+    import json as _json
+    try:
+        data = _json.loads(content)
+        if "web" not in data and "installed" not in data:
+            raise ValueError("Not a valid OAuth client secret file")
+    except Exception:
+        return RedirectResponse("/onboarding?step=1&error=invalid", status_code=303)
+    CREDENTIALS_PATH.write_bytes(content)
+    CREDENTIALS_PATH.chmod(0o600)
+    return RedirectResponse("/onboarding?step=2", status_code=303)
+
+
+# ── Watch daemon ──────────────────────────────────────────────────────────────
+
+
+import threading as _threading
+_watch_thread: "_threading.Thread | None" = None
+_watch_stop_event = _threading.Event()
+_watch_interval: int = 30
+
+
+@app.get("/watch", response_class=HTMLResponse)
+async def watch_page(request: Request):
+    from mailtrim.core.storage import AgentRepo, get_session
+    ctx = _base()
+    ctx["active"] = "watch"
+    ctx["is_running"] = bool(_watch_thread and _watch_thread.is_alive())
+    ctx["interval"] = _watch_interval
+    ctx["agents"] = [
+        {
+            "email": a.account_email,
+            "name": a.name,
+            "interval": a.interval_minutes,
+            "is_active": a.is_active,
+            "status": a.status,
+            "last_run": a.last_run_at.strftime("%H:%M") if a.last_run_at else "never",
+            "last_found": a.last_found_count,
+        }
+        for a in AgentRepo(get_session()).list_all()
+    ]
+    return _resp(request, "watch.html", ctx)
+
+
+@app.post("/watch/start")
+async def watch_start(request: Request):
+    global _watch_thread, _watch_interval
+    form = await request.form()
+    _watch_interval = max(1, int(form.get("interval") or "30"))
+    if _watch_thread and _watch_thread.is_alive():
+        return RedirectResponse("/watch", status_code=303)
+    _watch_stop_event.clear()
+    def _run():
+        try:
+            from mailtrim.core.daemon import start_daemon_background
+            start_daemon_background(stop_event=_watch_stop_event)
+        except Exception:
+            pass
+    _watch_thread = _threading.Thread(target=_run, daemon=True, name="mailtrim-watch")
+    _watch_thread.start()
+    return RedirectResponse("/watch?started=1", status_code=303)
+
+
+@app.post("/watch/stop")
+async def watch_stop(request: Request):
+    global _watch_thread
+    _watch_stop_event.set()
+    if _watch_thread:
+        _watch_thread.join(timeout=5)
+        _watch_thread = None
+    return RedirectResponse("/watch?stopped=1", status_code=303)
+
+
+@app.get("/watch/status", response_class=HTMLResponse)
+async def watch_status(request: Request):
+    from mailtrim.core.storage import AgentRepo, get_session
+    is_running = bool(_watch_thread and _watch_thread.is_alive())
+    agents = AgentRepo(get_session()).list_all()
+    rows = ""
+    for a in agents:
+        last = a.last_run_at.strftime("%H:%M") if a.last_run_at else "never"
+        dot_color = "bg-teal-400" if a.is_active and a.status != "error" else ("bg-red-400" if a.status == "error" else "bg-slate-300")
+        rows += f'<tr><td class="py-2 px-4 text-sm font-medium text-slate-800">{a.name}</td><td class="py-2 px-4 text-xs text-slate-500">{a.account_email}</td><td class="py-2 px-4"><span class="w-2 h-2 rounded-full {dot_color} inline-block"></span></td><td class="py-2 px-4 text-xs text-slate-500">{last}</td><td class="py-2 px-4 text-xs text-slate-500">{a.last_found_count}</td></tr>'
+    status_badge = '<span class="inline-flex items-center gap-1.5 text-xs font-medium text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse"></span>Running</span>' if is_running else '<span class="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>Stopped</span>'
+    return HTMLResponse(f'<div id="watch-status" hx-get="/watch/status" hx-trigger="every 10s" hx-swap="outerHTML"><div class="flex items-center justify-between mb-4"><span class="text-sm font-medium text-slate-700">Daemon status</span>{status_badge}</div><table class="w-full"><thead><tr class="text-xs text-slate-400 uppercase tracking-wide border-b border-slate-100"><th class="py-2 px-4 text-left">Agent</th><th class="py-2 px-4 text-left">Account</th><th class="py-2 px-4 text-left">Status</th><th class="py-2 px-4 text-left">Last run</th><th class="py-2 px-4 text-left">Found</th></tr></thead><tbody>{rows}</tbody></table></div>')
 
 
 # ── Agents ────────────────────────────────────────────────────────────────────

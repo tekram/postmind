@@ -146,3 +146,50 @@ def start_daemon(interval_minutes: int | None = None, *, run_immediately: bool =
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
         scheduler.shutdown(wait=False)
+
+
+def start_daemon_background(stop_event=None, interval_minutes: int | None = None) -> None:
+    """Non-blocking variant for use inside the FastAPI web process."""
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.jobstores.memory import MemoryJobStore
+    except ImportError:
+        raise ImportError("Install apscheduler: pip install apscheduler")
+
+    from mailtrim.core.storage import AgentRepo, get_session
+    from mailtrim.core.account_registry import list_accounts
+
+    agents = AgentRepo(get_session()).list_all()
+    active = [a for a in agents if a.is_active]
+    if not active:
+        accounts = list_accounts()
+        if not accounts:
+            raise RuntimeError("No accounts or agents registered.")
+        repo = AgentRepo(get_session())
+        for acct in accounts:
+            repo.register(acct.email, acct.email.split("@")[0].title(), interval_minutes or 30)
+        active = [a for a in AgentRepo(get_session()).list_all() if a.is_active]
+
+    scheduler = BackgroundScheduler(jobstores={"default": MemoryJobStore()})
+    for agent in active:
+        mins = interval_minutes or agent.interval_minutes
+        scheduler.add_job(
+            _triage_account,
+            "interval",
+            minutes=mins,
+            args=[agent.account_email],
+            id=f"heartbeat_{agent.account_email}",
+            replace_existing=True,
+        )
+
+    scheduler.start()
+    if stop_event:
+        stop_event.wait()  # blocks this thread until stop() is called
+        scheduler.shutdown(wait=False)
+    else:
+        import time
+        try:
+            while True:
+                time.sleep(1)
+        except (KeyboardInterrupt, SystemExit):
+            scheduler.shutdown(wait=False)

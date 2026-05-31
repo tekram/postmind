@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Add Account — mailtrim{% endblock %}
+{% block content %}
+<div class="px-8 py-8 max-w-2xl mx-auto">
+
+  <!-- Header -->
+  <div class="mb-6">
+    <a href="/accounts" class="inline-flex items-center gap-1.5 text-slate-500 hover:text-slate-700 text-sm mb-3">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+      </svg>
+      Back to accounts
+    </a>
+    <h1 class="text-2xl font-bold text-slate-900">Add account</h1>
+    <p class="text-slate-500 text-sm mt-1">Connect a Gmail or IMAP email account</p>
+  </div>
+
+  <!-- Error banner -->
+  {% if error %}
+  <div class="mb-6 bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
+    <svg class="w-5 h-5 text-red-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+    </svg>
+    <p class="text-red-800 text-sm">{{ error }}</p>
+  </div>
+  {% endif %}
+
+  <!-- Tab switcher -->
+  <div class="flex gap-1 bg-slate-100 p-1 rounded-xl mb-6">
+    <a href="/accounts/add?tab=gmail"
+       class="flex-1 text-center py-2 px-4 rounded-lg text-sm font-medium transition-colors
+              {% if tab == 'gmail' %}bg-white text-slate-900 shadow-sm{% else %}text-slate-500 hover:text-slate-700{% endif %}">
+      <svg class="w-4 h-4 inline-block mr-1.5 -mt-0.5" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 010 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.907 1.528-1.147C21.69 2.28 24 3.434 24 5.457z"/>
+      </svg>
+      Gmail
+    </a>
+    <a href="/accounts/add?tab=imap"
+       class="flex-1 text-center py-2 px-4 rounded-lg text-sm font-medium transition-colors
+              {% if tab == 'imap' %}bg-white text-slate-900 shadow-sm{% else %}text-slate-500 hover:text-slate-700{% endif %}">
+      <svg class="w-4 h-4 inline-block mr-1.5 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+      </svg>
+      IMAP
+    </a>
+  </div>
+
+  <!-- Gmail tab -->
+  {% if tab == 'gmail' %}
+  <div class="bg-white rounded-xl border border-slate-200 p-6">
+    <h2 class="text-base font-semibold text-slate-900 mb-1">Connect Gmail</h2>
+    <p class="text-slate-500 text-sm mb-5">Opens a browser window for Google sign-in. Your credentials are stored locally only.</p>
+
+    {% if not has_credentials %}
+    <!-- No credentials.json warning -->
+    <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-5">
+      <div class="flex items-start gap-3">
+        <svg class="w-5 h-5 text-amber-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+        </svg>
+        <div>
+          <p class="text-amber-800 text-sm font-medium">credentials.json not found</p>
+          <p class="text-amber-700 text-xs mt-1">Download it from Google Cloud Console and place it in <code class="bg-amber-100 px-1 rounded">~/.mailtrim/credentials.json</code>, or use the onboarding wizard to upload it.</p>
+          <a href="/onboarding?step=1" class="inline-block mt-2 text-xs font-medium text-amber-700 hover:text-amber-900 underline">Open setup wizard &rarr;</a>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <div id="oauth-result">
+      <button
+        hx-post="/accounts/add/gmail/start"
+        hx-target="#oauth-result"
+        hx-swap="innerHTML"
+        hx-indicator="#gmail-spinner"
+        {% if not has_credentials %}disabled{% endif %}
+        class="inline-flex items-center gap-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
+        </svg>
+        Connect Gmail account
+      </button>
+      <div id="gmail-spinner" class="htmx-indicator flex items-center gap-2 text-slate-500 text-sm mt-3">
+        <div class="w-4 h-4 border-2 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+        Starting OAuth flow&hellip;
+      </div>
+    </div>
+
+    <p class="text-slate-400 text-xs mt-4">
+      Gmail uses OAuth 2.0 — mailtrim never sees your password. Token stored at <code>~/.mailtrim/tokens/</code>.
+    </p>
+  </div>
+
+  {% else %}
+  <!-- IMAP tab -->
+  <div class="bg-white rounded-xl border border-slate-200 p-6">
+    <h2 class="text-base font-semibold text-slate-900 mb-1">Connect IMAP account</h2>
+    <p class="text-slate-500 text-sm mb-5">Works with any IMAP-enabled email provider (Outlook, Fastmail, iCloud, self-hosted, etc.)</p>
+
+    <form method="POST" action="/accounts/add/imap" class="space-y-4">
+      <div class="grid grid-cols-3 gap-4">
+        <div class="col-span-2">
+          <label class="block text-xs font-medium text-slate-700 mb-1">IMAP server</label>
+          <input type="text" name="imap_server" placeholder="imap.example.com" required
+                 class="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-700 mb-1">Port</label>
+          <input type="number" name="imap_port" value="993" min="1" max="65535"
+                 class="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400">
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-xs font-medium text-slate-700 mb-1">Username / email</label>
+        <input type="text" name="imap_user" placeholder="you@example.com" required
+               class="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400">
+      </div>
+
+      <div>
+        <label class="block text-xs font-medium text-slate-700 mb-1">Password / app password</label>
+        <input type="password" name="imap_password" required
+               class="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400">
+        <p class="text-slate-400 text-xs mt-1">Use an app-specific password if your provider requires 2FA.</p>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-700 mb-1">Folder (optional)</label>
+          <input type="text" name="imap_folder" placeholder="INBOX"
+                 class="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-700 mb-1">Display name (optional)</label>
+          <input type="text" name="display_name" placeholder="Work email"
+                 class="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400">
+        </div>
+      </div>
+
+      <div class="pt-2">
+        <button type="submit"
+                class="w-full bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors">
+          Connect IMAP account
+        </button>
+      </div>
+    </form>
+
+    <p class="text-slate-400 text-xs mt-4">
+      Credentials are stored in-memory only and not written to disk. The connection is tested before saving.
+    </p>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}
