@@ -1286,8 +1286,8 @@ def fetch_sender_groups_from_db(
     Use ``scope="inbox"`` to restrict to inbox-only records.
     Use ``promo_only=True`` to filter to promotional emails only (no LLM needed).
     """
-    from mailtrim.core.gmail_client import Message, MessageHeader
-    from mailtrim.core.storage import EmailRecord, get_session
+    from postmind.core.gmail_client import Message, MessageHeader
+    from postmind.core.storage import EmailRecord, get_session
 
     session = get_session()
     q = session.query(EmailRecord).filter(EmailRecord.account_email == account_email)

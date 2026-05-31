@@ -36,12 +36,18 @@
 
   {% if has_scan %}
   <!-- Stat cards -->
-  <div class="grid grid-cols-3 gap-4 mb-8">
+  <div class="grid grid-cols-4 gap-4 mb-8">
 
     <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-      <p class="text-slate-500 text-xs font-medium uppercase tracking-wide">Senders found</p>
+      <p class="text-slate-500 text-xs font-medium uppercase tracking-wide">Emails cached</p>
+      <p class="text-3xl font-bold text-slate-900 mt-1">{{ "{:,}".format(total_emails or 0) }}</p>
+      <p class="text-slate-400 text-xs mt-1">in local database</p>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+      <p class="text-slate-500 text-xs font-medium uppercase tracking-wide">Unique senders</p>
       <p class="text-3xl font-bold text-slate-900 mt-1">{{ sender_count }}</p>
-      <p class="text-slate-400 text-xs mt-1">top senders scanned</p>
+      <p class="text-slate-400 text-xs mt-1">in your inbox</p>
     </div>
 
     <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
@@ -51,11 +57,9 @@
     </div>
 
     <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-      <p class="text-slate-500 text-xs font-medium uppercase tracking-wide">Total messages</p>
-      <p class="text-3xl font-bold text-slate-900 mt-1">
-        {{ "{:,}".format(profile.get("messagesTotal", 0)) }}
-      </p>
-      <p class="text-slate-400 text-xs mt-1">in your account</p>
+      <p class="text-slate-500 text-xs font-medium uppercase tracking-wide">Last synced</p>
+      <p class="text-lg font-bold text-slate-900 mt-1 truncate">{{ scanned_at or "—" }}</p>
+      <p class="text-slate-400 text-xs mt-1"><a href="/sync" class="text-teal-600 hover:underline">Re-sync →</a></p>
     </div>
 
   </div>
@@ -128,13 +132,29 @@
   {% endif %}
 
   <!-- Quick actions -->
-  <div class="grid grid-cols-3 gap-3 mt-4">
+  <div class="grid grid-cols-5 gap-3 mt-4">
     <a href="/stats"
        class="flex items-center gap-2.5 bg-white border border-slate-200 hover:border-teal-300 hover:bg-teal-50/50 rounded-xl p-4 transition-colors group">
       <span class="text-xl">📊</span>
       <div>
         <p class="text-sm font-medium text-slate-800 group-hover:text-teal-700">Stats</p>
-        <p class="text-xs text-slate-400">Analyze your inbox</p>
+        <p class="text-xs text-slate-400">Sender rankings</p>
+      </div>
+    </a>
+    <a href="/triage"
+       class="flex items-center gap-2.5 bg-white border border-slate-200 hover:border-teal-300 hover:bg-teal-50/50 rounded-xl p-4 transition-colors group">
+      <span class="text-xl">🤖</span>
+      <div>
+        <p class="text-sm font-medium text-slate-800 group-hover:text-teal-700">Triage</p>
+        <p class="text-xs text-slate-400">AI classify emails</p>
+      </div>
+    </a>
+    <a href="/sync"
+       class="flex items-center gap-2.5 bg-white border border-slate-200 hover:border-slate-300 rounded-xl p-4 transition-colors group">
+      <span class="text-xl">🔄</span>
+      <div>
+        <p class="text-sm font-medium text-slate-800">Sync</p>
+        <p class="text-xs text-slate-400">Update local cache</p>
       </div>
     </a>
     <a href="/undo"
@@ -142,7 +162,7 @@
       <span class="text-xl">↩</span>
       <div>
         <p class="text-sm font-medium text-slate-800">Undo</p>
-        <p class="text-xs text-slate-400">Restore deleted emails</p>
+        <p class="text-xs text-slate-400">Restore deleted</p>
       </div>
     </a>
     <a href="/settings"

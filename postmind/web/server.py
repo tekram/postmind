@@ -92,6 +92,26 @@ def _provider_name() -> str:
         return "gmail"
 
 
+def _chat_mode() -> str:
+    """Effective backend for the chat assistant — its own setting, or the
+    global ai_mode when left to inherit."""
+    try:
+        s = get_settings()
+        return s.chat_ai_mode or s.ai_mode
+    except Exception:
+        return "off"
+
+
+def _chat_engine_kwargs() -> dict:
+    """Override kwargs for AIEngine so the assistant uses its configured backend/model."""
+    s = get_settings()
+    return {
+        "mode": _chat_mode(),
+        "cloud_model": s.chat_cloud_model or s.ai_model,
+        "ollama_model": s.chat_ollama_model or s.ollama_model,
+    }
+
+
 def _base() -> dict:
     """Base template context — request passed separately to TemplateResponse."""
     from postmind.core.account_registry import list_accounts
@@ -100,6 +120,7 @@ def _base() -> dict:
     return {
         "version": __version__,
         "ai_mode": _ai_mode(),
+        "chat_mode": _chat_mode(),
         "provider": _provider_name(),
         "is_authed": _is_authed(),
         "accounts": [
@@ -191,31 +212,65 @@ async def dashboard(request: Request):
     if not _list_accts() and not _is_authed():
         return RedirectResponse("/onboarding", status_code=302)
 
+    from postmind.core.sender_stats import (
+        best_next_step,
+        fetch_sender_groups_from_db,
+        generate_recommendations,
+        group_by_domain,
+        reclaimable_mb,
+    )
+    from postmind.core.storage import AccountRepo, EmailRecord, EmailRepo, get_session
+
+    account_email = _get_web_account() or ""
+    session = get_session()
+
     cached = _cache_get()
     if cached:
-        from postmind.core.sender_stats import (
-            best_next_step,
-            generate_recommendations,
-            group_by_domain,
-            reclaimable_mb,
-        )
-
         groups = cached["groups"]
+        scanned_at = cached["scanned_at"]
+        account_email = cached["account_email"]
+        profile = cached["profile"]
+    elif account_email and EmailRepo(session).get_inbox(account_email, limit=1):
+        # No in-memory cache but local DB has data — build from DB
+        groups = fetch_sender_groups_from_db(
+            account_email=account_email,
+            scope="inbox",
+            min_count=1,
+            top_n=50,
+            sort_by="score",
+        )
+        acct_row = AccountRepo(session).get(account_email)
+        scanned_at = acct_row.last_synced_at.strftime("%-d %b %Y") if (acct_row and acct_row.last_synced_at) else "local cache"
+        profile = {}
+    else:
+        groups = None
+        scanned_at = None
+        profile = {}
+
+    if groups:
         domain_groups = group_by_domain(groups)
         domain_map = {d.domain: d for d in domain_groups}
         recs = generate_recommendations(groups, top_n=5, domain_map=domain_map)
         bns = best_next_step(recs)
         total_reclaimable = reclaimable_mb(recs)
 
+        # Total emails in DB
+        total_emails = (
+            session.query(EmailRecord)
+            .filter(EmailRecord.account_email == account_email, EmailRecord.is_inbox.is_(True))
+            .count()
+        )
+
         ctx.update({
             "has_scan": True,
-            "scanned_at": cached["scanned_at"],
-            "account_email": cached["account_email"],
-            "profile": cached["profile"],
-            "top_senders": _enrich_groups(groups[:3]),
+            "scanned_at": scanned_at,
+            "account_email": account_email,
+            "profile": profile,
+            "top_senders": _enrich_groups(groups[:5]),
             "total_reclaimable": total_reclaimable,
             "sender_count": len(groups),
             "best_next": bns,
+            "total_emails": total_emails,
         })
     else:
         ctx["has_scan"] = False
@@ -242,7 +297,7 @@ async def stats_data(
     sort: str = "score",
     scope: str = "inbox",
     since: str = "",
-    top: int = 25,
+    top: int = 100,
 ):
     if not _is_authed():
         return _resp(
@@ -254,32 +309,57 @@ async def stats_data(
     def _scan():
         from postmind.core.sender_stats import (
             fetch_sender_groups,
+            fetch_sender_groups_from_db,
             generate_recommendations,
             group_by_domain,
             reclaimable_mb,
         )
-        from postmind.core.storage import BlocklistRepo, get_session
+        from postmind.core.storage import BlocklistRepo, EmailRepo, get_session
 
-        client = _build_provider()
-        profile = client.get_profile()
-        account_email = profile.get("emailAddress", "")
-
-        query = "in:anywhere -in:trash -in:spam" if scope == "anywhere" else "in:inbox"
-        if since:
-            query += f" newer_than:{since}"
-
+        account_email = _get_web_account() or ""
         valid_sort = sort if sort in ("score", "count", "size", "oldest") else "score"
+        session = get_session()
 
-        groups = fetch_sender_groups(
-            client,
-            query=query,
-            max_messages=1000,
-            min_count=1,
-            top_n=top,
-            sort_by=valid_sort,
-        )
+        # Use local DB when synced data exists and no time filter (since) is applied
+        has_local_data = bool(account_email and EmailRepo(session).get_inbox(account_email, limit=1))
 
-        blocked = BlocklistRepo(get_session()).blocked_emails(account_email)
+        data_source = "Gmail API"
+        total_emails_in_scope = 0
+
+        if has_local_data and not since:
+            db_scope = "inbox" if scope != "anywhere" else "anywhere"
+            groups = fetch_sender_groups_from_db(
+                account_email=account_email,
+                scope=db_scope,
+                min_count=1,
+                top_n=top,
+                sort_by=valid_sort,
+            )
+            profile = {"emailAddress": account_email}
+            data_source = "local cache"
+            from postmind.core.storage import EmailRecord
+            db_q = session.query(EmailRecord).filter(EmailRecord.account_email == account_email)
+            if db_scope == "inbox":
+                db_q = db_q.filter(EmailRecord.is_inbox.is_(True))
+            total_emails_in_scope = db_q.count()
+        else:
+            client = _build_provider()
+            profile = client.get_profile()
+            account_email = profile.get("emailAddress", "")
+            query = "in:anywhere -in:trash -in:spam" if scope == "anywhere" else "in:inbox"
+            if since:
+                query += f" newer_than:{since}"
+            groups = fetch_sender_groups(
+                client,
+                query=query,
+                max_messages=1000,
+                min_count=1,
+                top_n=top,
+                sort_by=valid_sort,
+            )
+            total_emails_in_scope = sum(g.count for g in groups)
+
+        blocked = BlocklistRepo(session).blocked_emails(account_email)
         if blocked:
             groups = [g for g in groups if g.sender_email not in blocked]
 
@@ -290,11 +370,21 @@ async def stats_data(
         recs = generate_recommendations(groups, top_n=5, domain_map=domain_map)
         total_reclaimable = reclaimable_mb(recs)
 
+        # Date range from groups
+        all_dates = [g.earliest_date for g in groups if g.earliest_date]
+        date_from = min(all_dates).strftime("%-d %b %Y") if all_dates else ""
+        latest_dates = [g.latest_date for g in groups if g.latest_date]
+        date_to = max(latest_dates).strftime("%-d %b %Y") if latest_dates else ""
+
         return {
             "senders": _enrich_groups(groups),
             "total_reclaimable": total_reclaimable,
             "account_email": account_email,
             "total_scanned": sum(g.count for g in groups),
+            "total_emails": total_emails_in_scope,
+            "date_from": date_from,
+            "date_to": date_to,
+            "data_source": data_source,
             "scanned_at": datetime.now(timezone.utc).strftime("%H:%M"),
         }
 
@@ -310,11 +400,10 @@ async def stats_data(
 # ── Purge ─────────────────────────────────────────────────────────────────────
 
 
-@app.post("/purge/preview", response_class=HTMLResponse)
-async def purge_preview(request: Request):
-    form = await request.form()
-    senders = form.getlist("senders")
-
+def _render_purge_preview(request: Request, senders: list[str]) -> HTMLResponse:
+    """Render the confirm-first purge preview for the given senders from the
+    current scan cache. Shared by the POST form flow and the GET deep-link the
+    chat assistant produces. Trashing still requires the explicit confirm button."""
     if not senders:
         return RedirectResponse("/stats", status_code=303)
 
@@ -324,6 +413,8 @@ async def purge_preview(request: Request):
 
     groups = cached["groups"]
     selected_groups = [g for g in groups if g.sender_email in senders]
+    if not selected_groups:
+        return _resp(request, "error.html", {"error": "None of those senders are in the current scan. Re-run Stats and try again."})
     total_count = sum(g.count for g in selected_groups)
     total_mb = round(sum(g.total_size_bytes for g in selected_groups) / (1024 * 1024), 1)
 
@@ -331,12 +422,25 @@ async def purge_preview(request: Request):
     ctx.update({
         "active": "stats",
         "selected": _enrich_groups(selected_groups),
-        "senders": senders,
+        "senders": [g.sender_email for g in selected_groups],
         "total_count": total_count,
         "total_mb": total_mb,
         "undo_days": get_settings().undo_window_days,
     })
     return _resp(request, "purge_preview.html", ctx)
+
+
+@app.post("/purge/preview", response_class=HTMLResponse)
+async def purge_preview(request: Request):
+    form = await request.form()
+    return _render_purge_preview(request, form.getlist("senders"))
+
+
+@app.get("/purge/preview", response_class=HTMLResponse)
+async def purge_preview_get(request: Request):
+    """Deep-link entrypoint (e.g. from the chat assistant): renders the same
+    confirm-first preview. Read-only — nothing is trashed until the user confirms."""
+    return _render_purge_preview(request, request.query_params.getlist("senders"))
 
 
 @app.post("/purge/confirm", response_class=HTMLResponse)
@@ -487,6 +591,9 @@ async def settings_page(request: Request):
             "has_api_key": bool(s.anthropic_api_key),
             "ollama_base_url": s.ollama_base_url,
             "ollama_model": s.ollama_model,
+            "chat_ai_mode": s.chat_ai_mode,  # "" = inherit
+            "chat_cloud_model": s.chat_cloud_model or s.ai_model,
+            "chat_ollama_model": s.chat_ollama_model or s.ollama_model,
         })
     except Exception:
         ctx.update({
@@ -495,6 +602,8 @@ async def settings_page(request: Request):
             "undo_days": 30, "has_api_key": False,
             "ollama_base_url": "http://localhost:11434",
             "ollama_model": "llama3.2",
+            "chat_ai_mode": "", "chat_cloud_model": "claude-sonnet-4-6",
+            "chat_ollama_model": "qwen2.5:32b",
         })
 
     ctx.update({
@@ -636,6 +745,21 @@ async def gmail_add_poll(task_id: str):
 </div>""")
 
 
+def _test_and_register_imap(server, user, password, port, folder, display_name):
+    """Live-test an IMAP connection then register it as the active account.
+
+    Password is used only for the connection test and is never written to disk
+    (consistent with the existing /accounts/add/imap behavior).
+    """
+    from postmind.core.providers.factory import get_provider
+    from postmind.core.account_registry import register_imap
+    from postmind.config import set_active_account
+    provider = get_provider("imap", imap_server=server, imap_user=user, imap_password=password, imap_port=port, imap_folder=folder)
+    provider.get_profile()
+    register_imap(user, server, user, port, folder, display_name or user)
+    set_active_account(user)
+
+
 @app.post("/accounts/add/imap", response_class=HTMLResponse)
 async def imap_add(request: Request):
     form = await request.form()
@@ -650,18 +774,11 @@ async def imap_add(request: Request):
         ctx.update({"active": "accounts", "tab": "imap", "has_credentials": CREDENTIALS_PATH.exists(), "error": "Server, username, and password are required."})
         return _resp(request, "accounts_add.html", ctx)
 
-    def _test_and_register():
-        from postmind.core.providers.factory import get_provider
-        from postmind.core.account_registry import register_imap
-        from postmind.config import set_active_account
-        provider = get_provider("imap", imap_server=server, imap_user=user, imap_password=password, imap_port=port, imap_folder=folder)
-        provider.get_profile()
-        register_imap(user, server, user, port, folder, display_name or user)
-        set_active_account(user)
-
     try:
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(_executor, _test_and_register)
+        await loop.run_in_executor(
+            _executor, _test_and_register_imap, server, user, password, port, folder, display_name
+        )
     except Exception as exc:
         ctx = _base()
         ctx.update({"active": "accounts", "tab": "imap", "has_credentials": CREDENTIALS_PATH.exists(), "error": str(exc)})
@@ -676,13 +793,75 @@ async def imap_add(request: Request):
 async def onboarding(request: Request):
     from postmind.core.account_registry import list_accounts
     step = int(request.query_params.get("step", "1"))
+    tab = request.query_params.get("tab", "gmail")
+    if tab not in ("gmail", "imap"):
+        tab = "gmail"
+    s = get_settings()
     ctx = _base()
     ctx.update({
         "step": step,
+        "tab": tab,
         "has_credentials": CREDENTIALS_PATH.exists(),
         "has_accounts": len(list_accounts()) > 0,
+        "ai_mode": s.ai_mode,
+        "ollama_base_url": s.ollama_base_url,
+        "ollama_model": s.ollama_model,
+        "has_api_key": bool(s.anthropic_api_key),
     })
     return _resp(request, "onboarding.html", ctx)
+
+
+@app.post("/onboarding/connect/imap", response_class=HTMLResponse)
+async def onboarding_connect_imap(request: Request):
+    """Register an IMAP account during onboarding, reusing the shared
+    test-and-register logic, then advance the wizard to the AI step."""
+    form = await request.form()
+    server = (form.get("imap_server") or "").strip()
+    user = (form.get("imap_user") or "").strip()
+    password = (form.get("imap_password") or "").strip()
+    port = int(form.get("imap_port") or "993")
+    folder = (form.get("imap_folder") or "INBOX").strip() or "INBOX"
+    display_name = (form.get("display_name") or "").strip()
+
+    def _render_error(msg: str) -> HTMLResponse:
+        from postmind.core.account_registry import list_accounts
+        s = get_settings()
+        ctx = _base()
+        ctx.update({
+            "step": 1,
+            "tab": "imap",
+            "has_credentials": CREDENTIALS_PATH.exists(),
+            "has_accounts": len(list_accounts()) > 0,
+            "ai_mode": s.ai_mode,
+            "ollama_base_url": s.ollama_base_url,
+            "ollama_model": s.ollama_model,
+            "has_api_key": bool(s.anthropic_api_key),
+            "imap_error": msg,
+        })
+        return _resp(request, "onboarding.html", ctx)
+
+    if not server or not user or not password:
+        return _render_error("Server, username, and password are required.")
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            _executor, _test_and_register_imap, server, user, password, port, folder, display_name
+        )
+    except Exception as exc:
+        return _render_error(str(exc))
+
+    _scan_cache.clear()
+    return RedirectResponse("/onboarding?step=2", status_code=303)
+
+
+@app.post("/onboarding/ai-mode")
+async def onboarding_ai_mode(request: Request):
+    """Persist the chosen AI mode during onboarding (same mechanism as
+    /settings/ai-mode), then advance to the final step."""
+    form = await request.form()
+    _persist_ai_mode(form)
+    return RedirectResponse("/onboarding?step=3", status_code=303)
 
 
 @app.post("/onboarding/upload-credentials", response_class=HTMLResponse)
@@ -948,25 +1127,10 @@ async def agents_compose(request: Request):
         return HTMLResponse(f"<p class='text-red-500 text-sm mt-3'>Error: {html.escape(str(exc))}</p>")
 
 
-@app.post("/settings/ai-mode")
-async def update_ai_mode(request: Request):
-    form = await request.form()
-    mode = form.get("mode", "off")
-
-    if mode not in ("off", "local", "cloud"):
-        raise HTTPException(status_code=400, detail="Invalid AI mode")
-
-    updates: dict[str, str] = {"POSTMIND_AI_MODE": mode}
-
-    if mode == "local":
-        url = (form.get("ollama_base_url") or "http://localhost:11434").strip()
-        model = (form.get("ollama_model") or "qwen2.5:32b").strip()
-        updates["MAILTRIM_OLLAMA_BASE_URL"] = url
-        updates["MAILTRIM_OLLAMA_MODEL"] = model
-
+def _write_env(updates: dict[str, str]) -> None:
+    """Upsert KEY=value pairs into ~/.postmind/.env and reset the settings cache."""
     env_file = DATA_DIR / ".env"
     lines: list[str] = env_file.read_text().splitlines(keepends=True) if env_file.exists() else []
-
     for key, value in updates.items():
         new_line = f"{key}={value}\n"
         for i, line in enumerate(lines):
@@ -975,13 +1139,63 @@ async def update_ai_mode(request: Request):
                 break
         else:
             lines.append(new_line)
-
     env_file.write_text("".join(lines))
-
     import postmind.config as _cfg
     _cfg._settings = None
 
+
+def _persist_ai_mode(form) -> str:
+    """Write AI-mode settings to DATA_DIR/.env and reset the cached settings.
+
+    Shared by /settings/ai-mode and the onboarding "enable AI" step. Returns the
+    chosen mode. Raises HTTPException(400) on an invalid mode.
+    """
+    mode = form.get("mode", "off")
+    if mode not in ("off", "local", "cloud"):
+        raise HTTPException(status_code=400, detail="Invalid AI mode")
+
+    updates: dict[str, str] = {"POSTMIND_AI_MODE": mode}
+    if mode == "local":
+        url = (form.get("ollama_base_url") or "http://localhost:11434").strip()
+        model = (form.get("ollama_model") or "qwen2.5:32b").strip()
+        updates["MAILTRIM_OLLAMA_BASE_URL"] = url
+        updates["MAILTRIM_OLLAMA_MODEL"] = model
+    elif mode == "cloud":
+        api_key = (form.get("anthropic_api_key") or "").strip()
+        if api_key:
+            updates["ANTHROPIC_API_KEY"] = api_key
+
+    _write_env(updates)
+    return mode
+
+
+@app.post("/settings/ai-mode")
+async def update_ai_mode(request: Request):
+    form = await request.form()
+    _persist_ai_mode(form)
     return RedirectResponse("/settings?success=ai_mode", status_code=303)
+
+
+@app.post("/settings/chat")
+async def update_chat_settings(request: Request):
+    """Configure the floating assistant's LLM backend independently of global AI mode."""
+    form = await request.form()
+    mode = (form.get("chat_mode") or "").strip()  # "" = inherit
+    if mode not in ("", "inherit", "off", "local", "cloud"):
+        raise HTTPException(status_code=400, detail="Invalid chat mode")
+    if mode == "inherit":
+        mode = ""
+
+    updates: dict[str, str] = {"POSTMIND_CHAT_AI_MODE": mode}
+    if mode == "cloud":
+        model = (form.get("chat_cloud_model") or "").strip()
+        updates["POSTMIND_CHAT_CLOUD_MODEL"] = model
+    elif mode == "local":
+        model = (form.get("chat_ollama_model") or "").strip()
+        updates["POSTMIND_CHAT_OLLAMA_MODEL"] = model
+
+    _write_env(updates)
+    return RedirectResponse("/settings?success=chat", status_code=303)
 
 
 # ── Protected senders ─────────────────────────────────────────────────────────
@@ -1322,3 +1536,310 @@ async def triage_page(request: Request):
         "scanned_at": datetime.now(timezone.utc).strftime("%H:%M"),
     })
     return _resp(request, "triage.html", ctx)
+
+
+# ── Assistant (floating chat) ──────────────────────────────────────────────────
+
+_PAGES = {
+    "/": "Dashboard — inbox overview at a glance",
+    "/stats": "Stats — senders ranked by storage impact, with a Purge button",
+    "/triage": "Triage — AI-classified unread inbox (priority, category, action)",
+    "/agents": "Agents — per-account heartbeat watchers and their voice/soul config",
+    "/sync": "Sync — pull the mailbox into the local cache",
+    "/accounts": "Accounts — add / switch / remove Gmail and IMAP accounts",
+    "/watch": "Watch — start/stop the heartbeat daemon that runs agents",
+    "/undo": "Undo History — reverse recent operations within the undo window",
+    "/settings": "Settings — AI mode, protected senders, data location",
+}
+
+
+def _chat_overview_text(account_email: str) -> str:
+    """Compact, live snapshot of the inbox for grounding the assistant."""
+    from postmind.core.sender_stats import (
+        fetch_sender_groups_from_db,
+        generate_recommendations,
+        group_by_domain,
+        reclaimable_mb,
+    )
+    from postmind.core.storage import EmailRepo, get_session
+
+    cached = _cache_get()
+    groups = None
+    source = ""
+    if cached:
+        groups = cached["groups"]
+        source = "recent scan"
+    elif account_email and EmailRepo(get_session()).get_inbox(account_email, limit=1):
+        groups = fetch_sender_groups_from_db(
+            account_email=account_email, scope="inbox", min_count=1, top_n=100, sort_by="score"
+        )
+        source = "local cache"
+
+    if not groups:
+        return (
+            "No inbox scan data is available yet. The user should open Stats or run a "
+            "Sync first so concrete numbers can be quoted."
+        )
+
+    domain_map = {d.domain: d for d in group_by_domain(groups)}
+    recs = generate_recommendations(groups, top_n=5, domain_map=domain_map)
+    total_count = sum(g.count for g in groups)
+    lines = [
+        f"Inbox snapshot (source: {source}) for {account_email or 'active account'}:",
+        f"- {len(groups)} senders, {total_count:,} emails in scope",
+        f"- ~{reclaimable_mb(recs):.0f} MB reclaimable from the top cleanup suggestions",
+        "- Top senders by impact:",
+    ]
+    for g in groups[:8]:
+        size = f"{g.total_size_mb:.1f} MB" if g.total_size_mb >= 0.1 else f"{g.total_size_bytes // 1024} KB"
+        lines.append(f"  • {g.display_name} <{g.sender_email}> — {g.count} emails, {size}")
+    return "\n".join(lines)
+
+
+def _chat_search_senders(query: str, account_email: str) -> str:
+    from postmind.core.sender_stats import fetch_sender_groups_from_db
+    from postmind.core.storage import EmailRepo, get_session
+
+    cached = _cache_get()
+    if cached:
+        groups = cached["groups"]
+    elif account_email and EmailRepo(get_session()).get_inbox(account_email, limit=1):
+        groups = fetch_sender_groups_from_db(
+            account_email=account_email, scope="inbox", min_count=1, top_n=500, sort_by="score"
+        )
+    else:
+        return "No scan data available — ask the user to run a Sync or open Stats first."
+
+    q = query.lower().strip()
+    matches = [
+        g for g in groups
+        if q in (g.sender_email or "").lower()
+        or q in (g.sender_name or "").lower()
+        or q in (g.domain or "").lower()
+    ]
+    if not matches:
+        return f"No senders matching '{query}' in the current scan."
+    lines = [f"{len(matches)} sender(s) matching '{query}':"]
+    for g in matches[:12]:
+        size = f"{g.total_size_mb:.1f} MB" if g.total_size_mb >= 0.1 else f"{g.total_size_bytes // 1024} KB"
+        lines.append(f"- {g.display_name} <{g.sender_email}> — {g.count} emails, {size}")
+    return "\n".join(lines)
+
+
+_CHAT_TOOLS = [
+    {
+        "name": "get_inbox_overview",
+        "description": "Get a live snapshot of the user's inbox: total senders, emails, reclaimable storage, and the top senders by impact. Call this whenever the user asks about the state of their inbox, what's cluttering it, or what to clean up.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "search_senders",
+        "description": "Search the user's senders by name, email address, or domain substring. Use when the user asks about email from a specific person, company, or domain.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "Name, email, or domain to search for."}},
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "draft_email",
+        "description": "Draft an email in the user's voice. Returns a Subject line and body. Use when the user asks to write or reply to an email.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "intent": {"type": "string", "description": "What the email should accomplish."},
+                "recipient_context": {"type": "string", "description": "Who it's to and any relevant context."},
+                "thread_snippet": {"type": "string", "description": "The message being replied to, if any."},
+            },
+            "required": ["intent"],
+        },
+    },
+    {
+        "name": "propose_cleanup",
+        "description": "Stage a cleanup of specific senders and give the user a button into the purge preview, where they confirm before anything is trashed. Use when the user agrees to clean up particular senders/domains. You do NOT delete anything — you only stage the selection and link to the confirm-first preview. Provide either explicit sender emails, or a query to match senders from the current scan, or both.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senders": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Exact sender email addresses to stage for cleanup.",
+                },
+                "query": {"type": "string", "description": "Optionally match senders by name/email/domain substring instead of (or in addition to) explicit addresses."},
+            },
+        },
+    },
+    {
+        "name": "navigate",
+        "description": "Give the user a button to jump to a postmind page. Use to guide them to where an action happens (e.g. send them to Stats to purge, Triage to classify, Sync to refresh data, Settings to enable AI).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "page": {
+                    "type": "string",
+                    "enum": ["/", "/stats", "/triage", "/agents", "/sync", "/accounts", "/watch", "/undo", "/settings"],
+                },
+                "label": {"type": "string", "description": "Short button label, e.g. 'Open Stats'."},
+            },
+            "required": ["page", "label"],
+        },
+    },
+]
+
+
+def _chat_resolve_senders(emails: list[str], query: str, account_email: str):
+    """Resolve explicit emails + an optional substring query to SenderGroups
+    present in the current scan cache or local DB. Returns (groups, error_text)."""
+    from postmind.core.sender_stats import fetch_sender_groups_from_db
+    from postmind.core.storage import EmailRepo, get_session
+
+    cached = _cache_get()
+    if cached:
+        groups = cached["groups"]
+    elif account_email and EmailRepo(get_session()).get_inbox(account_email, limit=1):
+        groups = fetch_sender_groups_from_db(
+            account_email=account_email, scope="inbox", min_count=1, top_n=500, sort_by="score"
+        )
+    else:
+        return [], "No scan data available — ask the user to open Stats or run a Sync first."
+
+    wanted = {e.strip().lower() for e in (emails or []) if e.strip()}
+    q = (query or "").strip().lower()
+    matched = []
+    for g in groups:
+        em = (g.sender_email or "").lower()
+        if em in wanted:
+            matched.append(g)
+        elif q and (q in em or q in (g.sender_name or "").lower() or q in (g.domain or "").lower()):
+            matched.append(g)
+    return matched, None
+
+
+def _build_chat_system(page: str, account_email: str, ai_mode: str) -> str:
+    here = _PAGES.get(page, "the app")
+    overview = _chat_overview_text(account_email)
+    pages = "\n".join(f"  {p} — {desc}" for p, desc in _PAGES.items())
+    return f"""\
+You are the postmind Assistant — a friendly, concise helper embedded in postmind, a \
+privacy-first email management tool that runs locally. You help the user understand and \
+tidy their inbox, draft emails, and find their way around the app.
+
+Be brief and practical. Prefer 1–3 short sentences or a tight bullet list. Quote real \
+numbers from the inbox snapshot below rather than guessing. Never claim to have deleted, \
+archived, or sent anything — you cannot act directly. When the user agrees to clean up \
+specific senders, use `propose_cleanup` to stage them; it gives the user a button into the \
+confirm-first purge preview (deletes go to Trash and are undoable) — you must never imply \
+the cleanup already happened. For anything else, use `navigate` to point the user to the \
+right page. When they want an email written, use `draft_email`.
+
+The user is currently on: {here}.
+Active account: {account_email or 'none connected yet'}. AI mode: {ai_mode}.
+
+Pages you can navigate to:
+{pages}
+
+Live inbox snapshot:
+{overview}"""
+
+
+@app.post("/chat")
+async def chat_endpoint(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return {"reply": "Sorry — I couldn't read that request.", "actions": []}
+    if not isinstance(body, dict):
+        body = {}
+    raw_messages = body.get("messages", [])
+    page = (body.get("page") or "/").split("?")[0]
+
+    # Sanitise + cap history.
+    messages = [
+        {"role": m["role"], "content": str(m["content"])[:4000]}
+        for m in raw_messages
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content")
+    ][-12:]
+    if not messages:
+        return {"reply": "Hi! Ask me about your inbox, have me draft an email, or tell me what you'd like to clean up.", "actions": []}
+
+    mode = _chat_mode()
+    if mode == "off":
+        return {
+            "reply": "I'm an AI assistant, but the assistant's AI is currently off (your data stays fully local). Choose a local or cloud backend under Settings → Chat Assistant and I can help triage your inbox, draft emails, and suggest cleanups.",
+            "actions": [{"label": "Open Settings", "href": "/settings"}],
+        }
+
+    account_email = _get_web_account() or ""
+    actions: list[dict] = []
+    engine_kwargs = _chat_engine_kwargs()
+
+    def _run():
+        from postmind.core.ai_engine import AIEngine
+
+        ai = AIEngine(**engine_kwargs)
+        system = _build_chat_system(page, account_email, mode)
+
+        def _executor_tool(name: str, tool_input: dict) -> str:
+            if name == "get_inbox_overview":
+                return _chat_overview_text(account_email)
+            if name == "search_senders":
+                return _chat_search_senders(tool_input.get("query", ""), account_email)
+            if name == "draft_email":
+                from postmind.core.storage import AgentRepo, get_session
+                soul = {}
+                agent = AgentRepo(get_session()).get_by_email(account_email) if account_email else None
+                if agent:
+                    soul = {
+                        "voice_style": agent.voice_style,
+                        "user_context": agent.user_context,
+                        "writing_guidelines": agent.writing_guidelines,
+                    }
+                try:
+                    return ai.compose_email(
+                        intent=tool_input.get("intent", ""),
+                        recipient_context=tool_input.get("recipient_context", ""),
+                        thread_snippet=tool_input.get("thread_snippet", ""),
+                        soul=soul,
+                    )
+                except ValueError as exc:
+                    return str(exc)
+            if name == "propose_cleanup":
+                from urllib.parse import urlencode
+                matched, err = _chat_resolve_senders(
+                    tool_input.get("senders") or [], tool_input.get("query", ""), account_email
+                )
+                if err:
+                    return err
+                if not matched:
+                    return "No matching senders found in the current scan — nothing staged."
+                total = sum(g.count for g in matched)
+                mb = sum(g.total_size_bytes for g in matched) / (1024 * 1024)
+                href = "/purge/preview?" + urlencode([("senders", g.sender_email) for g in matched])
+                if not any(a["href"] == href for a in actions):
+                    actions.append({"label": f"Review & confirm ({total} emails)", "href": href})
+                names = ", ".join(g.sender_email for g in matched[:5]) + ("…" if len(matched) > 5 else "")
+                return (
+                    f"Staged {len(matched)} sender(s) — {total} emails, ~{mb:.0f} MB ({names}). "
+                    "Added a button to the purge preview; the user must confirm there before anything moves to Trash."
+                )
+            if name == "navigate":
+                page_path = tool_input.get("page", "/")
+                if page_path in _PAGES:
+                    label = tool_input.get("label") or "Open page"
+                    if not any(a["href"] == page_path for a in actions):
+                        actions.append({"label": label, "href": page_path})
+                    return f"Added a '{label}' button linking to {page_path}."
+                return "Unknown page."
+            return f"Unknown tool: {name}"
+
+        # Tools only work in cloud mode; local mode answers conversationally.
+        tools = _CHAT_TOOLS if mode == "cloud" else None
+        return ai.chat(messages, system=system, tools=tools, tool_executor=_executor_tool)
+
+    try:
+        loop = asyncio.get_event_loop()
+        reply = await loop.run_in_executor(_executor, _run)
+    except Exception as exc:
+        return {"reply": f"Sorry — I hit an error: {exc}", "actions": []}
+
+    return {"reply": reply, "actions": actions}
