@@ -20,7 +20,8 @@ import urllib.request
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT = 2  # seconds — must not slow down CLI noticeably on CPU-only machines
+_TIMEOUT_LLAMA = 2    # llama.cpp on CPU — kept short so slow machines degrade gracefully
+_TIMEOUT_OLLAMA = 120  # Ollama — 32B models need time to generate
 
 
 # ── Base class ────────────────────────────────────────────────────────────────
@@ -63,7 +64,7 @@ class AIClient:
     def _post(self, prompt: str) -> str:
         raise NotImplementedError
 
-    def _http_post(self, url: str, payload: dict) -> dict:
+    def _http_post(self, url: str, payload: dict, timeout: int = _TIMEOUT_LLAMA) -> dict:
         """Shared HTTP POST helper — returns parsed JSON response dict."""
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -72,7 +73,7 @@ class AIClient:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:  # nosec B310 — localhost only
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 — localhost only
             return json.loads(resp.read().decode("utf-8"))
 
 
@@ -107,7 +108,7 @@ class LlamaCppClient(AIClient):
             "grammar": self._GRAMMAR,
             "stop": ["</s>", "<|user|>", "<|system|>"],
         }
-        data = self._http_post(self._endpoint, payload)
+        data = self._http_post(self._endpoint, payload, timeout=_TIMEOUT_LLAMA)
         return data.get("content", "").strip()
 
 
@@ -128,7 +129,7 @@ class OllamaClient(AIClient):
     def __init__(
         self,
         url: str = "http://localhost:11434",
-        model: str = "phi3",
+        model: str = "qwen2.5:32b",
     ) -> None:
         self._endpoint = url.rstrip("/") + "/api/generate"
         self._model = model
@@ -139,7 +140,7 @@ class OllamaClient(AIClient):
             "prompt": prompt,
             "stream": False,
         }
-        data = self._http_post(self._endpoint, payload)
+        data = self._http_post(self._endpoint, payload, timeout=_TIMEOUT_OLLAMA)
         return data.get("response", "").strip()
 
 
@@ -149,7 +150,7 @@ class OllamaClient(AIClient):
 def get_ai_client(
     backend: str = "llama",
     url: str = "",
-    model: str = "phi3",
+    model: str = "qwen2.5:32b",
 ) -> AIClient:
     """
     Construct and return the appropriate AIClient.

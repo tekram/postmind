@@ -109,7 +109,7 @@ class Settings(BaseSettings):
 
     # Ollama (local AI backend)
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3.2"
+    ollama_model: str = "qwen2.5:32b"
 
     # Rate limiting
     gmail_batch_size: int = 50  # Max messages per Gmail batch request

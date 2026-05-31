@@ -854,7 +854,7 @@ async def update_ai_mode(request: Request):
 
     if mode == "local":
         url = (form.get("ollama_base_url") or "http://localhost:11434").strip()
-        model = (form.get("ollama_model") or "llama3.2").strip()
+        model = (form.get("ollama_model") or "qwen2.5:32b").strip()
         updates["MAILTRIM_OLLAMA_BASE_URL"] = url
         updates["MAILTRIM_OLLAMA_MODEL"] = model
 
@@ -955,7 +955,8 @@ async def sync_page(request: Request):
 async def sync_start(request: Request):
     form = await request.form()
     scope = form.get("scope", "inbox")
-    limit = int(form.get("limit", "1000"))
+    raw_limit = int(form.get("limit", "1000"))
+    limit = None if raw_limit == 0 else raw_limit
 
     task_id = uuid.uuid4().hex[:8]
     _sync_tasks[task_id] = {
@@ -997,7 +998,7 @@ async def sync_start(request: Request):
 
             for i in range(0, total, chunk_size):
                 chunk_ids = ids[i : i + chunk_size]
-                messages = client.get_messages_metadata(chunk_ids)
+                messages = client.get_messages_metadata_batch(chunk_ids)
                 records = [
                     EmailRecord(
                         account_email=account_email,
@@ -1115,26 +1116,49 @@ async def triage_page(request: Request):
     ctx["active"] = "triage"
 
     if _ai_mode() == "off":
-        return _resp(request, "triage.html", {**ctx, "ai_off": True, "results": []})
+        return _resp(request, "triage.html", {**ctx, "ai_off": True, "results": [], "scope": "unread", "limit": 20})
 
     if not _is_authed():
-        return _resp(request, "triage.html", {**ctx, "ai_off": False, "auth_error": True, "results": []})
+        return _resp(request, "triage.html", {**ctx, "ai_off": False, "auth_error": True, "results": [], "scope": "unread", "limit": 20})
 
     limit = int(request.query_params.get("limit", "20"))
+    scope = request.query_params.get("scope", "unread")  # "unread" or "all"
 
     def _run():
         from postmind.core.ai_engine import AIEngine
-        from postmind.core.gmail_client import GmailClient
+        from postmind.core.gmail_client import GmailClient, Message, MessageHeader
 
-        client = GmailClient()
-        profile = client.get_profile()
-        account_email = profile.get("emailAddress", "")
+        account_email = _get_web_account() or ""
 
-        ids = client.list_message_ids(query="in:inbox is:unread", max_results=limit)
-        if not ids:
+        if scope == "all":
+            # Read from local synced DB — no Gmail API calls needed
+            from postmind.core.storage import EmailRepo, get_session
+            session = get_session()
+            repo = EmailRepo(session)
+            records = repo.get_inbox(account_email=account_email, limit=limit)
+            messages = []
+            for r in records:
+                from_ = f"{r.sender_name} <{r.sender_email}>" if r.sender_name else r.sender_email
+                messages.append(Message(
+                    id=r.gmail_id,
+                    thread_id=r.thread_id or "",
+                    snippet=r.snippet or "",
+                    headers=MessageHeader(subject=r.subject or "", from_=from_),
+                    label_ids=[],
+                    size_estimate=r.size_estimate or 0,
+                    internal_date=0,
+                ))
+        else:
+            client = GmailClient()
+            profile = client.get_profile()
+            account_email = profile.get("emailAddress", "")
+            ids = client.list_message_ids(query="in:inbox is:unread", max_results=limit)
+            if not ids:
+                return [], account_email
+            messages = client.get_messages_batch(ids)
+
+        if not messages:
             return [], account_email
-
-        messages = client.get_messages_batch(ids)
 
         ai = AIEngine()
         classified = ai.classify_emails(messages)
@@ -1188,6 +1212,7 @@ async def triage_page(request: Request):
         "results": results,
         "account_email": account_email,
         "limit": limit,
+        "scope": scope,
         "scanned_at": datetime.now(timezone.utc).strftime("%H:%M"),
     })
     return _resp(request, "triage.html", ctx)

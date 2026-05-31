@@ -4,19 +4,37 @@
 
 <div class="p-8">
 
-  <div class="flex items-center justify-between mb-6">
+  <div class="flex items-start justify-between mb-6 gap-4 flex-wrap">
     <div>
       <h1 class="text-2xl font-semibold text-slate-900">Inbox Triage</h1>
       <p class="text-slate-500 text-sm mt-1">
-        AI classifies your unread emails by priority, category, and suggested action.
+        AI classifies emails by priority, category, and suggested action.
       </p>
     </div>
-    {% if results %}
-    <div class="flex items-center gap-3">
-      <span class="text-slate-400 text-xs">{{ results | length }} emails · scanned at {{ scanned_at }}</span>
-      <a href="/triage?limit=50" class="text-teal-600 hover:text-teal-700 text-sm font-medium">Load more</a>
-    </div>
-    {% endif %}
+
+    <!-- Filter form -->
+    <form method="GET" action="/triage" class="flex items-center gap-2 flex-wrap">
+      <select name="scope"
+              class="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30">
+        <option value="unread" {% if scope == 'unread' %}selected{% endif %}>Unread only</option>
+        <option value="all" {% if scope == 'all' %}selected{% endif %}>All synced emails</option>
+      </select>
+      <select name="limit"
+              class="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30">
+        <option value="20"  {% if limit == 20  %}selected{% endif %}>20 emails</option>
+        <option value="50"  {% if limit == 50  %}selected{% endif %}>50 emails</option>
+        <option value="100" {% if limit == 100 %}selected{% endif %}>100 emails</option>
+        <option value="200" {% if limit == 200 %}selected{% endif %}>200 emails</option>
+        <option value="500" {% if limit == 500 %}selected{% endif %}>500 emails</option>
+      </select>
+      <button type="submit"
+              class="bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg transition-colors">
+        Classify
+      </button>
+      {% if results %}
+      <span class="text-slate-400 text-xs">{{ results | length }} results · {{ scanned_at }}</span>
+      {% endif %}
+    </form>
   </div>
 
   {% if ai_off %}
