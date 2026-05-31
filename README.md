@@ -154,6 +154,37 @@ Each email gets:
 
 ---
 
+## Background daemon
+
+`mailtrim watch` runs a persistent heartbeat agent — one per registered account — that wakes up on a schedule, fetches unread emails, and runs AI triage automatically.
+
+```bash
+mailtrim watch                    # triage every 30 minutes (default)
+mailtrim watch --interval 15      # every 15 minutes
+mailtrim watch --interval 5 --now # start immediately, then every 5 minutes
+```
+
+To run as a background service on Linux:
+```bash
+# Create a systemd user service
+cat > ~/.config/systemd/user/mailtrim-watch.service << EOF
+[Unit]
+Description=mailtrim heartbeat daemon
+
+[Service]
+ExecStart=$(which mailtrim) watch --interval 30
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target
+EOF
+
+systemctl --user enable --now mailtrim-watch
+```
+
+---
+
 ## Commands
 
 ### Core (no API key needed)
@@ -175,6 +206,8 @@ Each email gets:
 | `mailtrim doctor` | Health check — auth, Gmail connection, storage, config |
 | `mailtrim privacy` | Show exactly what data stays local vs. what leaves your machine |
 | `mailtrim serve` | Start the local web UI at http://localhost:8484 |
+| `mailtrim watch` | Start the heartbeat daemon — triage each account every N minutes |
+| `mailtrim watch --interval 15 --now` | Run immediately then triage every 15 minutes |
 
 ### AI commands (cloud or local mode)
 
