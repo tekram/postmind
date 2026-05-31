@@ -806,6 +806,9 @@ async def agents_page(request: Request):
             "voice_style": a.voice_style or "professional",
             "user_context": a.user_context or "",
             "writing_guidelines": a.writing_guidelines or "",
+            "run_rules": a.run_rules if a.run_rules is not None else True,
+            "run_followups": a.run_followups if a.run_followups is not None else True,
+            "run_avoidance": a.run_avoidance if a.run_avoidance is not None else False,
         }
         for a in agents
     ]
@@ -857,6 +860,22 @@ async def agents_soul(request: Request):
         voice_style=(form.get("voice_style") or "").strip() or None,
         user_context=(form.get("user_context") or "").strip() or None,
         writing_guidelines=(form.get("writing_guidelines") or "").strip() or None,
+    )
+    return RedirectResponse("/agents", status_code=303)
+
+
+@app.post("/agents/features")
+async def agents_features(request: Request):
+    form = await request.form()
+    email = (form.get("email") or "").strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email required")
+    from postmind.core.storage import AgentRepo, get_session
+    AgentRepo(get_session()).update_features(
+        account_email=email,
+        run_rules=form.get("run_rules") == "on",
+        run_followups=form.get("run_followups") == "on",
+        run_avoidance=form.get("run_avoidance") == "on",
     )
     return RedirectResponse("/agents", status_code=303)
 

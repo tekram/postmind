@@ -196,13 +196,16 @@ _SessionLocal = None
 
 def _run_migrations(engine) -> None:
     """Apply incremental schema changes that SQLAlchemy's create_all cannot handle."""
-    soul_columns = [
+    new_columns = [
         ("voice_style", "TEXT"),
         ("user_context", "TEXT"),
         ("writing_guidelines", "TEXT"),
+        ("run_rules", "INTEGER DEFAULT 1"),
+        ("run_followups", "INTEGER DEFAULT 1"),
+        ("run_avoidance", "INTEGER DEFAULT 0"),
     ]
     with engine.connect() as conn:
-        for col, col_type in soul_columns:
+        for col, col_type in new_columns:
             try:
                 conn.execute(
                     __import__("sqlalchemy").text(
@@ -556,6 +559,11 @@ class Agent(Base):
     user_context = Column(Text, nullable=True)     # who the user is, their role, key relationships
     writing_guidelines = Column(Text, nullable=True)  # style rules, things to always/never do
 
+    # Heartbeat feature toggles — which tasks run each cycle
+    run_rules = Column(Boolean, default=True)      # execute active automation rules
+    run_followups = Column(Boolean, default=True)  # sync follow-up reply detection
+    run_avoidance = Column(Boolean, default=False) # detect avoided emails (requires AI)
+
 
 class AgentRepo:
     def __init__(self, session: Session):
@@ -621,6 +629,20 @@ class AgentRepo:
             agent.voice_style = voice_style or None
             agent.user_context = user_context or None
             agent.writing_guidelines = writing_guidelines or None
+            self.s.commit()
+
+    def update_features(
+        self,
+        account_email: str,
+        run_rules: bool,
+        run_followups: bool,
+        run_avoidance: bool,
+    ) -> None:
+        agent = self.get_by_email(account_email)
+        if agent:
+            agent.run_rules = run_rules
+            agent.run_followups = run_followups
+            agent.run_avoidance = run_avoidance
             self.s.commit()
 
     def delete(self, account_email: str) -> None:

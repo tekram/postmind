@@ -68,16 +68,48 @@
       <p class="text-xs text-red-500 mt-2 ml-6">{{ agent.error }}</p>
       {% endif %}
 
-      <!-- Soul + Compose (collapsible) -->
+      <!-- Heartbeat tasks + Soul + Compose (collapsible) -->
       <div class="mt-3 border-t border-slate-100 pt-3">
         <details class="group">
           <summary class="text-xs text-slate-500 cursor-pointer select-none hover:text-slate-700 list-none flex items-center gap-1">
             <span class="group-open:hidden">&#9656;</span>
             <span class="hidden group-open:inline">&#9662;</span>
-            Soul &amp; Compose
+            Configure
           </summary>
 
           <div class="mt-3 space-y-4">
+
+            <!-- Heartbeat tasks -->
+            <div>
+              <p class="text-xs font-medium text-slate-700 mb-2">Heartbeat tasks</p>
+              <form method="POST" action="/agents/features" class="space-y-1.5">
+                <input type="hidden" name="email" value="{{ agent.email }}">
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" name="run_rules" {% if agent.run_rules %}checked{% endif %}
+                         class="rounded border-slate-300 text-teal-600 focus:ring-teal-500/30">
+                  <span class="text-xs text-slate-600">Apply automation rules</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" name="run_followups" {% if agent.run_followups %}checked{% endif %}
+                         class="rounded border-slate-300 text-teal-600 focus:ring-teal-500/30">
+                  <span class="text-xs text-slate-600">Sync follow-up replies</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" name="run_avoidance" {% if agent.run_avoidance %}checked{% endif %}
+                         class="rounded border-slate-300 text-teal-600 focus:ring-teal-500/30">
+                  <span class="text-xs text-slate-600">Detect avoided emails <span class="text-slate-400">(requires AI)</span></span>
+                </label>
+                <div class="pt-1">
+                  <button type="submit"
+                          class="text-xs px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors border border-slate-200">
+                    Save tasks
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <div class="border-t border-slate-100"></div>
+
             <!-- Soul config form -->
             <form method="POST" action="/agents/soul" class="space-y-3">
               <input type="hidden" name="email" value="{{ agent.email }}">

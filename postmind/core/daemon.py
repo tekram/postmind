@@ -12,7 +12,7 @@ def _triage_account(email: str) -> None:
     """Run one heartbeat cycle for a single account: fetch new mail, classify, apply rules."""
     from postmind.config import get_settings, load_account_config, token_path_for
     from postmind.core.account_registry import list_accounts
-    from postmind.core.storage import AccountRepo, AgentRepo, EmailRepo, get_session
+    from postmind.core.storage import AccountRepo, AgentRepo, get_session
 
     logger.info("Heartbeat: %s", email)
 
@@ -28,6 +28,12 @@ def _triage_account(email: str) -> None:
         if not token.exists():
             logger.warning("No token for %s — skipping heartbeat (run: postmind auth)", email)
             return
+
+    # Load agent feature toggles
+    agent = AgentRepo(get_session()).get_by_email(email)
+    run_rules = getattr(agent, "run_rules", True)
+    run_followups = getattr(agent, "run_followups", True)
+    run_avoidance = getattr(agent, "run_avoidance", False)
 
     found_count = 0
     try:
@@ -55,25 +61,72 @@ def _triage_account(email: str) -> None:
             logger.info("Heartbeat %s: inbox clear", email)
             AccountRepo(get_session()).update_last_synced(email)
             AgentRepo(get_session()).update_after_run(email, found_count=0, status="idle")
-            return
+        else:
+            messages = provider.get_messages_batch(ids)
+            found_count = len(messages)
+            logger.info("Heartbeat %s: %d unread messages", email, found_count)
 
-        messages = provider.get_messages_batch(ids)
-        found_count = len(messages)
-        logger.info("Heartbeat %s: %d unread messages", email, found_count)
+            # Run AI classification if AI mode is enabled
+            settings = get_settings()
+            if settings.ai_mode in ("cloud", "local"):
+                try:
+                    from postmind.core.ai_engine import AIEngine
+                    ai = AIEngine()
+                    classified = ai.classify_emails(messages)
+                    logger.info("Heartbeat %s: classified %d emails", email, len(classified))
+                except Exception as exc:
+                    logger.warning("Heartbeat %s: AI classification failed: %s", email, exc)
 
-        # Run AI classification if AI mode is enabled
-        settings = get_settings()
-        if settings.ai_mode in ("cloud", "local"):
-            try:
-                from postmind.core.ai_engine import AIEngine
-                ai = AIEngine()
-                classified = ai.classify_emails(messages)
-                logger.info("Heartbeat %s: classified %d emails", email, len(classified))
-            except Exception as exc:
-                logger.warning("Heartbeat %s: AI classification failed: %s", email, exc)
+            AccountRepo(get_session()).update_last_synced(email)
+            AgentRepo(get_session()).update_after_run(email, found_count=found_count, status="idle")
 
-        AccountRepo(get_session()).update_last_synced(email)
-        AgentRepo(get_session()).update_after_run(email, found_count=found_count, status="idle")
+        # ── Optional heartbeat tasks (Gmail-only, toggled per agent) ──────────
+
+        if provider_name == "gmail":
+            gmail_client = provider.gmail_client  # type: ignore[attr-defined]
+
+            # Execute active automation rules
+            if run_rules:
+                try:
+                    from postmind.core.bulk_engine import BulkEngine
+                    engine = BulkEngine(gmail_client, email)
+                    results = engine.run_rules(dry_run=False)
+                    total = sum(r.affected_count for r in results.values())
+                    if total:
+                        logger.info("Heartbeat %s: rules applied to %d messages", email, total)
+                except Exception as exc:
+                    logger.warning("Heartbeat %s: rule execution failed: %s", email, exc)
+
+            # Sync follow-up reply detection
+            if run_followups:
+                try:
+                    from postmind.core.follow_up import FollowUpTracker
+                    tracker = FollowUpTracker(gmail_client, email)
+                    replied = tracker.sync_replies()
+                    due = tracker.get_due_follow_ups()
+                    if replied or due:
+                        logger.info(
+                            "Heartbeat %s: %d replies detected, %d follow-ups due",
+                            email, replied, len(due),
+                        )
+                except Exception as exc:
+                    logger.warning("Heartbeat %s: follow-up sync failed: %s", email, exc)
+
+            # Detect avoided emails (needs AI)
+            if run_avoidance:
+                settings = get_settings()
+                if settings.ai_mode in ("cloud", "local"):
+                    try:
+                        from postmind.core.avoidance import AvoidanceDetector
+                        from postmind.core.ai_engine import AIEngine
+                        detector = AvoidanceDetector(gmail_client, email, ai=AIEngine())
+                        avoided = detector.get_avoided_emails(with_insights=False)
+                        if avoided:
+                            logger.info(
+                                "Heartbeat %s: %d emails being avoided", email, len(avoided)
+                            )
+                    except Exception as exc:
+                        logger.warning("Heartbeat %s: avoidance detection failed: %s", email, exc)
 
     except Exception as exc:
         logger.error("Heartbeat %s failed: %s", email, exc, exc_info=True)
