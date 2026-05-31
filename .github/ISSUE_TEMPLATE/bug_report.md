@@ -14,7 +14,7 @@ assignees: ''
 
 ```
 # The exact command you ran
-mailtrim <command> <flags>
+postmind <command> <flags>
 ```
 
 1.
@@ -37,7 +37,7 @@ mailtrim <command> <flags>
 
 - OS: <!-- e.g. macOS 14.4, Ubuntu 22.04 -->
 - Python version: <!-- python3 --version -->
-- mailtrim version: <!-- mailtrim version -->
+- postmind version: <!-- postmind version -->
 - Anthropic key set: yes / no (mock mode)
 
 ## Additional context

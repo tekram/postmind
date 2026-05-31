@@ -3,13 +3,13 @@ requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mailtrim"
+name = "postmind"
 version = "0.4.2"
 description = "Privacy-first email inbox management — Gmail + IMAP, local-first core, optional AI via Anthropic API"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-authors = [{ name = "mailtrim contributors" }]
+authors = [{ name = "postmind contributors" }]
 keywords = [
     "gmail", "email", "inbox", "cleanup", "productivity",
     "cli", "ai", "anthropic", "privacy",
@@ -44,14 +44,14 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/tekram/mailtrim"
-"Bug Tracker" = "https://github.com/tekram/mailtrim/issues"
-"Source Code" = "https://github.com/tekram/mailtrim"
+Homepage = "https://github.com/tekram/postmind"
+"Bug Tracker" = "https://github.com/tekram/postmind/issues"
+"Source Code" = "https://github.com/tekram/postmind"
 
 [project.optional-dependencies]
 # Headless browser support for unsubscribe fallback
 headless = ["playwright>=1.44.0"]
-# Local web UI: mailtrim serve
+# Local web UI: postmind serve
 web = [
     "fastapi>=0.110.0",
     "uvicorn>=0.27.0",
@@ -68,11 +68,11 @@ dev = [
 ]
 
 [project.scripts]
-mailtrim = "mailtrim.cli.main:app"
+postmind = "postmind.cli.main:app"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["mailtrim*"]
+include = ["postmind*"]
 exclude = ["tests*"]
 
 [tool.ruff]
@@ -92,5 +92,5 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["mailtrim"]
+source = ["postmind"]
 omit = ["*/venv/*", "tests/*"]

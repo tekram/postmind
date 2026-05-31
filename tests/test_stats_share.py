@@ -1,4 +1,4 @@
-"""Tests for `mailtrim stats --share` and generate_stats_share_text."""
+"""Tests for `postmind stats --share` and generate_stats_share_text."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def _make_sender(
     inbox_days: int = 200,
     has_unsubscribe: bool = True,
 ):
-    from mailtrim.core.sender_stats import SenderGroup
+    from postmind.core.sender_stats import SenderGroup
 
     now = datetime.now(timezone.utc)
     return SenderGroup(
@@ -38,7 +38,7 @@ def _make_sender(
 
 
 def _invoke(*args: str, groups=None):
-    from mailtrim.cli.main import app
+    from postmind.cli.main import app
 
     mock_client = MagicMock()
     mock_client.get_profile.return_value = {
@@ -52,9 +52,9 @@ def _invoke(*args: str, groups=None):
         groups = [_make_sender()]
 
     with (
-        patch("mailtrim.cli.main._get_provider", return_value=mock_client),
-        patch("mailtrim.core.sender_stats.fetch_sender_groups", return_value=groups),
-        patch("mailtrim.cli.main._record"),
+        patch("postmind.cli.main._get_provider", return_value=mock_client),
+        patch("postmind.core.sender_stats.fetch_sender_groups", return_value=groups),
+        patch("postmind.cli.main._record"),
     ):
         return runner.invoke(app, ["stats", *args], catch_exceptions=False)
 
@@ -64,7 +64,7 @@ def _invoke(*args: str, groups=None):
 
 class TestGenerateStatsShareText:
     def test_twitter_under_280_chars(self):
-        from mailtrim.core.sender_stats import generate_stats_share_text
+        from postmind.core.sender_stats import generate_stats_share_text
 
         text = generate_stats_share_text(
             reclaimable_mb_val=87.5,
@@ -77,7 +77,7 @@ class TestGenerateStatsShareText:
         assert len(text) <= 280
 
     def test_twitter_contains_emoji(self):
-        from mailtrim.core.sender_stats import generate_stats_share_text
+        from postmind.core.sender_stats import generate_stats_share_text
 
         text = generate_stats_share_text(
             reclaimable_mb_val=10.0,
@@ -90,7 +90,7 @@ class TestGenerateStatsShareText:
         assert "🧹" in text
 
     def test_plain_no_emoji(self):
-        from mailtrim.core.sender_stats import generate_stats_share_text
+        from postmind.core.sender_stats import generate_stats_share_text
 
         text = generate_stats_share_text(
             reclaimable_mb_val=10.0,
@@ -103,7 +103,7 @@ class TestGenerateStatsShareText:
         assert "🧹" not in text
 
     def test_contains_email_count(self):
-        from mailtrim.core.sender_stats import generate_stats_share_text
+        from postmind.core.sender_stats import generate_stats_share_text
 
         text = generate_stats_share_text(
             reclaimable_mb_val=50.0,
@@ -115,7 +115,7 @@ class TestGenerateStatsShareText:
         assert "1,234" in text
 
     def test_contains_sender_count(self):
-        from mailtrim.core.sender_stats import generate_stats_share_text
+        from postmind.core.sender_stats import generate_stats_share_text
 
         text = generate_stats_share_text(
             reclaimable_mb_val=20.0,
@@ -128,7 +128,7 @@ class TestGenerateStatsShareText:
         assert "sender" in text
 
     def test_contains_mb_when_nonzero(self):
-        from mailtrim.core.sender_stats import generate_stats_share_text
+        from postmind.core.sender_stats import generate_stats_share_text
 
         text = generate_stats_share_text(
             reclaimable_mb_val=42.5,
@@ -140,7 +140,7 @@ class TestGenerateStatsShareText:
         assert "42.5 MB" in text
 
     def test_no_mb_when_zero(self):
-        from mailtrim.core.sender_stats import generate_stats_share_text
+        from postmind.core.sender_stats import generate_stats_share_text
 
         text = generate_stats_share_text(
             reclaimable_mb_val=0,
@@ -153,7 +153,7 @@ class TestGenerateStatsShareText:
 
     def test_contains_top_domains_as_pretty_labels(self):
         """Known domains are displayed as human-readable labels, not raw domain names."""
-        from mailtrim.core.sender_stats import generate_stats_share_text
+        from postmind.core.sender_stats import generate_stats_share_text
 
         text = generate_stats_share_text(
             reclaimable_mb_val=5.0,
@@ -171,7 +171,7 @@ class TestGenerateStatsShareText:
 
     def test_no_personal_data(self):
         """Email addresses must never appear in share text."""
-        from mailtrim.core.sender_stats import generate_stats_share_text
+        from postmind.core.sender_stats import generate_stats_share_text
 
         text = generate_stats_share_text(
             reclaimable_mb_val=10.0,
@@ -183,7 +183,7 @@ class TestGenerateStatsShareText:
         assert "@" not in text
 
     def test_contains_repo_url(self):
-        from mailtrim.core.sender_stats import generate_stats_share_text
+        from postmind.core.sender_stats import generate_stats_share_text
 
         text = generate_stats_share_text(
             reclaimable_mb_val=5.0,
@@ -192,10 +192,10 @@ class TestGenerateStatsShareText:
             top_domains=[],
             scan_seconds=1,
         )
-        assert "github.com/tekram/mailtrim" in text
+        assert "github.com/tekram/postmind" in text
 
     def test_scan_speed_shown(self):
-        from mailtrim.core.sender_stats import generate_stats_share_text
+        from postmind.core.sender_stats import generate_stats_share_text
 
         text = generate_stats_share_text(
             reclaimable_mb_val=5.0,
@@ -208,7 +208,7 @@ class TestGenerateStatsShareText:
 
     def test_twitter_stays_under_280_with_long_domains(self):
         """Even with many long domain names the output must not exceed 280."""
-        from mailtrim.core.sender_stats import generate_stats_share_text
+        from postmind.core.sender_stats import generate_stats_share_text
 
         long_domains = [
             "verylongnewsletterdomain.example.com",
@@ -226,7 +226,7 @@ class TestGenerateStatsShareText:
         assert len(text) <= 280
 
     def test_singular_sender_word(self):
-        from mailtrim.core.sender_stats import generate_stats_share_text
+        from postmind.core.sender_stats import generate_stats_share_text
 
         text = generate_stats_share_text(
             reclaimable_mb_val=5.0,
@@ -251,7 +251,7 @@ class TestShareExamples:
     """
 
     def _gen(self, **kw):
-        from mailtrim.core.sender_stats import generate_stats_share_text
+        from postmind.core.sender_stats import generate_stats_share_text
 
         defaults = dict(
             reclaimable_mb_val=0.0,
@@ -287,7 +287,7 @@ class TestShareExamples:
         assert len(text) <= 200
         # Has emoji and URL
         assert "🧹" in text
-        assert "github.com/tekram/mailtrim" in text
+        assert "github.com/tekram/postmind" in text
 
     def test_example_single_sender_twitter(self):
         """Single-sender result uses singular 'sender', not 'senders'."""
@@ -343,7 +343,7 @@ class TestShareExamples:
         assert "Notion" in text
         assert "Top sources:" in text
         assert "3s" in text
-        assert "github.com/tekram/mailtrim" in text
+        assert "github.com/tekram/postmind" in text
 
     def test_example_sensitive_domain_filtered(self):
         """Sensitive domains (bank, health …) are silently excluded from share text."""
@@ -377,7 +377,7 @@ class TestStatsCLIShare:
 
     def test_share_shows_github_url(self):
         result = _invoke("--share")
-        assert "github.com/tekram/mailtrim" in result.output
+        assert "github.com/tekram/postmind" in result.output
 
     def test_share_shows_copy_ready_section(self):
         result = _invoke("--share")

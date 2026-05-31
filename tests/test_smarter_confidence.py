@@ -21,7 +21,7 @@ def _make_group(
     """Build a minimal SenderGroup for scoring tests."""
     from datetime import timedelta
 
-    from mailtrim.core.sender_stats import SenderGroup
+    from postmind.core.sender_stats import SenderGroup
 
     now = datetime.now(timezone.utc)
     earliest = now - timedelta(days=inbox_days)
@@ -43,7 +43,7 @@ def _make_group(
 
 def test_no_penalty_for_clean_newsletter():
     """Newsletters with no transactional keywords should score high."""
-    from mailtrim.core.sender_stats import compute_confidence_score
+    from postmind.core.sender_stats import compute_confidence_score
 
     g = _make_group(
         subjects=["Weekly digest: top stories this week", "Your weekly roundup"],
@@ -58,7 +58,7 @@ def test_no_penalty_for_clean_newsletter():
 
 def test_penalty_applied_for_receipt_keyword():
     """'receipt' in subject line should trigger 25-pt penalty."""
-    from mailtrim.core.sender_stats import compute_confidence_score
+    from postmind.core.sender_stats import compute_confidence_score
 
     g = _make_group(
         subjects=["Your order receipt #12345"],
@@ -71,7 +71,7 @@ def test_penalty_applied_for_receipt_keyword():
 
 
 def test_penalty_applied_for_invoice_keyword():
-    from mailtrim.core.sender_stats import compute_confidence_score
+    from postmind.core.sender_stats import compute_confidence_score
 
     g = _make_group(subjects=["Invoice #INV-2024-001 from Acme Corp"])
     score = compute_confidence_score(g)
@@ -79,7 +79,7 @@ def test_penalty_applied_for_invoice_keyword():
 
 
 def test_penalty_applied_for_security_alert():
-    from mailtrim.core.sender_stats import compute_confidence_score
+    from postmind.core.sender_stats import compute_confidence_score
 
     g = _make_group(subjects=["Security alert: new login detected"])
     score = compute_confidence_score(g)
@@ -88,7 +88,7 @@ def test_penalty_applied_for_security_alert():
 
 def test_penalty_does_not_go_below_zero():
     """Low-signal sender with a transactional keyword should floor at 0, not go negative."""
-    from mailtrim.core.sender_stats import compute_confidence_score
+    from postmind.core.sender_stats import compute_confidence_score
 
     g = _make_group(
         subjects=["Your payment receipt"],
@@ -102,7 +102,7 @@ def test_penalty_does_not_go_below_zero():
 
 def test_penalty_not_triggered_by_partial_word():
     """'ordering' should not trigger the 'order' keyword (substring check is word-safe)."""
-    from mailtrim.core.sender_stats import compute_confidence_score
+    from postmind.core.sender_stats import compute_confidence_score
 
     # "ordering" contains "order" as a substring — we accept this conservative behaviour
     # but document it here so the decision is explicit, not accidental.
@@ -120,7 +120,7 @@ def test_penalty_not_triggered_by_partial_word():
 
 def test_confidence_reason_includes_transactional():
     """confidence_reason() should mention transactional keywords when detected."""
-    from mailtrim.core.sender_stats import confidence_reason
+    from postmind.core.sender_stats import confidence_reason
 
     g = _make_group(subjects=["Your invoice is ready"])
     reason = confidence_reason(g)
@@ -128,7 +128,7 @@ def test_confidence_reason_includes_transactional():
 
 
 def test_confidence_reason_no_transactional_for_newsletter():
-    from mailtrim.core.sender_stats import confidence_reason
+    from postmind.core.sender_stats import confidence_reason
 
     g = _make_group(subjects=["Top 10 stories this week", "Newsletter Vol. 42"])
     reason = confidence_reason(g)
@@ -139,7 +139,7 @@ def test_confidence_reason_no_transactional_for_newsletter():
 
 
 def test_blocklist_add_and_list():
-    from mailtrim.core.storage import BlocklistRepo, get_session
+    from postmind.core.storage import BlocklistRepo, get_session
 
     repo = BlocklistRepo(get_session())
     repo.add("user@gmail.com", "bank@example.com")
@@ -153,7 +153,7 @@ def test_blocklist_add_and_list():
 
 def test_blocklist_add_idempotent():
     """Adding the same sender twice should not create duplicates."""
-    from mailtrim.core.storage import BlocklistRepo, get_session
+    from postmind.core.storage import BlocklistRepo, get_session
 
     repo = BlocklistRepo(get_session())
     repo.add("user@gmail.com", "bank@example.com")
@@ -164,7 +164,7 @@ def test_blocklist_add_idempotent():
 
 
 def test_blocklist_remove():
-    from mailtrim.core.storage import BlocklistRepo, get_session
+    from postmind.core.storage import BlocklistRepo, get_session
 
     repo = BlocklistRepo(get_session())
     repo.add("user@gmail.com", "bank@example.com")
@@ -175,7 +175,7 @@ def test_blocklist_remove():
 
 
 def test_blocklist_remove_nonexistent_returns_false():
-    from mailtrim.core.storage import BlocklistRepo, get_session
+    from postmind.core.storage import BlocklistRepo, get_session
 
     repo = BlocklistRepo(get_session())
     removed = repo.remove("user@gmail.com", "nobody@example.com")
@@ -183,7 +183,7 @@ def test_blocklist_remove_nonexistent_returns_false():
 
 
 def test_blocklist_blocked_emails_set():
-    from mailtrim.core.storage import BlocklistRepo, get_session
+    from postmind.core.storage import BlocklistRepo, get_session
 
     repo = BlocklistRepo(get_session())
     repo.add("user@gmail.com", "bank@example.com")
@@ -195,7 +195,7 @@ def test_blocklist_blocked_emails_set():
 
 def test_blocklist_scoped_to_account():
     """Blocked senders for account A should not appear for account B."""
-    from mailtrim.core.storage import BlocklistRepo, get_session
+    from postmind.core.storage import BlocklistRepo, get_session
 
     repo = BlocklistRepo(get_session())
     repo.add("alice@gmail.com", "spam@example.com")
@@ -204,7 +204,7 @@ def test_blocklist_scoped_to_account():
 
 
 def test_blocklist_undo_feedback_reason():
-    from mailtrim.core.storage import BlocklistRepo, get_session
+    from postmind.core.storage import BlocklistRepo, get_session
 
     repo = BlocklistRepo(get_session())
     repo.add("user@gmail.com", "news@example.com", reason="undo_feedback")

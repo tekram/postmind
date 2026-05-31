@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typer.testing import CliRunner
 
-from mailtrim import __version__
-from mailtrim.cli.main import app
+from postmind import __version__
+from postmind.cli.main import app
 
 runner = CliRunner()
 
@@ -17,12 +17,12 @@ def test_version_flag_exits_zero():
 
 def test_version_flag_output():
     result = runner.invoke(app, ["--version"])
-    assert result.output.strip() == f"mailtrim {__version__}"
+    assert result.output.strip() == f"postmind {__version__}"
 
 
 def test_version_flag_short_form():
     result = runner.invoke(app, ["-V"])
-    assert result.output.strip() == f"mailtrim {__version__}"
+    assert result.output.strip() == f"postmind {__version__}"
 
 
 def test_version_command_exits_zero():
@@ -32,7 +32,7 @@ def test_version_command_exits_zero():
 
 def test_version_command_output():
     result = runner.invoke(app, ["version"])
-    assert result.output.strip() == f"mailtrim {__version__}"
+    assert result.output.strip() == f"postmind {__version__}"
 
 
 def test_version_contains_package_version():

@@ -21,7 +21,7 @@ def _use_clean_db(clean_db):
 
 class TestIMAPBatchUntrash:
     def _make_provider(self):
-        from mailtrim.core.providers.imap import IMAPProvider
+        from postmind.core.providers.imap import IMAPProvider
 
         p = IMAPProvider.__new__(IMAPProvider)
         p._server = "imap.example.com"
@@ -111,7 +111,7 @@ class TestIMAPBatchUntrash:
 
 
 def test_gmail_batch_untrash_calls_untrash_per_id():
-    from mailtrim.core.providers.gmail import GmailProvider
+    from postmind.core.providers.gmail import GmailProvider
 
     mock_client = MagicMock()
     provider = GmailProvider(client=mock_client)
@@ -126,7 +126,7 @@ def test_gmail_batch_untrash_calls_untrash_per_id():
 
 
 def test_gmail_batch_untrash_empty_returns_zero():
-    from mailtrim.core.providers.gmail import GmailProvider
+    from postmind.core.providers.gmail import GmailProvider
 
     provider = GmailProvider(client=MagicMock())
     assert provider.batch_untrash([]) == 0
@@ -137,7 +137,7 @@ def test_gmail_batch_untrash_empty_returns_zero():
 
 def _seed_undo_log(account_email: str, message_ids: list[str]) -> int:
     """Insert a trash undo log entry and return its ID."""
-    from mailtrim.core.storage import UndoLogRepo, get_session
+    from postmind.core.storage import UndoLogRepo, get_session
 
     repo = UndoLogRepo(get_session())
     entry = repo.record(
@@ -152,7 +152,7 @@ def _seed_undo_log(account_email: str, message_ids: list[str]) -> int:
 
 class TestUndoIMAP:
     def _invoke(self, log_id: int | None, restore_count: int = 3) -> object:
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
         mock_provider = MagicMock()
         mock_provider.batch_untrash.return_value = restore_count
@@ -171,8 +171,8 @@ class TestUndoIMAP:
             args.insert(1, str(log_id))
 
         with (
-            patch("mailtrim.cli.main._get_provider", return_value=mock_provider),
-            patch("mailtrim.cli.main._record"),
+            patch("postmind.cli.main._get_provider", return_value=mock_provider),
+            patch("postmind.cli.main._record"),
         ):
             return runner.invoke(
                 app,
@@ -190,7 +190,7 @@ class TestUndoIMAP:
         assert "2" in result.output
 
     def test_restore_calls_batch_untrash(self):
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
         ids = ["uid1", "uid2", "uid3"]
         log_id = _seed_undo_log("user@example.com", ids)
@@ -199,8 +199,8 @@ class TestUndoIMAP:
         mock_provider.batch_untrash.return_value = 3
 
         with (
-            patch("mailtrim.cli.main._get_provider", return_value=mock_provider),
-            patch("mailtrim.cli.main._record"),
+            patch("postmind.cli.main._get_provider", return_value=mock_provider),
+            patch("postmind.cli.main._record"),
         ):
             result = runner.invoke(
                 app,
@@ -235,7 +235,7 @@ class TestUndoIMAP:
         assert "Partial restore" in result.output or "1 of 3" in result.output
 
     def test_unsupported_operation_exits_with_message(self):
-        from mailtrim.core.storage import UndoLogRepo, get_session
+        from postmind.core.storage import UndoLogRepo, get_session
 
         repo = UndoLogRepo(get_session())
         entry = repo.record(
@@ -251,7 +251,7 @@ class TestUndoIMAP:
         assert "archive" in result.output.lower() or "not supported" in result.output.lower()
 
     def test_missing_imap_user_exits(self):
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
         result = runner.invoke(
             app,
@@ -270,9 +270,9 @@ def test_purge_domain_mode_creates_undo_log():
     """Domain-mode purge must record an undo log so the user can restore."""
     from datetime import datetime, timedelta, timezone
 
-    from mailtrim.cli.main import app
-    from mailtrim.core.sender_stats import SenderGroup
-    from mailtrim.core.storage import UndoLogRepo, get_session
+    from postmind.cli.main import app
+    from postmind.core.sender_stats import SenderGroup
+    from postmind.core.storage import UndoLogRepo, get_session
 
     now = datetime.now(timezone.utc)
     group = SenderGroup(
@@ -298,9 +298,9 @@ def test_purge_domain_mode_creates_undo_log():
     mock_client.batch_trash.return_value = 5
 
     with (
-        patch("mailtrim.cli.main._get_provider", return_value=mock_client),
-        patch("mailtrim.core.sender_stats.fetch_sender_groups", return_value=[group]),
-        patch("mailtrim.cli.main._record"),
+        patch("postmind.cli.main._get_provider", return_value=mock_client),
+        patch("postmind.core.sender_stats.fetch_sender_groups", return_value=[group]),
+        patch("postmind.cli.main._record"),
     ):
         result = runner.invoke(
             app,
@@ -318,4 +318,4 @@ def test_purge_domain_mode_creates_undo_log():
     assert "example.com" in entries[0].description
 
     # Verify undo ID is shown in output
-    assert "mailtrim undo" in result.output
+    assert "postmind undo" in result.output

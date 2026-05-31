@@ -248,7 +248,7 @@ class BulkEngine:
         elif action == "trash":
             return self.client.batch_trash(message_ids)
         elif action == "label":
-            label_name = params.get("label_name", "mailtrim/auto")
+            label_name = params.get("label_name", "postmind/auto")
             label_id = self.client.get_or_create_label(label_name)
             return self.client.batch_label(message_ids, add=[label_id])
         elif action == "mark_read":

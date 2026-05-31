@@ -489,8 +489,8 @@ def generate_share_text(
     Generate a concise, copyable share summary.
 
     Examples:
-      "Freed 87 MB from 3 senders (495 emails) using mailtrim 🎉"
-      "Freed 87 MB from 3 senders (495 emails) in 12s using mailtrim 🎉"
+      "Freed 87 MB from 3 senders (495 emails) using postmind 🎉"
+      "Freed 87 MB from 3 senders (495 emails) in 12s using postmind 🎉"
 
     elapsed_seconds=None means the user is previewing (stats --share),
     not reporting an actual completed purge.
@@ -499,13 +499,13 @@ def generate_share_text(
     sender_word = "sender" if sender_count == 1 else "senders"
     return (
         f"Freed {freed_mb} MB from {sender_count} {sender_word} "
-        f"({email_count:,} emails{time_part}) using mailtrim 🎉"
+        f"({email_count:,} emails{time_part}) using postmind 🎉"
     )
 
 
 # ── Stats share text ─────────────────────────────────────────────────────────
 
-_REPO_URL = "https://github.com/tekram/mailtrim"
+_REPO_URL = "https://github.com/tekram/postmind"
 
 # Substrings that indicate a domain carries sensitive content.
 # Domains matching any of these are silently excluded from share text.
@@ -593,7 +593,7 @@ def generate_stats_share_text(
     fmt: str = "twitter",
 ) -> str:
     """
-    Share text for ``mailtrim stats --share`` — describes what *could* be cleaned.
+    Share text for ``postmind stats --share`` — describes what *could* be cleaned.
 
     Format
     ------
@@ -748,20 +748,20 @@ def generate_viral_share_text(
     email_count: int,
     reclaim_pct: float = 0.0,
     elapsed_seconds: int | None = None,
-    repo_url: str = "https://github.com/tekram/mailtrim",
+    repo_url: str = "https://github.com/tekram/postmind",
 ) -> str:
     """
     Generate a multi-line, tweet/Slack-shaped share text designed to be
     copied and pasted. Reads like a brag, not a log line.
 
     Example output:
-      🤯 495 emails deleted · 87 MB freed in 8s using mailtrim
+      🤯 495 emails deleted · 87 MB freed in 8s using postmind
          • 3 senders responsible
          • My inbox was 30% clutter — now it's clean
          • ~41 min of reading time reclaimed
 
       Core cleanup runs locally — no API key needed. Free forever.
-      → https://github.com/tekram/mailtrim
+      → https://github.com/tekram/postmind
     """
     time_part = f" in {elapsed_seconds}s" if elapsed_seconds is not None else ""
     pct_line = (
@@ -775,7 +775,7 @@ def generate_viral_share_text(
     )
     sender_word = "sender" if sender_count == 1 else "senders"
     return (
-        f"🤯 {email_count:,} emails deleted · {freed_mb} MB freed{time_part} using mailtrim\n"
+        f"🤯 {email_count:,} emails deleted · {freed_mb} MB freed{time_part} using postmind\n"
         f"   • {sender_count} {sender_word} responsible\n"
         f"   • Core cleanup runs locally — no API key needed"
         + pct_line
@@ -884,7 +884,7 @@ class Action:
     label: str  # "Delete all", "Keep last 10", etc.
     savings_mb: float  # Estimated MB freed (exact or ~)
     savings_exact: bool  # True = exact, False = estimate
-    command: str  # Ready-to-run mailtrim command
+    command: str  # Ready-to-run postmind command
 
 
 @dataclass
@@ -914,9 +914,9 @@ def generate_recommendations(
     - Tiny (< 1 MB)       → Delete older than 30d
 
     Commands use structured flags (not NL strings) for reliability:
-      mailtrim purge --domain example.com --yes
-      mailtrim purge --domain example.com --keep 10
-      mailtrim purge --domain example.com --older-than 90
+      postmind purge --domain example.com --yes
+      postmind purge --domain example.com --keep 10
+      postmind purge --domain example.com --older-than 90
     """
 
     # Rank by impact weighted by confidence so low-confidence senders don't
@@ -951,7 +951,7 @@ def generate_recommendations(
                     label="Review manually",
                     savings_mb=0,
                     savings_exact=True,
-                    command=f"mailtrim purge --domain {domain} --dry-run",
+                    command=f"postmind purge --domain {domain} --dry-run",
                 )
             )
             if count > 5:
@@ -962,7 +962,7 @@ def generate_recommendations(
                         label=f"Keep latest {keep}",
                         savings_mb=round(size_mb * fraction, 1),
                         savings_exact=False,
-                        command=f"mailtrim purge --domain {domain} --keep {keep}",
+                        command=f"postmind purge --domain {domain} --keep {keep}",
                     )
                 )
         else:
@@ -973,7 +973,7 @@ def generate_recommendations(
                         label="Delete all",
                         savings_mb=size_mb,
                         savings_exact=True,
-                        command=f"mailtrim purge --domain {domain} --yes",
+                        command=f"postmind purge --domain {domain} --yes",
                     )
                 )
 
@@ -985,7 +985,7 @@ def generate_recommendations(
                         label="Mark all as read",
                         savings_mb=0,
                         savings_exact=True,
-                        command=f"mailtrim bulk mark-read --domain {domain}",
+                        command=f"postmind bulk mark-read --domain {domain}",
                     )
                 )
                 if days >= 30:
@@ -994,7 +994,7 @@ def generate_recommendations(
                             label="Delete older than 30d",
                             savings_mb=round(size_mb * 0.85, 1),
                             savings_exact=False,
-                            command=f"mailtrim purge --domain {domain} --older-than 30",
+                            command=f"postmind purge --domain {domain} --older-than 30",
                         )
                     )
 
@@ -1007,7 +1007,7 @@ def generate_recommendations(
                         label=f"Keep last {keep}",
                         savings_mb=round(size_mb * fraction_deleted, 1),
                         savings_exact=False,
-                        command=f"mailtrim purge --domain {domain} --keep {keep}",
+                        command=f"postmind purge --domain {domain} --keep {keep}",
                     )
                 )
 
@@ -1018,7 +1018,7 @@ def generate_recommendations(
                         label="Delete older than 90d",
                         savings_mb=round(size_mb * 0.85, 1),
                         savings_exact=False,
-                        command=f"mailtrim purge --domain {domain} --older-than 90",
+                        command=f"postmind purge --domain {domain} --older-than 90",
                     )
                 )
 
@@ -1029,7 +1029,7 @@ def generate_recommendations(
                         label="Delete older than 30d",
                         savings_mb=round(size_mb * 0.8, 1),
                         savings_exact=False,
-                        command=f"mailtrim purge --domain {domain} --older-than 30",
+                        command=f"postmind purge --domain {domain} --older-than 30",
                     )
                 )
 

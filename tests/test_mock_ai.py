@@ -2,8 +2,8 @@
 
 import pytest
 
-from mailtrim.core.gmail_client import Message, MessageHeader
-from mailtrim.core.mock_ai import MockAIEngine, _heuristic_parse, get_ai_engine
+from postmind.core.gmail_client import Message, MessageHeader
+from postmind.core.mock_ai import MockAIEngine, _heuristic_parse, get_ai_engine
 
 
 def _msg(
@@ -206,7 +206,7 @@ def test_get_ai_engine_returns_mock_without_key(monkeypatch):
 
 
 def test_get_ai_engine_returns_real_with_key(monkeypatch):
-    from mailtrim.core.ai_engine import AIEngine
+    from postmind.core.ai_engine import AIEngine
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake-key-for-testing")
     engine = get_ai_engine()

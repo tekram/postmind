@@ -1,4 +1,4 @@
-"""Central configuration — reads from env vars and ~/.mailtrim/config.toml."""
+"""Central configuration — reads from env vars and ~/.postmind/config.toml."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Default data directory: ~/.mailtrim/
-DATA_DIR = Path(os.environ.get("MAILTRIM_DIR", Path.home() / ".mailtrim"))
-DB_PATH = DATA_DIR / "mailtrim.db"
+# Default data directory: ~/.postmind/
+DATA_DIR = Path(os.environ.get("POSTMIND_DIR", Path.home() / ".postmind"))
+DB_PATH = DATA_DIR / "postmind.db"
 CREDENTIALS_PATH = DATA_DIR / "credentials.json"  # OAuth client secret (downloaded from GCP)
 TOKEN_PATH = DATA_DIR / "token.json"  # OAuth access/refresh token (generated)
 UNDO_LOG_DIR = DATA_DIR / "undo_logs"
@@ -28,7 +28,7 @@ def token_path_for(email: str) -> Path:
 
 def get_active_account() -> str | None:
     """Return the active account email. Env var override takes precedence (for --account flag)."""
-    override = os.environ.get("_MAILTRIM_OVERRIDE_ACCOUNT")
+    override = os.environ.get("_POSTMIND_OVERRIDE_ACCOUNT") or os.environ.get("_MAILTRIM_OVERRIDE_ACCOUNT")
     if override:
         return override.strip() or None
     try:
@@ -65,7 +65,7 @@ def save_account_config(email: str, config: dict) -> None:
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_prefix="MAILTRIM_",
+        env_prefix="POSTMIND_",
         env_file=str(DATA_DIR / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
@@ -90,7 +90,7 @@ class Settings(BaseSettings):
     follow_up_default_days: int = 3  # Default follow-up reminder window
 
     # Deprecated: per-account provider and IMAP settings now live in
-    # ~/.mailtrim/accounts/<email>.json via save_account_config()/load_account_config().
+    # ~/.postmind/accounts/<email>.json via save_account_config()/load_account_config().
     # These fields remain for backward-compat fallback on unmigrated installs
     # (web/server.py and cli/main.py use them as the last-resort tier in a
     # four-way priority: CLI flag → per-account config → these Settings → default).

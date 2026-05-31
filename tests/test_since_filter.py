@@ -17,7 +17,7 @@ runner = CliRunner()
 
 class TestValidateSince:
     def _v(self, value: str) -> int:
-        from mailtrim.core.validation import validate_since
+        from postmind.core.validation import validate_since
 
         return validate_since(value)
 
@@ -70,7 +70,7 @@ class TestValidateSince:
 
 class TestImapQueryTranslation:
     def _translate(self, query: str):
-        from mailtrim.core.providers.imap import _gmail_query_to_imap
+        from postmind.core.providers.imap import _gmail_query_to_imap
 
         return _gmail_query_to_imap(query)
 
@@ -119,7 +119,7 @@ class TestGmailQueryConstruction:
     """Verify that --since injects newer_than into the query string."""
 
     def _make_client(self, groups=None):
-        from mailtrim.core.sender_stats import SenderGroup
+        from postmind.core.sender_stats import SenderGroup
 
         if groups is None:
             now = datetime.now(timezone.utc)
@@ -148,7 +148,7 @@ class TestGmailQueryConstruction:
         return mock, groups
 
     def test_stats_since_appends_newer_than_to_query(self):
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
         mock_client, groups = self._make_client()
         captured_queries: list[str] = []
@@ -158,8 +158,8 @@ class TestGmailQueryConstruction:
             return groups
 
         with (
-            patch("mailtrim.cli.main._get_provider", return_value=mock_client),
-            patch("mailtrim.core.sender_stats.fetch_sender_groups", side_effect=fake_fetch),
+            patch("postmind.cli.main._get_provider", return_value=mock_client),
+            patch("postmind.core.sender_stats.fetch_sender_groups", side_effect=fake_fetch),
         ):
             result = runner.invoke(app, ["stats", "--since", "30d"], catch_exceptions=False)
 
@@ -167,7 +167,7 @@ class TestGmailQueryConstruction:
         assert any("newer_than:30d" in q for q in captured_queries)
 
     def test_stats_no_since_no_newer_than(self):
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
         mock_client, groups = self._make_client()
         captured_queries: list[str] = []
@@ -177,8 +177,8 @@ class TestGmailQueryConstruction:
             return groups
 
         with (
-            patch("mailtrim.cli.main._get_provider", return_value=mock_client),
-            patch("mailtrim.core.sender_stats.fetch_sender_groups", side_effect=fake_fetch),
+            patch("postmind.cli.main._get_provider", return_value=mock_client),
+            patch("postmind.core.sender_stats.fetch_sender_groups", side_effect=fake_fetch),
         ):
             result = runner.invoke(app, ["stats"], catch_exceptions=False)
 
@@ -186,7 +186,7 @@ class TestGmailQueryConstruction:
         assert all("newer_than" not in q for q in captured_queries)
 
     def test_stats_since_with_scope_anywhere(self):
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
         mock_client, groups = self._make_client()
         captured_queries: list[str] = []
@@ -196,8 +196,8 @@ class TestGmailQueryConstruction:
             return groups
 
         with (
-            patch("mailtrim.cli.main._get_provider", return_value=mock_client),
-            patch("mailtrim.core.sender_stats.fetch_sender_groups", side_effect=fake_fetch),
+            patch("postmind.cli.main._get_provider", return_value=mock_client),
+            patch("postmind.core.sender_stats.fetch_sender_groups", side_effect=fake_fetch),
         ):
             result = runner.invoke(
                 app, ["stats", "--since", "7d", "--scope", "anywhere"], catch_exceptions=False
@@ -207,7 +207,7 @@ class TestGmailQueryConstruction:
         assert any("newer_than:7d" in q and "in:anywhere" in q for q in captured_queries)
 
     def test_purge_since_appends_newer_than_to_query(self):
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
         mock_client, groups = self._make_client()
         captured_queries: list[str] = []
@@ -217,10 +217,10 @@ class TestGmailQueryConstruction:
             return groups
 
         with (
-            patch("mailtrim.cli.main._get_provider", return_value=mock_client),
-            patch("mailtrim.cli.main._get_account_email", return_value="user@gmail.com"),
-            patch("mailtrim.core.sender_stats.fetch_sender_groups", side_effect=fake_fetch),
-            patch("mailtrim.core.storage.BlocklistRepo") as mock_bl,
+            patch("postmind.cli.main._get_provider", return_value=mock_client),
+            patch("postmind.cli.main._get_account_email", return_value="user@gmail.com"),
+            patch("postmind.core.sender_stats.fetch_sender_groups", side_effect=fake_fetch),
+            patch("postmind.core.storage.BlocklistRepo") as mock_bl,
         ):
             mock_bl.return_value.blocked_emails.return_value = set()
             result = runner.invoke(
@@ -231,7 +231,7 @@ class TestGmailQueryConstruction:
         assert any("newer_than:30d" in q for q in captured_queries)
 
     def test_purge_domain_and_since(self):
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
         mock_client, groups = self._make_client()
         captured_queries: list[str] = []
@@ -241,10 +241,10 @@ class TestGmailQueryConstruction:
             return groups
 
         with (
-            patch("mailtrim.cli.main._get_provider", return_value=mock_client),
-            patch("mailtrim.cli.main._get_account_email", return_value="user@gmail.com"),
-            patch("mailtrim.core.sender_stats.fetch_sender_groups", side_effect=fake_fetch),
-            patch("mailtrim.core.storage.BlocklistRepo") as mock_bl,
+            patch("postmind.cli.main._get_provider", return_value=mock_client),
+            patch("postmind.cli.main._get_account_email", return_value="user@gmail.com"),
+            patch("postmind.core.sender_stats.fetch_sender_groups", side_effect=fake_fetch),
+            patch("postmind.core.storage.BlocklistRepo") as mock_bl,
         ):
             mock_bl.return_value.blocked_emails.return_value = set()
             result = runner.invoke(
@@ -271,43 +271,43 @@ class TestCLIValidationErrors:
         return mock
 
     def test_stats_invalid_since_exits_1(self):
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
-        with patch("mailtrim.cli.main._get_provider", return_value=self._mock_provider()):
+        with patch("postmind.cli.main._get_provider", return_value=self._mock_provider()):
             result = runner.invoke(app, ["stats", "--since", "badvalue"], catch_exceptions=False)
         assert result.exit_code == 1
         assert "Error" in result.output
 
     def test_stats_since_zero_exits_1(self):
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
-        with patch("mailtrim.cli.main._get_provider", return_value=self._mock_provider()):
+        with patch("postmind.cli.main._get_provider", return_value=self._mock_provider()):
             result = runner.invoke(app, ["stats", "--since", "0d"], catch_exceptions=False)
         assert result.exit_code == 1
 
     def test_stats_since_no_d_suffix_exits_1(self):
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
-        with patch("mailtrim.cli.main._get_provider", return_value=self._mock_provider()):
+        with patch("postmind.cli.main._get_provider", return_value=self._mock_provider()):
             result = runner.invoke(app, ["stats", "--since", "30"], catch_exceptions=False)
         assert result.exit_code == 1
 
     def test_purge_invalid_since_exits_1(self):
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
-        with patch("mailtrim.cli.main._get_provider", return_value=self._mock_provider()):
+        with patch("postmind.cli.main._get_provider", return_value=self._mock_provider()):
             result = runner.invoke(app, ["purge", "--since", "xyz"], catch_exceptions=False)
         assert result.exit_code == 1
 
     def test_stats_scope_label_includes_since(self):
         """When --since is used the scan label should mention the time window."""
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
         mock_client = self._mock_provider()
 
         with (
-            patch("mailtrim.cli.main._get_provider", return_value=mock_client),
-            patch("mailtrim.core.sender_stats.fetch_sender_groups", return_value=[]),
+            patch("postmind.cli.main._get_provider", return_value=mock_client),
+            patch("postmind.core.sender_stats.fetch_sender_groups", return_value=[]),
         ):
             result = runner.invoke(app, ["stats", "--since", "7d"], catch_exceptions=False)
 

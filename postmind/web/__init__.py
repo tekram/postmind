@@ -1,1 +1,1 @@
-# mailtrim web interface
+# postmind web interface

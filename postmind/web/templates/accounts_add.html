@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Add Account — mailtrim{% endblock %}
+{% block title %}Add Account — postmind{% endblock %}
 {% block content %}
 <div class="px-8 py-8 max-w-2xl mx-auto">
 
@@ -60,7 +60,7 @@
         </svg>
         <div>
           <p class="text-amber-800 text-sm font-medium">credentials.json not found</p>
-          <p class="text-amber-700 text-xs mt-1">Download it from Google Cloud Console and place it in <code class="bg-amber-100 px-1 rounded">~/.mailtrim/credentials.json</code>, or use the onboarding wizard to upload it.</p>
+          <p class="text-amber-700 text-xs mt-1">Download it from Google Cloud Console and place it in <code class="bg-amber-100 px-1 rounded">~/.postmind/credentials.json</code>, or use the onboarding wizard to upload it.</p>
           <a href="/onboarding?step=1" class="inline-block mt-2 text-xs font-medium text-amber-700 hover:text-amber-900 underline">Open setup wizard &rarr;</a>
         </div>
       </div>
@@ -87,7 +87,7 @@
     </div>
 
     <p class="text-slate-400 text-xs mt-4">
-      Gmail uses OAuth 2.0 — mailtrim never sees your password. Token stored at <code>~/.mailtrim/tokens/</code>.
+      Gmail uses OAuth 2.0 — postmind never sees your password. Token stored at <code>~/.postmind/tokens/</code>.
     </p>
   </div>
 

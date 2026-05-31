@@ -23,7 +23,7 @@ runner = CliRunner()
 
 class TestAiStatusLine:
     def _s(self, mode: str):
-        from mailtrim.core.ai.mode import ai_status_line
+        from postmind.core.ai.mode import ai_status_line
 
         return ai_status_line(mode)
 
@@ -70,14 +70,14 @@ class TestAiStatusLine:
 class TestHandleErrorAIModeError:
     def _invoke_triage_with_off(self):
         """Invoke triage with ai_mode=off so require_cloud raises AIModeError."""
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
         mock_client = MagicMock()
 
         with (
-            patch("mailtrim.cli.main._get_client", return_value=mock_client),
+            patch("postmind.cli.main._get_client", return_value=mock_client),
             patch(
-                "mailtrim.cli.main.get_settings",
+                "postmind.cli.main.get_settings",
                 return_value=MagicMock(ai_mode="off"),
             ),
         ):
@@ -93,7 +93,7 @@ class TestHandleErrorAIModeError:
 
     def test_off_mode_shows_enable_command(self):
         result = self._invoke_triage_with_off()
-        assert "mailtrim config ai-mode" in result.output
+        assert "postmind config ai-mode" in result.output
 
     def test_multiline_error_shows_secondary_lines(self):
         """Each line of AIModeError.message is printed, not just the first."""
@@ -108,7 +108,7 @@ class TestHandleErrorAIModeError:
 
 class TestStatsBadge:
     def _invoke_stats(self, mode: str = "off"):
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
         mock_client = MagicMock()
         mock_client.get_profile.return_value = {
@@ -118,11 +118,11 @@ class TestStatsBadge:
         }
 
         with (
-            patch("mailtrim.cli.main._get_provider", return_value=mock_client),
-            patch("mailtrim.core.sender_stats.fetch_sender_groups", return_value=[]),
-            patch("mailtrim.cli.main._record"),
+            patch("postmind.cli.main._get_provider", return_value=mock_client),
+            patch("postmind.core.sender_stats.fetch_sender_groups", return_value=[]),
+            patch("postmind.cli.main._record"),
             patch(
-                "mailtrim.cli.main.get_settings",
+                "postmind.cli.main.get_settings",
                 return_value=MagicMock(ai_mode=mode),
             ),
         ):
@@ -159,7 +159,7 @@ class TestStatsBadge:
 
 class TestQuickstartBadge:
     def _invoke_quickstart(self, mode: str = "off"):
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
         mock_client = MagicMock()
         mock_client.get_profile.return_value = {
@@ -169,10 +169,10 @@ class TestQuickstartBadge:
         }
 
         with (
-            patch("mailtrim.cli.main._get_provider", return_value=mock_client),
-            patch("mailtrim.core.sender_stats.fetch_sender_groups", return_value=[]),
+            patch("postmind.cli.main._get_provider", return_value=mock_client),
+            patch("postmind.core.sender_stats.fetch_sender_groups", return_value=[]),
             patch(
-                "mailtrim.cli.main.get_settings",
+                "postmind.cli.main.get_settings",
                 return_value=MagicMock(ai_mode=mode, provider="gmail"),
             ),
         ):
@@ -201,15 +201,15 @@ class TestQuickstartBadge:
 
 class TestDoctorBadge:
     def _invoke_doctor(self, mode: str = "off"):
-        from mailtrim.cli.main import app
-        from mailtrim.core.diagnostics import CheckResult
+        from postmind.cli.main import app
+        from postmind.core.diagnostics import CheckResult
 
         ok_results = [CheckResult("Auth token valid", ok=True, message="ok")]
 
         with (
-            patch("mailtrim.core.diagnostics.run_all", return_value=ok_results),
+            patch("postmind.core.diagnostics.run_all", return_value=ok_results),
             patch(
-                "mailtrim.cli.main.get_settings",
+                "postmind.cli.main.get_settings",
                 return_value=MagicMock(ai_mode=mode),
             ),
         ):
@@ -241,7 +241,7 @@ class TestCloudWarning:
         """
         Stub out the command's heavy work but let require_cloud + _cloud_ai_warning run.
         """
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
         mock_client = MagicMock()
         mock_client.get_email_address.return_value = "user@gmail.com"
@@ -249,10 +249,10 @@ class TestCloudWarning:
         mock_client.get_messages_batch.return_value = []
 
         with (
-            patch("mailtrim.cli.main._get_client", return_value=mock_client),
-            patch("mailtrim.cli.main._get_provider", return_value=mock_client),
+            patch("postmind.cli.main._get_client", return_value=mock_client),
+            patch("postmind.cli.main._get_provider", return_value=mock_client),
             patch(
-                "mailtrim.cli.main.get_settings",
+                "postmind.cli.main.get_settings",
                 return_value=MagicMock(ai_mode="cloud"),
             ),
         ):
@@ -280,7 +280,7 @@ class TestCloudWarning:
 
     def test_triage_warning_mentions_disable(self):
         result = self._invoke_with_cloud_mode(["triage"])
-        assert "mailtrim config ai-mode off" in result.output
+        assert "postmind config ai-mode off" in result.output
 
 
 # ── Off-mode blocking ─────────────────────────────────────────────────────────
@@ -288,15 +288,15 @@ class TestCloudWarning:
 
 class TestOffModeBlocking:
     def _invoke_cloud_cmd_with_off(self, command: list[str]):
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
         mock_client = MagicMock()
 
         with (
-            patch("mailtrim.cli.main._get_client", return_value=mock_client),
-            patch("mailtrim.cli.main._get_provider", return_value=mock_client),
+            patch("postmind.cli.main._get_client", return_value=mock_client),
+            patch("postmind.cli.main._get_provider", return_value=mock_client),
             patch(
-                "mailtrim.cli.main.get_settings",
+                "postmind.cli.main.get_settings",
                 return_value=MagicMock(ai_mode="off"),
             ),
         ):
@@ -320,7 +320,7 @@ class TestOffModeBlocking:
 
     def test_triage_off_shows_enable_hint(self):
         result = self._invoke_cloud_cmd_with_off(["triage"])
-        assert "mailtrim config ai-mode" in result.output
+        assert "postmind config ai-mode" in result.output
 
     def test_bulk_off_no_cloud_warning(self):
         """_cloud_ai_warning must NOT fire when mode is off (blocked before reaching it)."""

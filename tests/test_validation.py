@@ -1,9 +1,9 @@
-"""Tests for the input validation module (mailtrim.core.validation)."""
+"""Tests for the input validation module (postmind.core.validation)."""
 
 import pytest
 import typer
 
-from mailtrim.core.validation import validate_domain, validate_older_than, validate_sender_email
+from postmind.core.validation import validate_domain, validate_older_than, validate_sender_email
 
 # ── validate_domain ───────────────────────────────────────────────────────────
 

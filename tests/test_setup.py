@@ -1,4 +1,4 @@
-"""Tests for `mailtrim setup` command."""
+"""Tests for `postmind setup` command."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def _make_sender(
     inbox_days: int = 180,
     has_unsubscribe: bool = True,
 ):
-    from mailtrim.core.sender_stats import SenderGroup
+    from postmind.core.sender_stats import SenderGroup
 
     now = datetime.now(timezone.utc)
     return SenderGroup(
@@ -41,7 +41,7 @@ def _make_sender(
 
 def _mock_checks_ok():
     """Return a patch context that makes all doctor checks pass."""
-    from mailtrim.core.diagnostics import CheckResult
+    from postmind.core.diagnostics import CheckResult
 
     ok_results = [
         CheckResult("Required packages", ok=True, message="ok"),
@@ -53,13 +53,13 @@ def _mock_checks_ok():
         CheckResult("Gmail connection", ok=True, message="ok"),
         CheckResult("Trash access", ok=True, message="ok"),
     ]
-    return patch("mailtrim.core.diagnostics.run_all", return_value=ok_results)
+    return patch("postmind.core.diagnostics.run_all", return_value=ok_results)
 
 
 def _invoke_gmail(groups=None, auth_ok=True, checks_ok=True, credentials_exist=True):
     """Simulate user typing 'G' for Gmail, happy path by default."""
-    from mailtrim.cli.main import app
-    from mailtrim.config import CREDENTIALS_PATH
+    from postmind.cli.main import app
+    from postmind.config import CREDENTIALS_PATH
 
     if groups is None:
         groups = [_make_sender()]
@@ -69,7 +69,7 @@ def _invoke_gmail(groups=None, auth_ok=True, checks_ok=True, credentials_exist=T
     mock_client.get_email_address.return_value = "user@gmail.com"
     mock_client.get_profile.return_value = _GOOD_PROFILE
 
-    from mailtrim.core.diagnostics import CheckResult
+    from postmind.core.diagnostics import CheckResult
 
     if checks_ok:
         check_results = [
@@ -89,35 +89,35 @@ def _invoke_gmail(groups=None, auth_ok=True, checks_ok=True, credentials_exist=T
                 "Gmail connection",
                 ok=False,
                 message="Session expired",
-                fix="mailtrim auth",
+                fix="postmind auth",
             ),
         ]
 
     with (
         patch(
-            "mailtrim.cli.main.CREDENTIALS_PATH",
+            "postmind.cli.main.CREDENTIALS_PATH",
             CREDENTIALS_PATH if not credentials_exist else CREDENTIALS_PATH,
         ),
-        patch("mailtrim.config.CREDENTIALS_PATH", CREDENTIALS_PATH),
+        patch("postmind.config.CREDENTIALS_PATH", CREDENTIALS_PATH),
         patch("pathlib.Path.exists", return_value=credentials_exist),
-        patch("mailtrim.core.gmail_client.authenticate", return_value=mock_creds),
+        patch("postmind.core.gmail_client.authenticate", return_value=mock_creds),
         patch(
-            "mailtrim.cli.main._get_client",
+            "postmind.cli.main._get_client",
             side_effect=Exception("bad auth") if not auth_ok else lambda: mock_client,
         ),
         patch(
-            "mailtrim.core.gmail_client.GmailClient",
+            "postmind.core.gmail_client.GmailClient",
             return_value=mock_client if auth_ok else (_ for _ in ()).throw(Exception("bad auth")),
         ),
-        patch("mailtrim.core.diagnostics.run_all", return_value=check_results),
-        patch("mailtrim.core.sender_stats.fetch_sender_groups", return_value=groups),
+        patch("postmind.core.diagnostics.run_all", return_value=check_results),
+        patch("postmind.core.sender_stats.fetch_sender_groups", return_value=groups),
     ):
         return runner.invoke(app, ["setup"], input="G\n", catch_exceptions=False)
 
 
 def _invoke_imap(groups=None, imap_ok=True):
     """Simulate user typing 'I' for IMAP."""
-    from mailtrim.cli.main import app
+    from postmind.cli.main import app
 
     if groups is None:
         groups = [_make_sender()]
@@ -127,7 +127,7 @@ def _invoke_imap(groups=None, imap_ok=True):
     if not imap_ok:
         mock_provider.get_profile.side_effect = Exception("auth failed")
 
-    from mailtrim.core.diagnostics import CheckResult
+    from postmind.core.diagnostics import CheckResult
 
     ok = CheckResult("ok", ok=True, message="ok")
     check_results = [
@@ -139,13 +139,13 @@ def _invoke_imap(groups=None, imap_ok=True):
     imap_input = "I\nimap.example.com\nuser@example.com\nsecret\n993\n"
     with (
         patch("pathlib.Path.exists", return_value=True),
-        patch("mailtrim.core.providers.factory.get_provider", return_value=mock_provider),
-        patch("mailtrim.core.diagnostics.run_all", return_value=check_results),
-        patch("mailtrim.core.diagnostics.check_dependencies", return_value=ok),
-        patch("mailtrim.core.diagnostics.check_config", return_value=ok),
-        patch("mailtrim.core.diagnostics.check_data_dir", return_value=ok),
-        patch("mailtrim.core.diagnostics.check_undo_storage", return_value=ok),
-        patch("mailtrim.core.sender_stats.fetch_sender_groups", return_value=groups),
+        patch("postmind.core.providers.factory.get_provider", return_value=mock_provider),
+        patch("postmind.core.diagnostics.run_all", return_value=check_results),
+        patch("postmind.core.diagnostics.check_dependencies", return_value=ok),
+        patch("postmind.core.diagnostics.check_config", return_value=ok),
+        patch("postmind.core.diagnostics.check_data_dir", return_value=ok),
+        patch("postmind.core.diagnostics.check_undo_storage", return_value=ok),
+        patch("postmind.core.sender_stats.fetch_sender_groups", return_value=groups),
     ):
         return runner.invoke(app, ["setup"], input=imap_input, catch_exceptions=False)
 
@@ -201,7 +201,7 @@ def test_missing_credentials_shows_steps():
 
 def test_missing_credentials_shows_retry_hint():
     result = _invoke_gmail(credentials_exist=False)
-    assert "mailtrim setup" in result.output
+    assert "postmind setup" in result.output
 
 
 # ── Doctor checks ─────────────────────────────────────────────────────────────
@@ -224,12 +224,12 @@ def test_doctor_failure_exits_1():
 
 def test_doctor_failure_shows_fix():
     result = _invoke_gmail(checks_ok=False)
-    assert "mailtrim auth" in result.output or "Fix" in result.output
+    assert "postmind auth" in result.output or "Fix" in result.output
 
 
 def test_doctor_failure_shows_retry_hint():
     result = _invoke_gmail(checks_ok=False)
-    assert "mailtrim setup" in result.output
+    assert "postmind setup" in result.output
 
 
 # ── Quickstart scan ───────────────────────────────────────────────────────────
@@ -247,12 +247,12 @@ def test_shows_safe_sender_count():
 
 def test_shows_best_action_command():
     result = _invoke_gmail(groups=[_make_sender()])
-    assert "mailtrim purge" in result.output
+    assert "postmind purge" in result.output
 
 
 def test_shows_undo_hint():
     result = _invoke_gmail()
-    assert "mailtrim undo" in result.output
+    assert "postmind undo" in result.output
 
 
 def test_clean_inbox_message():
@@ -271,8 +271,8 @@ def test_shows_setup_complete():
 
 def test_shows_next_commands():
     result = _invoke_gmail()
-    assert "mailtrim quickstart" in result.output
-    assert "mailtrim stats" in result.output
+    assert "postmind quickstart" in result.output
+    assert "postmind stats" in result.output
 
 
 # ── IMAP path ─────────────────────────────────────────────────────────────────
@@ -290,4 +290,4 @@ def test_imap_failure_exits_1():
 
 def test_imap_failure_shows_retry_hint():
     result = _invoke_imap(imap_ok=False)
-    assert "mailtrim setup" in result.output
+    assert "postmind setup" in result.output

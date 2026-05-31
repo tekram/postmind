@@ -26,7 +26,7 @@ def _triage_account(email: str) -> None:
     if acct.provider == "gmail":
         token = token_path_for(email)
         if not token.exists():
-            logger.warning("No token for %s — skipping heartbeat (run: mailtrim auth)", email)
+            logger.warning("No token for %s — skipping heartbeat (run: postmind auth)", email)
             return
 
     found_count = 0
@@ -37,7 +37,7 @@ def _triage_account(email: str) -> None:
 
         if provider_name == "imap":
             import os
-            pw = os.environ.get("MAILTRIM_IMAP_PASSWORD", "")
+            pw = os.environ.get("POSTMIND_IMAP_PASSWORD", "")
             provider = get_provider(
                 "imap",
                 imap_server=cfg.get("imap_server", ""),
@@ -92,7 +92,7 @@ def start_daemon(interval_minutes: int | None = None, *, run_immediately: bool =
         from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
     except ImportError:
         raise ImportError(
-            "APScheduler is required for mailtrim watch. "
+            "APScheduler is required for postmind watch. "
             "Install it with: pip install apscheduler"
         )
 

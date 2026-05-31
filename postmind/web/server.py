@@ -1,4 +1,4 @@
-"""Local web interface for mailtrim — runs on localhost, nothing leaves your machine."""
+"""Local web interface for postmind — runs on localhost, nothing leaves your machine."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from postmind.config import CREDENTIALS_PATH, DATA_DIR, TOKEN_PATH, get_settings
 _THIS_DIR = Path(__file__).parent
 _TEMPLATES_DIR = _THIS_DIR / "templates"
 
-app = FastAPI(title="mailtrim", docs_url=None, redoc_url=None)
+app = FastAPI(title="postmind", docs_url=None, redoc_url=None)
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 # In-memory scan cache — keyed by "latest", short TTL
@@ -131,7 +131,7 @@ def _build_provider():
 
     if provider_name == "imap":
         import os
-        pw = os.environ.get("MAILTRIM_IMAP_PASSWORD", "")
+        pw = os.environ.get("POSTMIND_IMAP_PASSWORD", "")
         s = get_settings()
         return get_provider(
             "imap",
@@ -248,7 +248,7 @@ async def stats_data(
         return _resp(
             request,
             "stats_error.html",
-            {"error": "Not authenticated. Run mailtrim auth in your terminal first."},
+            {"error": "Not authenticated. Run postmind auth in your terminal first."},
         )
 
     def _scan():
@@ -578,7 +578,7 @@ async def accounts_add_page(request: Request):
 @app.post("/accounts/add/gmail/start", response_class=HTMLResponse)
 async def gmail_add_start(request: Request):
     if not CREDENTIALS_PATH.exists():
-        return HTMLResponse('<p class="text-red-600 text-sm">credentials.json not found in ~/.mailtrim/. Download it from Google Cloud Console first.</p>')
+        return HTMLResponse('<p class="text-red-600 text-sm">credentials.json not found in ~/.postmind/. Download it from Google Cloud Console first.</p>')
     task_id = uuid.uuid4().hex[:10]
     _oauth_tasks[task_id] = {"status": "running", "email": None, "error": None}
 
@@ -751,7 +751,7 @@ async def watch_start(request: Request):
             start_daemon_background(stop_event=_watch_stop_event)
         except Exception:
             pass
-    _watch_thread = _threading.Thread(target=_run, daemon=True, name="mailtrim-watch")
+    _watch_thread = _threading.Thread(target=_run, daemon=True, name="postmind-watch")
     _watch_thread.start()
     return RedirectResponse("/watch?started=1", status_code=303)
 
@@ -850,7 +850,7 @@ async def update_ai_mode(request: Request):
     if mode not in ("off", "local", "cloud"):
         raise HTTPException(status_code=400, detail="Invalid AI mode")
 
-    updates: dict[str, str] = {"MAILTRIM_AI_MODE": mode}
+    updates: dict[str, str] = {"POSTMIND_AI_MODE": mode}
 
     if mode == "local":
         url = (form.get("ollama_base_url") or "http://localhost:11434").strip()

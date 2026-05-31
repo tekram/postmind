@@ -1,223 +1,195 @@
-# mailtrim
+# postmind
 
-**Clean your inbox safely. Triage with AI. Everything stays on your machine.**
+**Clean your inbox safely in seconds.**
+Everything goes to Trash. Undo anytime.
 
-[![PyPI](https://img.shields.io/pypi/v/mailtrim.svg)](https://pypi.org/project/mailtrim/)
+[![PyPI](https://img.shields.io/pypi/v/postmind.svg)](https://pypi.org/project/postmind/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![CI](https://github.com/tekram/mailtrim/actions/workflows/ci.yml/badge.svg)](https://github.com/tekram/mailtrim/actions/workflows/ci.yml)
+[![CI](https://github.com/tekram/postmind/actions/workflows/ci.yml/badge.svg)](https://github.com/tekram/postmind/actions/workflows/ci.yml)
 
 ---
 
-## What it does
+## Quick Demo
 
-mailtrim gives you two ways to manage your inbox:
-
-**CLI** — run anywhere, no browser needed:
 ```bash
-mailtrim stats     # rank senders by storage impact
-mailtrim purge     # bulk-delete by sender — goes to Trash, undo anytime
-mailtrim triage    # AI classifies every unread: priority, action, why
+pip install postmind
+postmind setup          # connect Gmail or IMAP — guided, ~2 minutes
+postmind stats          # rank your inbox clutter by impact
+postmind purge          # bulk-delete what you picked — goes to Trash
 ```
 
-**Web UI** — full interface at `localhost:8484`:
-```bash
-pip install "mailtrim[web]"
-mailtrim serve
-```
-
-Both run entirely on your machine. No subscription. No telemetry. AI is off by default.
+That's the whole workflow. No API key. No subscription. Nothing sent to any server.
 
 ---
 
-## Safety guarantees
+## Why postmind?
+
+- **Finds what's actually filling your inbox** — ranks senders by storage impact, not just count
+- **Bulk cleanup in seconds** — delete 300+ emails from one sender in a single command
+- **Nothing is permanently deleted** — everything goes to Trash, recoverable for 30 days
+- **Privacy-first** — core commands run entirely on your machine; AI is opt-in and off by default
+- **Works with Gmail and IMAP** — Outlook, Fastmail, iCloud, any IMAP server
+
+---
+
+## Safety Guarantees
 
 | Guarantee | How it works |
 |---|---|
-| Trash first | Every delete moves mail to Trash — never permanent |
-| Full undo | `mailtrim undo` reverses any operation within 30 days |
+| Trash first | Every delete sends mail to Trash, not permanent deletion |
+| Full undo | `postmind undo` reverses any operation within 30 days |
 | No cloud required | `stats`, `purge`, `undo`, `setup` are 100% local |
-| AI is opt-in | AI is `off` by default — enable explicitly |
-| Sensitive senders protected | Banks, healthcare, legal senders are flagged and never auto-suggested |
+| AI is optional | AI is `off` by default — you enable it explicitly |
+| Dry-run available | `purge --json` shows what would be deleted before you confirm |
 
 ---
 
-## Quickstart
+## 60-Second Quickstart
+
+**First time:**
 
 ```bash
-pip install mailtrim
-mailtrim setup     # connect Gmail or IMAP — guided, ~2 minutes
-mailtrim stats     # see your inbox ranked by clutter
-mailtrim purge     # interactive: pick senders, confirm, done
+pip install postmind
+postmind setup    # walks you through Gmail auth and runs your first scan
 ```
 
-Or open the web UI:
+**After setup:**
 
 ```bash
-pip install "mailtrim[web]"
-mailtrim serve     # opens http://localhost:8484 in your browser
+postmind stats                          # see your inbox ranked by clutter
+postmind purge                          # interactive: pick senders, confirm, done
+postmind purge --domain linkedin.com    # target one sender directly
+postmind undo                           # reverse anything you just did
+```
+
+**Already set up? Jump straight to cleanup:**
+
+```bash
+postmind quickstart    # one command — scans, ranks, shows the safest first action
 ```
 
 ---
 
-## Example output
+## Example Output
 
-### `mailtrim stats`
+### `postmind stats`
 
 ```
-Provider: Gmail  ·  AI: OFF  (nothing leaves your machine)
+Provider: Gmail
+✨ Scan complete — analyzed 2,341 emails across 41 senders in 4s
+  AI: OFF  no data leaves your machine
 
 34% of your inbox is clutter — caused by just 3 senders. 87.4 MB gone in one command.
 
- #  Impact  Sender                Emails   Size    Oldest      Risk
- 1  100     LinkedIn Jobs            312   44 MB   847d ago    🟢 Safe
- 2   82     Substack Weekly          183   26 MB   512d ago    🟢 Safe
- 3   29     Shopify Receipts          94   12 MB   203d ago    🟢 Safe
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  TOTAL RECLAIMABLE SPACE                                                    │
+│  You can safely free ~87.4 MB (34% of scanned inbox)                        │
+│  from your top 3 senders · Each cleanup takes ~3-5s                         │
+│  All deletions go to Trash — undo anytime                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+ #  Impact    Sender                Emails  Size    Oldest      Risk
+ 1  100       LinkedIn Jobs            312  44 MB   847d ago    Safe to clean
+ 2   82       Substack Weekly          183  26 MB   512d ago    Safe to clean
+ 3   29       Shopify Receipts          94  12 MB   203d ago    Safe to clean
 ```
 
-### `mailtrim triage` (cloud or local AI)
+### `postmind purge`
 
 ```
-⚡ HIGH  Reply needed — your manager asked a direct question     [reply]
-         From: boss@company.com · action_required
+  Top Email Offenders  (589 emails · 82 MB)
 
-· MED   Newsletter — weekly digest you subscribed to            [unsubscribe]
-         From: digest@substack.com · newsletter
+ # │ Sender              │ Emails │ Size  │ Latest  │ Sample subject
+───┼─────────────────────┼────────┼───────┼─────────┼─────────────────────────
+ 1 │ LinkedIn Jobs       │   312  │  44MB │ Apr 03  │ 12 new jobs matching…
+ 2 │ Substack Weekly     │   183  │  26MB │ Apr 01  │ This week: AI is eating…
+ 3 │ Shopify Receipts    │    94  │  12MB │ Mar 28  │ Your order has shipped
 
-  LOW   Automated notification, no action needed                [archive]
-         From: noreply@github.com · notification
+Your selection: 1,2
+
+Move 495 emails to Trash? (undo available for 30 days) [y/N]: y
+✓ Moved 495 emails to Trash.  postmind undo 1  — to reverse
 ```
 
-### `mailtrim purge`
+### `postmind undo`
 
 ```
-  Your selection: LinkedIn Jobs (312 emails · 44 MB)
+  Recent operations
 
-  Move 312 emails to Trash? (undo available for 30 days) [y/N]: y
-  ✓ Moved 312 emails to Trash.   mailtrim undo 1  — to reverse
-```
+  #1  Apr 05  495 emails trashed  (LinkedIn Jobs + Substack)
+  #2  Apr 03   94 emails trashed  (Shopify Receipts)
 
----
+Restore which operation? 1
 
-## Web UI
-
-`mailtrim serve` starts a local web server at `http://localhost:8484`.
-
-| Page | What it does |
-|---|---|
-| **Dashboard** | Inbox summary — reclaimable space, top senders, best next action |
-| **Stats** | Full sender table with filters, sort, and bulk purge |
-| **Triage** | AI card grid — priority, category, explanation, suggested action per email |
-| **Sync** | Cache inbox metadata locally for instant repeated stats/purge |
-| **Undo History** | Reverse any operation within its 30-day window |
-| **Settings** | AI mode, Ollama config, provider, protected senders |
-
-The web UI uses HTMX for live updates (sync progress, stats loading) with no JavaScript framework.
-
----
-
-## AI features
-
-AI is off by default. Enable with `mailtrim config ai-mode cloud` or `mailtrim config ai-mode local`.
-
-### Cloud (Anthropic)
-
-```bash
-mailtrim config ai-mode cloud    # requires ANTHROPIC_API_KEY
-mailtrim triage                  # classify unread inbox
-mailtrim bulk "archive all newsletters older than 60 days"
-mailtrim digest                  # weekly summary — patterns, action items, one cleanup suggestion
-mailtrim avoid                   # surface emails you've seen but never acted on
-```
-
-Only email subjects and snippets (≤300 characters) are sent to Anthropic — never full body content.
-
-### Local (Ollama)
-
-```bash
-ollama pull llama3.2
-mailtrim config ai-mode local    # zero network calls — runs on your machine
-mailtrim triage
-```
-
-In the web UI, go to **Settings → AI Mode → Local** to set your Ollama URL and model.
-Any model in `ollama list` works — `llama3.2`, `mistral`, `gemma3`, etc.
-
-### What AI classifies
-
-Each email gets:
-- **Priority**: high / medium / low
-- **Category**: action_required · conversation · newsletter · notification · receipt · calendar · social · spam
-- **Explanation**: one sentence (why it was classified this way)
-- **Suggested action**: reply · archive · unsubscribe · delete · keep · delegate
-- **Deadline hint**: extracted time pressure, e.g. "by Friday" or "this week"
-
----
-
-## Background daemon
-
-`mailtrim watch` runs a persistent heartbeat agent — one per registered account — that wakes up on a schedule, fetches unread emails, and runs AI triage automatically.
-
-```bash
-mailtrim watch                    # triage every 30 minutes (default)
-mailtrim watch --interval 15      # every 15 minutes
-mailtrim watch --interval 5 --now # start immediately, then every 5 minutes
-```
-
-To run as a background service on Linux:
-```bash
-# Create a systemd user service
-cat > ~/.config/systemd/user/mailtrim-watch.service << EOF
-[Unit]
-Description=mailtrim heartbeat daemon
-
-[Service]
-ExecStart=$(which mailtrim) watch --interval 30
-Restart=on-failure
-RestartSec=30
-
-[Install]
-WantedBy=default.target
-EOF
-
-systemctl --user enable --now mailtrim-watch
+✓ Restored 495 emails.
 ```
 
 ---
 
-## Commands
+## Privacy
+
+**Data never leaves your machine unless you explicitly enable cloud AI.**
+
+- All data stored in `~/.postmind/` — no telemetry, no analytics, no external sync
+- OAuth token written `chmod 0600` — owner read-only
+- `stats`, `purge`, `undo`, `setup` are fully local — no API key, no network calls
+- **AI mode** is shown in every command output:
+  - `AI: OFF   no data leaves your machine` (default)
+  - `AI: LOCAL  runs on your machine — nothing sent externally`
+  - `AI: CLOUD  email data may be sent to Anthropic`
+- When cloud AI is enabled, a warning appears **before** any data is sent
+- Cloud AI features send only email subjects and 300-character snippets — never full body content
+
+**Revoke access at any time:**
+- Google: [myaccount.google.com/permissions](https://myaccount.google.com/permissions) → remove postmind
+- Local: `rm ~/.postmind/token.json`
+
+See [PRIVACY.md](PRIVACY.md) for the full data flow.
+
+---
+
+## Commands Overview
 
 ### Core (no API key needed)
 
 | Command | What it does |
 |---|---|
-| `mailtrim setup` | Guided first-time setup — connect Gmail or IMAP |
-| `mailtrim auth` | Re-authenticate with Gmail (OAuth browser flow) |
-| `mailtrim quickstart` | One-shot scan → safest first cleanup action |
-| `mailtrim stats` | Rank senders by storage impact with confidence scores |
-| `mailtrim stats --since 30d` | Scope scan to the last N days |
-| `mailtrim stats --scope anywhere` | Include archived and sent, not just inbox |
-| `mailtrim purge` | Interactive bulk delete — pick senders, confirm, done |
-| `mailtrim purge --domain example.com` | Target one domain directly |
-| `mailtrim protect invoices@bank.com` | Protect a sender from purge |
-| `mailtrim undo` | List and reverse recent operations |
-| `mailtrim sync` | Cache inbox metadata locally for faster repeated queries |
-| `mailtrim unsubscribe email@sender.com` | Unsubscribe via List-Unsubscribe header |
-| `mailtrim doctor` | Health check — auth, Gmail connection, storage, config |
-| `mailtrim privacy` | Show exactly what data stays local vs. what leaves your machine |
-| `mailtrim serve` | Start the local web UI at http://localhost:8484 |
-| `mailtrim watch` | Start the heartbeat daemon — triage each account every N minutes |
-| `mailtrim watch --interval 15 --now` | Run immediately then triage every 15 minutes |
+| `postmind setup` | Guided first-time setup: connect Gmail or IMAP, run first scan |
+| `postmind auth` | Re-authenticate with Gmail (OAuth browser flow) |
+| `postmind quickstart` | One-shot scan → shows your safest first cleanup action |
+| `postmind stats` | Rank all senders by storage impact with confidence scores |
+| `postmind stats --since 30d` | Scope the scan to the last N days |
+| `postmind stats --scope anywhere` | Include archived and sent mail, not just inbox |
+| `postmind stats --share` | Generate a shareable summary (Twitter/plain) |
+| `postmind purge` | Interactive bulk delete — pick senders, confirm, done |
+| `postmind purge --domain example.com` | Target one domain directly |
+| `postmind purge --sort size` | Show largest senders first |
+| `postmind protect invoices@bank.com` | Protect a sender from future purge operations |
+| `postmind undo` | List recent operations and reverse any of them |
+| `postmind undo 3` | Reverse operation #3 specifically |
+| `postmind version` | Show installed version (`--version` / `-V` also works) |
+| `postmind doctor` | Health check — auth, Gmail connection, storage, config |
+| `postmind sync` | Pull inbox into local cache for faster repeated queries |
+| `postmind unsubscribe email@sender.com` | Unsubscribe via List-Unsubscribe header |
+| `postmind privacy` | Show exactly what data is stored and what (if anything) leaves your machine |
+| `postmind config ai-mode off\|local\|cloud` | Set AI mode persistently |
 
-### AI commands (cloud or local mode)
+### Optional AI (requires `postmind config ai-mode cloud`)
 
 | Command | What it does |
 |---|---|
-| `mailtrim triage` | Classify unread inbox — priority, category, suggested action |
-| `mailtrim bulk "<instruction>"` | Natural language bulk operation |
-| `mailtrim avoid` | Surface emails you've viewed repeatedly but never acted on |
-| `mailtrim digest` | Weekly inbox summary — patterns, follow-ups, cleanup suggestion |
-| `mailtrim rules --add "<rule>"` | Create a recurring automation rule |
+| `postmind triage` | Classify unread inbox — priority, category, why, suggested action |
+| `postmind bulk "archive newsletters older than 60 days"` | Natural language bulk operation |
+| `postmind avoid` | Surface emails you've viewed repeatedly but never acted on |
+| `postmind digest` | Weekly inbox summary — patterns, action items, one cleanup suggestion |
+
+### AI enrichment (local — no Anthropic key)
+
+```bash
+postmind stats --ai-backend ollama --ai-model phi3   # requires Ollama
+postmind purge --ai-backend llama                     # requires llama.cpp at localhost:8080
+```
 
 ---
 
@@ -226,139 +198,115 @@ systemctl --user enable --now mailtrim-watch
 ### Gmail (OAuth)
 
 ```bash
-# 1. Get credentials.json from Google Cloud Console (~10 minutes, one-time)
-#    console.cloud.google.com → New project → Gmail API → OAuth 2.0 Client ID (Desktop app)
-#    Download JSON → save to ~/.mailtrim/credentials.json
+# 1. Get credentials.json from Google Cloud Console (one-time, ~10 minutes)
+#    console.cloud.google.com → New project → Gmail API → OAuth 2.0 Client ID (Desktop)
+#    Download JSON → save to ~/.postmind/credentials.json
 
 # 2. Authenticate
-mailtrim auth    # opens browser once, saves token locally
+postmind auth    # opens browser once, stores token locally
 
 # 3. Run
-mailtrim stats
+postmind stats
 ```
 
-> **"This app isn't verified"** — expected. You're authorising your own app to access your own inbox. Click **Advanced → Go to mailtrim (unsafe)** to proceed.
+> **"This app isn't verified"** — expected. You're authorising your own app to access your own inbox. Click **Advanced → Go to postmind (unsafe)** to proceed.
 
 ### IMAP (Outlook, Fastmail, iCloud, self-hosted)
 
 ```bash
-mailtrim setup    # choose IMAP — enter server, user, password
+postmind setup    # choose IMAP at the prompt — enter server, user, password
 ```
 
-Your server/user/port are saved to `~/.mailtrim/.env`. The password is never stored on disk:
+Setup saves your server, username, port, and folder to `~/.postmind/.env`.
+After that, every command works with no flags:
 
 ```bash
-export MAILTRIM_IMAP_PASSWORD="your-app-password"   # set in your shell profile
+postmind stats       # reads persisted IMAP config automatically
+postmind purge       # same
+postmind undo        # same
 ```
+
+For the password, set it once in your shell environment (never stored on disk):
+
+```bash
+export POSTMIND_IMAP_PASSWORD="your-app-password"
+```
+
+Or postmind will prompt securely each time.
 
 ---
 
-## Confidence scores
+## Confidence Scores
 
-`purge` shows a 0–100 score estimating how safe bulk-deletion is:
+`purge` shows a 0–100 score that estimates how safe bulk-deletion is:
 
 | Signal | Weight |
 |---|---|
-| `List-Unsubscribe` header present | +30 pts |
-| Age ≥ 180 days in inbox | up to +35 pts |
-| Volume ≥ 50 from one sender | up to +35 pts |
-| Transactional keywords (invoice, receipt, order) | −25 pts |
+| `List-Unsubscribe` header present | 30 pts — sender self-identifies as bulk/marketing |
+| Age ≥ 180 days in inbox | up to 35 pts — emails sitting >6 months are rarely actionable |
+| Volume ≥ 50 from one sender | up to 35 pts — high frequency = almost certainly automated |
 
-🟢 ≥70 Safe · 🟡 40–69 Review · 🔴 Sensitive (bank, health, legal — never auto-suggested)
+🟢 ≥70 Safe to clean · 🟡 40–69 Needs review · 🔴 Sensitive (bank, health, legal — never auto-suggested)
 
-Scores are heuristics. The 30-day undo exists because no heuristic is perfect.
-
----
-
-## Privacy
-
-**Nothing leaves your machine unless you explicitly enable cloud AI.**
-
-- All data in `~/.mailtrim/` — no telemetry, no external sync
-- OAuth token stored `chmod 0600`
-- `stats`, `purge`, `undo`, `setup`, `serve` are fully local
-- Cloud AI sends only subjects + snippets (≤300 chars per email), never full body
-- AI mode shown in every command output:
-  - `AI: OFF   no data leaves your machine` (default)
-  - `AI: LOCAL  runs on your machine — nothing sent externally`
-  - `AI: CLOUD  subjects + snippets sent to Anthropic`
-
-Revoke Gmail access: [myaccount.google.com/permissions](https://myaccount.google.com/permissions) → remove mailtrim
+Scores are heuristics. The 30-day undo exists precisely because no heuristic is perfect.
 
 ---
 
 ## Configuration
 
-Settings via `~/.mailtrim/.env` or environment variables (`MAILTRIM_` prefix):
+Settings via `~/.postmind/.env` or environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `MAILTRIM_AI_MODE` | `off` | AI mode: `off` · `local` · `cloud` |
-| `ANTHROPIC_API_KEY` | *(not set)* | Required for cloud AI |
-| `MAILTRIM_AI_MODEL` | `claude-sonnet-4-6` | Claude model for cloud AI |
-| `MAILTRIM_OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint for local AI |
-| `MAILTRIM_OLLAMA_MODEL` | `llama3.2` | Ollama model name |
-| `MAILTRIM_DRY_RUN` | `false` | Preview mode — no changes made |
-| `MAILTRIM_UNDO_WINDOW_DAYS` | `30` | How long undo logs are kept |
-| `MAILTRIM_DIR` | `~/.mailtrim` | Data directory |
-| `MAILTRIM_PROVIDER` | `gmail` | Active provider — set by `mailtrim setup` |
-| `MAILTRIM_IMAP_SERVER` | *(not set)* | IMAP server hostname |
-| `MAILTRIM_IMAP_USER` | *(not set)* | IMAP username |
-| `MAILTRIM_IMAP_PORT` | `993` | IMAP SSL port |
-| `MAILTRIM_IMAP_FOLDER` | `INBOX` | IMAP folder to scan |
+| `POSTMIND_AI_MODE` | `off` | AI mode: `off` · `local` · `cloud` |
+| `ANTHROPIC_API_KEY` | *(not set)* | Required for cloud AI features |
+| `POSTMIND_AI_MODEL` | `claude-sonnet-4-6` | Claude model for cloud AI |
+| `POSTMIND_DRY_RUN` | `false` | Preview without executing |
+| `POSTMIND_UNDO_WINDOW_DAYS` | `30` | How long undo logs are kept |
+| `POSTMIND_DIR` | `~/.postmind` | Data directory |
+| `POSTMIND_PROVIDER` | `gmail` | Active provider — set automatically by `postmind setup` |
+| `POSTMIND_IMAP_SERVER` | *(not set)* | IMAP server hostname — set automatically by `postmind setup` |
+| `POSTMIND_IMAP_USER` | *(not set)* | IMAP username — set automatically by `postmind setup` |
+| `POSTMIND_IMAP_PORT` | `993` | IMAP SSL port |
+| `POSTMIND_IMAP_FOLDER` | `INBOX` | IMAP folder to scan |
+| `POSTMIND_IMAP_PASSWORD` | *(not set)* | IMAP password — **never stored on disk**, set in your shell |
 
----
-
-## Data layout
-
-```
-~/.mailtrim/
-├── .env                  # persisted config (MAILTRIM_* vars)
-├── credentials.json      # OAuth client secret from Google Cloud
-├── token.json            # OAuth access/refresh token (chmod 0600)
-├── mailtrim.db           # SQLite — emails, undo logs, rules, blocklist, follow-ups
-└── undo_logs/            # per-operation restore data
-```
-
----
-
-## Installation options
+**Set AI mode:**
 
 ```bash
-pip install mailtrim              # CLI only
-pip install "mailtrim[web]"       # + web UI (mailtrim serve)
-pip install "mailtrim[headless]"  # + Playwright for unsubscribe browser fallback
-pip install "mailtrim[web,headless]"  # everything
+postmind config ai-mode off     # default — no AI, nothing sent anywhere
+postmind config ai-mode local   # local models only (Ollama, llama.cpp)
+postmind config ai-mode cloud   # Anthropic Claude — requires ANTHROPIC_API_KEY
 ```
-
-Requires Python 3.11+.
 
 ---
 
 ## Troubleshooting
 
 ```bash
-mailtrim doctor    # diagnoses auth, connection, storage, config
+postmind doctor    # diagnoses auth, Gmail connection, storage, config
 ```
 
 | Symptom | Fix |
 |---|---|
-| "Gmail connection expired" | `mailtrim auth` |
-| "Token file not found" | `mailtrim auth` |
-| "Cannot write to ~/.mailtrim/" | `chmod 700 ~/.mailtrim` |
-| Scan feels slow | `mailtrim stats --max-scan 500` |
-| Not seeing enough senders | `mailtrim stats --scope anywhere` |
-| IMAP connection failed | Re-run `mailtrim setup` |
-| Web UI won't start | `pip install "mailtrim[web]"` then retry |
-| Ollama triage times out | Model too large — try `llama3.2` (3B), check `ollama ps` |
+| "Gmail connection expired" | `postmind auth` |
+| "Token file not found" | `postmind auth` |
+| "Cannot write to ~/.postmind/" | `chmod 700 ~/.postmind` |
+| "Rate limit hit" | Wait 60s, retry with `--max-scan 300` |
+| Scan feels slow | `postmind stats --max-scan 500` |
+| Not seeing enough senders | `postmind stats --scope anywhere` |
+| IMAP connection failed | Re-run `postmind setup` to update server/user settings |
+| Switched to Gmail but still prompted for IMAP password | Re-run `postmind setup` and choose Gmail — this clears stale IMAP settings from `.env` |
+| IMAP undo restores fewer emails than expected | Normal on non-Gmail IMAP — UIDs are folder-specific; check Trash manually for any remaining emails |
+| IMAP purge returns 0 emails moved | Server may lack a Trash folder; run `postmind doctor` to check |
 
 ---
 
 ## Testing
 
 ```bash
-pip install "mailtrim[dev]"
-pytest tests/ -v    # no credentials needed — AI paths use MockAIEngine
+# Zero credentials required — all AI paths use MockAIEngine
+pytest tests/ -v
 ```
 
 ---
@@ -366,9 +314,10 @@ pytest tests/ -v    # no credentials needed — AI paths use MockAIEngine
 ## Contributing
 
 Bug reports and feature requests via [GitHub Issues](../../issues).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
 
 ---
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) — free to use, modify, distribute.

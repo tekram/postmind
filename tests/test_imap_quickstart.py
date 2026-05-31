@@ -1,4 +1,4 @@
-"""Tests for `mailtrim quickstart --provider imap`."""
+"""Tests for `postmind quickstart --provider imap`."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def _make_sender(
     inbox_days: int = 200,
     has_unsubscribe: bool = True,
 ):
-    from mailtrim.core.sender_stats import SenderGroup
+    from postmind.core.sender_stats import SenderGroup
 
     now = datetime.now(timezone.utc)
     return SenderGroup(
@@ -45,7 +45,7 @@ def _make_sender(
 
 
 def _invoke_imap(auth_ok: bool = True, groups: list | None = None):
-    from mailtrim.cli.main import app
+    from postmind.cli.main import app
 
     mock_provider = MagicMock()
     if auth_ok:
@@ -57,14 +57,14 @@ def _invoke_imap(auth_ok: bool = True, groups: list | None = None):
         groups = [_make_sender()]
 
     with (
-        patch("mailtrim.cli.main._get_provider", return_value=mock_provider),
+        patch("postmind.cli.main._get_provider", return_value=mock_provider),
         patch(
-            "mailtrim.cli.main._get_account_email",
+            "postmind.cli.main._get_account_email",
             side_effect=ConnectionError("login failed")
             if not auth_ok
             else lambda _: "user@imap.example.com",
         ),
-        patch("mailtrim.core.sender_stats.fetch_sender_groups", return_value=groups),
+        patch("postmind.core.sender_stats.fetch_sender_groups", return_value=groups),
     ):
         return runner.invoke(
             app,
@@ -88,13 +88,13 @@ def _invoke_imap(auth_ok: bool = True, groups: list | None = None):
 def test_imap_auth_failure_shows_setup_hint():
     result = _invoke_imap(auth_ok=False)
     assert result.exit_code == 1
-    assert "mailtrim setup" in result.output
+    assert "postmind setup" in result.output
 
 
 def test_imap_auth_failure_does_not_show_auth_hint():
-    """IMAP users should not be told to run 'mailtrim auth' (that's Gmail-specific)."""
+    """IMAP users should not be told to run 'postmind auth' (that's Gmail-specific)."""
     result = _invoke_imap(auth_ok=False)
-    assert "mailtrim auth" not in result.output
+    assert "postmind auth" not in result.output
 
 
 def test_imap_auth_success_shows_account():
@@ -112,12 +112,12 @@ def test_imap_shows_email_count():
 
 def test_imap_shows_best_action():
     result = _invoke_imap(groups=[_make_sender()])
-    assert "mailtrim purge" in result.output
+    assert "postmind purge" in result.output
 
 
 def test_imap_shows_undo_hint():
     result = _invoke_imap()
-    assert "mailtrim undo" in result.output
+    assert "postmind undo" in result.output
 
 
 def test_imap_clean_inbox():
@@ -131,14 +131,14 @@ def test_imap_clean_inbox():
 
 def test_get_provider_called_not_get_client():
     """quickstart must use _get_provider(), never _get_client()."""
-    from mailtrim.cli.main import app
+    from postmind.cli.main import app
 
     mock_provider = MagicMock()
     with (
-        patch("mailtrim.cli.main._get_provider", return_value=mock_provider) as mock_gp,
-        patch("mailtrim.cli.main._get_client") as mock_gc,
-        patch("mailtrim.cli.main._get_account_email", return_value="u@example.com"),
-        patch("mailtrim.core.sender_stats.fetch_sender_groups", return_value=[]),
+        patch("postmind.cli.main._get_provider", return_value=mock_provider) as mock_gp,
+        patch("postmind.cli.main._get_client") as mock_gc,
+        patch("postmind.cli.main._get_account_email", return_value="u@example.com"),
+        patch("postmind.core.sender_stats.fetch_sender_groups", return_value=[]),
     ):
         runner.invoke(app, ["quickstart"], catch_exceptions=False)
         assert mock_gp.called
@@ -149,7 +149,7 @@ def test_get_provider_called_not_get_client():
 
 
 def test_imap_provider_supports_returns_false():
-    from mailtrim.core.providers.imap import IMAPProvider
+    from postmind.core.providers.imap import IMAPProvider
 
     # IMAPProvider.supports() is False for all capabilities
     provider = IMAPProvider.__new__(IMAPProvider)
@@ -162,7 +162,7 @@ def test_imap_provider_supports_returns_false():
 def test_gmail_provider_supports_returns_true():
     from unittest.mock import MagicMock
 
-    from mailtrim.core.providers.gmail import GmailProvider
+    from postmind.core.providers.gmail import GmailProvider
 
     provider = GmailProvider(client=MagicMock())
     assert provider.supports("labels") is True

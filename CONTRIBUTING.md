@@ -1,4 +1,4 @@
-# Contributing to mailtrim
+# Contributing to postmind
 
 Thanks for taking the time to contribute. This document covers everything you need to go from zero to a merged pull request.
 
@@ -34,7 +34,7 @@ Be kind, direct, and constructive. We welcome contributors of all experience lev
 ## Development Setup
 
 ```bash
-git clone https://github.com/tekram/mailtrim
+git clone https://github.com/tekram/postmind
 cd mailtrim
 
 # Create and activate a virtual environment
@@ -45,7 +45,7 @@ source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -e ".[dev]"
 
 # Set up your Gmail credentials (see README.md for full steps)
-cp /path/to/client_secret.json ~/.mailtrim/credentials.json
+cp /path/to/client_secret.json ~/.postmind/credentials.json
 
 # Set your Anthropic key (optional — mock mode works without it)
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -56,44 +56,11 @@ python -m pytest tests/ -v
 
 ---
 
-## Running the Web UI
-
-mailtrim ships an optional local web interface (`mailtrim serve`) built on FastAPI + HTMX.
-
-```bash
-# Install web extras (FastAPI, uvicorn, jinja2)
-pip install -e ".[dev,web]"
-
-# Authenticate first (if you haven't already)
-mailtrim setup
-
-# Start the local server (default: http://localhost:8000)
-mailtrim serve
-
-# Pick a different port
-mailtrim serve --port 9000
-```
-
-The web UI runs **entirely locally** — no data leaves your machine. It shares the same SQLite database and configuration as the CLI commands, so any changes (e.g. blocklisting a sender) are immediately visible in both interfaces.
-
-When working on the web UI, the relevant files are:
-
-```
-mailtrim/
-├── web/
-│   ├── app.py         # FastAPI application and route handlers
-│   └── templates/     # Jinja2 + HTMX templates (one per page/component)
-```
-
-The test suite does **not** require the web extras — all web-layer tests use FastAPI's `TestClient` which is included with `fastapi[testing]` or via `httpx`. If you add new routes, add corresponding tests in `tests/test_web_*.py`.
-
----
-
 ## Project Structure
 
 ```
-mailtrim/
-├── config.py          # Settings via env vars / ~/.mailtrim/.env
+postmind/
+├── config.py          # Settings via env vars / ~/.postmind/.env
 ├── core/
 │   ├── ai/
 │   │   ├── client.py      # AI provider abstraction (Anthropic / local / mock)
@@ -107,7 +74,7 @@ mailtrim/
 │   ├── storage.py         # Local SQLite via SQLAlchemy
 │   ├── llm.py             # Claude API integration (classification, NL→query)
 │   ├── mock_ai.py         # Drop-in AI stub for testing without an API key
-│   ├── diagnostics.py     # Health checks used by `mailtrim doctor`
+│   ├── diagnostics.py     # Health checks used by `postmind doctor`
 │   ├── errors.py          # Friendly error messages for common failures
 │   ├── usage_stats.py     # Local-only command run counters (never uploaded)
 │   ├── follow_up.py       # Conditional follow-up tracker
@@ -134,11 +101,11 @@ tests/
 
 **Adding a new command:**
 1. Add a function decorated with `@app.command()` in `cli/main.py`
-2. Put business logic in `mailtrim/core/` (keep CLI thin)
+2. Put business logic in `postmind/core/` (keep CLI thin)
 3. Add tests in `tests/`
 
 **Adding a new core feature:**
-1. Create `mailtrim/core/my_feature.py`
+1. Create `postmind/core/my_feature.py`
 2. Import it lazily inside the relevant CLI command (keeps startup fast)
 3. Add tests
 
@@ -163,15 +130,15 @@ python -m pytest tests/ -v
 python -m pytest tests/test_mock_ai.py -v
 
 # Run with coverage
-python -m pytest tests/ --cov=mailtrim --cov-report=term-missing
+python -m pytest tests/ --cov=postmind --cov-report=term-missing
 
 # Lint
-ruff check mailtrim/
+ruff check postmind/
 ```
 
 The test suite is designed to run **without a Gmail account or Anthropic key**. The `MockAIEngine` covers all AI paths. Use `pytest -m "not integration"` if you add integration tests requiring real credentials.
 
-**Tests that touch the database** must use the `clean_db` fixture from `tests/conftest.py`. It provides an isolated in-memory SQLite instance per test — no files written to `~/.mailtrim`. Add it as an autouse fixture at the module level:
+**Tests that touch the database** must use the `clean_db` fixture from `tests/conftest.py`. It provides an isolated in-memory SQLite instance per test — no files written to `~/.postmind`. Add it as an autouse fixture at the module level:
 
 ```python
 @pytest.fixture(autouse=True)
@@ -184,7 +151,7 @@ def _use_clean_db(clean_db):
 ## Pull Request Process
 
 1. Run `python -m pytest tests/` — all tests must pass
-2. Run `ruff check mailtrim/` — no lint errors
+2. Run `ruff check postmind/` — no lint errors
 3. Write a clear PR description: what changed, why, how to test it
 4. Link the related issue (e.g. `Closes #42`)
 5. Keep PRs focused — one logical change per PR

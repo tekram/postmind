@@ -58,7 +58,7 @@ def switch_to(email: str) -> None:
     accounts = list_accounts()
     if not any(a.email == email for a in accounts):
         raise ValueError(
-            f"Account {email!r} is not registered. Run: mailtrim accounts add"
+            f"Account {email!r} is not registered. Run: postmind accounts add"
         )
     set_active_account(email)
 
@@ -97,7 +97,7 @@ def register_imap(
 
 
 def migrate_legacy_token() -> None:
-    """One-time: move ~/.mailtrim/token.json → tokens/<email>.json and register the account."""
+    """One-time: move ~/.postmind/token.json → tokens/<email>.json and register the account."""
     from postmind.config import DATA_DIR, TOKEN_PATH, token_path_for, set_active_account
 
     legacy = DATA_DIR / "token.json"

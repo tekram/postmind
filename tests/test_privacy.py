@@ -1,4 +1,4 @@
-"""Tests for `mailtrim privacy` command output."""
+"""Tests for `postmind privacy` command output."""
 
 from __future__ import annotations
 
@@ -17,11 +17,11 @@ def reset_config(tmp_path, monkeypatch):
     DATA_DIR and _STATS_PATH are module-level constants computed at import time,
     so env-var monkeypatching alone is not enough — we must patch attributes directly.
     """
-    import mailtrim.config as cfg
-    import mailtrim.core.usage_stats as us
+    import postmind.config as cfg
+    import postmind.core.usage_stats as us
 
     monkeypatch.setattr(cfg, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(cfg, "DB_PATH", tmp_path / "mailtrim.db")
+    monkeypatch.setattr(cfg, "DB_PATH", tmp_path / "postmind.db")
     monkeypatch.setattr(cfg, "CREDENTIALS_PATH", tmp_path / "credentials.json")
     monkeypatch.setattr(cfg, "TOKEN_PATH", tmp_path / "token.json")
     monkeypatch.setattr(cfg, "UNDO_LOG_DIR", tmp_path / "undo_logs")
@@ -30,7 +30,7 @@ def reset_config(tmp_path, monkeypatch):
 
 
 def _invoke(ai_mode: str = "off"):
-    from mailtrim.cli.main import app
+    from postmind.cli.main import app
 
     return runner.invoke(
         app, ["privacy"], env={"MAILTRIM_AI_MODE": ai_mode}, catch_exceptions=False
@@ -130,4 +130,4 @@ def test_shows_trust_guarantees():
 
 def test_shows_config_ai_mode_hint():
     result = _invoke()
-    assert "mailtrim config ai-mode" in result.output
+    assert "postmind config ai-mode" in result.output

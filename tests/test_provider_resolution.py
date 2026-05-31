@@ -25,7 +25,7 @@ def _resolve(
     imap_port=993,
     imap_folder="INBOX",
 ):
-    from mailtrim.cli.main import _resolve_imap_settings
+    from postmind.cli.main import _resolve_imap_settings
 
     return _resolve_imap_settings(provider, imap_server, imap_user, imap_port, imap_folder)
 
@@ -35,7 +35,7 @@ class TestProviderFallback:
 
     def test_empty_cli_and_empty_settings_returns_gmail(self, monkeypatch):
         monkeypatch.setenv("MAILTRIM_PROVIDER", "")
-        import mailtrim.config as config
+        import postmind.config as config
 
         config._settings = None
         p, *_ = _resolve()
@@ -43,7 +43,7 @@ class TestProviderFallback:
 
     def test_cli_flag_wins_over_settings(self, monkeypatch):
         monkeypatch.setenv("MAILTRIM_PROVIDER", "gmail")
-        import mailtrim.config as config
+        import postmind.config as config
 
         config._settings = None
         p, *_ = _resolve(provider="imap")
@@ -56,7 +56,7 @@ class TestProviderFallback:
 
     def test_persisted_imap_returns_imap(self, monkeypatch):
         monkeypatch.setenv("MAILTRIM_PROVIDER", "imap")
-        import mailtrim.config as config
+        import postmind.config as config
 
         config._settings = None
         p, *_ = _resolve()
@@ -70,7 +70,7 @@ class TestGmailIsolation:
         monkeypatch.setenv("MAILTRIM_PROVIDER", "gmail")
         monkeypatch.setenv("MAILTRIM_IMAP_USER", "old@example.com")
         monkeypatch.setenv("MAILTRIM_IMAP_SERVER", "imap.example.com")
-        import mailtrim.config as config
+        import postmind.config as config
 
         config._settings = None
         _, server, user, port, folder = _resolve()
@@ -95,7 +95,7 @@ class TestGmailIsolation:
         """The IMAP password prompt guard relies on imap_user being empty in Gmail mode."""
         monkeypatch.setenv("MAILTRIM_PROVIDER", "gmail")
         monkeypatch.setenv("MAILTRIM_IMAP_USER", "user@example.com")
-        import mailtrim.config as config
+        import postmind.config as config
 
         config._settings = None
         _, _, imap_user, _, _ = _resolve()
@@ -111,7 +111,7 @@ class TestImapResolution:
         monkeypatch.setenv("MAILTRIM_PROVIDER", "imap")
         monkeypatch.setenv("MAILTRIM_IMAP_SERVER", "imap.example.com")
         monkeypatch.setenv("MAILTRIM_IMAP_USER", "user@example.com")
-        import mailtrim.config as config
+        import postmind.config as config
 
         config._settings = None
         _, server, user, _, _ = _resolve()
@@ -121,7 +121,7 @@ class TestImapResolution:
     def test_cli_flag_overrides_persisted_server(self, monkeypatch):
         monkeypatch.setenv("MAILTRIM_PROVIDER", "imap")
         monkeypatch.setenv("MAILTRIM_IMAP_SERVER", "imap.old.com")
-        import mailtrim.config as config
+        import postmind.config as config
 
         config._settings = None
         _, server, _, _, _ = _resolve(provider="imap", imap_server="imap.new.com")
@@ -130,7 +130,7 @@ class TestImapResolution:
     def test_custom_port_from_settings(self, monkeypatch):
         monkeypatch.setenv("MAILTRIM_PROVIDER", "imap")
         monkeypatch.setenv("MAILTRIM_IMAP_PORT", "1993")
-        import mailtrim.config as config
+        import postmind.config as config
 
         config._settings = None
         _, _, _, port, _ = _resolve()
@@ -139,7 +139,7 @@ class TestImapResolution:
     def test_cli_port_overrides_settings_when_nondefault(self, monkeypatch):
         monkeypatch.setenv("MAILTRIM_PROVIDER", "imap")
         monkeypatch.setenv("MAILTRIM_IMAP_PORT", "1993")
-        import mailtrim.config as config
+        import postmind.config as config
 
         config._settings = None
         _, _, _, port, _ = _resolve(provider="imap", imap_port=2993)
@@ -148,7 +148,7 @@ class TestImapResolution:
     def test_custom_folder_from_settings(self, monkeypatch):
         monkeypatch.setenv("MAILTRIM_PROVIDER", "imap")
         monkeypatch.setenv("MAILTRIM_IMAP_FOLDER", "Archive")
-        import mailtrim.config as config
+        import postmind.config as config
 
         config._settings = None
         _, _, _, _, folder = _resolve()
@@ -165,7 +165,7 @@ class TestProviderSwitching:
         monkeypatch.setenv("MAILTRIM_PROVIDER", "gmail")
         monkeypatch.setenv("MAILTRIM_IMAP_USER", "")
         monkeypatch.setenv("MAILTRIM_IMAP_SERVER", "")
-        import mailtrim.config as config
+        import postmind.config as config
 
         config._settings = None
         _, server, user, _, _ = _resolve()
@@ -177,7 +177,7 @@ class TestProviderSwitching:
         monkeypatch.setenv("MAILTRIM_PROVIDER", "imap")
         monkeypatch.setenv("MAILTRIM_IMAP_SERVER", "imap.example.com")
         monkeypatch.setenv("MAILTRIM_IMAP_USER", "user@example.com")
-        import mailtrim.config as config
+        import postmind.config as config
 
         config._settings = None
         p, server, user, _, _ = _resolve()
@@ -191,11 +191,11 @@ class TestProviderSwitching:
 
 def _capture_provider_line(provider: str, imap_server: str = "") -> str:
     """Call _print_provider_line and return the rendered text (markup stripped)."""
-    from mailtrim.cli.main import _print_provider_line
+    from postmind.cli.main import _print_provider_line
 
     buf = StringIO()
     cap = Console(file=buf, highlight=False, no_color=True)
-    with patch("mailtrim.cli.main.console", cap):
+    with patch("postmind.cli.main.console", cap):
         _print_provider_line(provider, imap_server)
     return buf.getvalue().strip()
 
@@ -246,17 +246,17 @@ class TestProviderIndicatorInCommands:
     def test_stats_shows_gmail_provider_line(self, monkeypatch):
         from typer.testing import CliRunner
 
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
         monkeypatch.setenv("MAILTRIM_PROVIDER", "gmail")
-        import mailtrim.config as config
+        import postmind.config as config
 
         config._settings = None
 
         client = self._mock_gmail_client()
         with (
-            patch("mailtrim.cli.main._get_provider", return_value=client),
-            patch("mailtrim.core.sender_stats.fetch_sender_groups", return_value=[]),
+            patch("postmind.cli.main._get_provider", return_value=client),
+            patch("postmind.core.sender_stats.fetch_sender_groups", return_value=[]),
         ):
             result = CliRunner().invoke(app, ["stats"], catch_exceptions=False)
 
@@ -265,20 +265,20 @@ class TestProviderIndicatorInCommands:
     def test_stats_shows_imap_provider_line(self, monkeypatch):
         from typer.testing import CliRunner
 
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
         monkeypatch.setenv("MAILTRIM_PROVIDER", "imap")
         monkeypatch.setenv("MAILTRIM_IMAP_SERVER", "imap.example.com")
         monkeypatch.setenv("MAILTRIM_IMAP_USER", "user@example.com")
         monkeypatch.setenv("MAILTRIM_IMAP_PASSWORD", "secret")
-        import mailtrim.config as config
+        import postmind.config as config
 
         config._settings = None
 
         client = self._mock_gmail_client()
         with (
-            patch("mailtrim.cli.main._get_provider", return_value=client),
-            patch("mailtrim.core.sender_stats.fetch_sender_groups", return_value=[]),
+            patch("postmind.cli.main._get_provider", return_value=client),
+            patch("postmind.core.sender_stats.fetch_sender_groups", return_value=[]),
         ):
             result = CliRunner().invoke(app, ["stats"], catch_exceptions=False)
 
@@ -288,18 +288,18 @@ class TestProviderIndicatorInCommands:
     def test_purge_shows_gmail_provider_line(self, monkeypatch):
         from typer.testing import CliRunner
 
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
         monkeypatch.setenv("MAILTRIM_PROVIDER", "gmail")
-        import mailtrim.config as config
+        import postmind.config as config
 
         config._settings = None
 
         client = self._mock_gmail_client()
         with (
-            patch("mailtrim.cli.main._get_provider", return_value=client),
-            patch("mailtrim.cli.main._get_account_email", return_value="user@gmail.com"),
-            patch("mailtrim.core.sender_stats.fetch_sender_groups", return_value=[]),
+            patch("postmind.cli.main._get_provider", return_value=client),
+            patch("postmind.cli.main._get_account_email", return_value="user@gmail.com"),
+            patch("postmind.core.sender_stats.fetch_sender_groups", return_value=[]),
         ):
             result = CliRunner().invoke(app, ["purge"], input="q\n", catch_exceptions=False)
 
@@ -308,17 +308,17 @@ class TestProviderIndicatorInCommands:
     def test_quickstart_shows_gmail_provider_line(self, monkeypatch):
         from typer.testing import CliRunner
 
-        from mailtrim.cli.main import app
+        from postmind.cli.main import app
 
         monkeypatch.setenv("MAILTRIM_PROVIDER", "gmail")
-        import mailtrim.config as config
+        import postmind.config as config
 
         config._settings = None
 
         client = self._mock_gmail_client()
         with (
-            patch("mailtrim.cli.main._get_provider", return_value=client),
-            patch("mailtrim.core.sender_stats.fetch_sender_groups", return_value=[]),
+            patch("postmind.cli.main._get_provider", return_value=client),
+            patch("postmind.core.sender_stats.fetch_sender_groups", return_value=[]),
         ):
             result = CliRunner().invoke(app, ["quickstart"], catch_exceptions=False)
 

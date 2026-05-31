@@ -1,16 +1,16 @@
 # Privacy Policy
 
-mailtrim is designed to keep your email data under your control.
+postmind is designed to keep your email data under your control.
 
 ## What stays local (everything by default)
 
 | Data | Where stored |
 |------|-------------|
-| OAuth token | `~/.mailtrim/token.json` (mode 0o600) |
-| Email metadata cache | `~/.mailtrim/mailtrim.db` (SQLite) |
-| Undo logs | `~/.mailtrim/mailtrim.db` |
-| Rules & follow-ups | `~/.mailtrim/mailtrim.db` |
-| Unsubscribe history | `~/.mailtrim/mailtrim.db` |
+| OAuth token | `~/.postmind/token.json` (mode 0o600) |
+| Email metadata cache | `~/.postmind/postmind.db` (SQLite) |
+| Undo logs | `~/.postmind/postmind.db` |
+| Rules & follow-ups | `~/.postmind/postmind.db` |
+| Unsubscribe history | `~/.postmind/postmind.db` |
 
 **Full email body content is never stored locally or sent anywhere.**
 
@@ -34,15 +34,15 @@ When you use `triage`, `bulk`, `rules --add`, `avoid`, or `digest`, the followin
 If you run without `ANTHROPIC_API_KEY`, the MockAIEngine is used — no data leaves your machine for AI purposes.
 
 ### Unsubscribe (headless browser)
-When `--unsub` is used with Playwright, your machine visits the sender's unsubscribe URL directly. No data passes through mailtrim servers (there are none).
+When `--unsub` is used with Playwright, your machine visits the sender's unsubscribe URL directly. No data passes through postmind servers (there are none).
 
 ## Revoking access
 
-To fully disconnect mailtrim:
+To fully disconnect postmind:
 
 ```bash
 # 1. Delete the local token
-rm ~/.mailtrim/token.json
+rm ~/.postmind/token.json
 
 # 2. Revoke at Google
 # https://myaccount.google.com/permissions
@@ -51,4 +51,4 @@ rm ~/.mailtrim/token.json
 
 ## No telemetry
 
-mailtrim contains no analytics, crash reporting, or usage tracking of any kind. It is a local tool that makes API calls only on your explicit command.
+postmind contains no analytics, crash reporting, or usage tracking of any kind. It is a local tool that makes API calls only on your explicit command.

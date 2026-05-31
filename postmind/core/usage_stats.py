@@ -2,10 +2,10 @@
 Local-only usage metrics — never uploaded anywhere.
 
 Tracks command runs, emails trashed, undo count, and first run date.
-Used only to understand how mailtrim is being used locally and to inform
+Used only to understand how postmind is being used locally and to inform
 future product decisions.
 
-Data is stored in ~/.mailtrim/usage.json  (plain JSON, human-readable).
+Data is stored in ~/.postmind/usage.json  (plain JSON, human-readable).
 """
 
 from __future__ import annotations

@@ -15,7 +15,7 @@ assignees: ''
 
 <!-- A clear description of what you'd like to happen.
      Include example CLI usage if relevant:
-     mailtrim <new-command> --new-flag -->
+     postmind <new-command> --new-flag -->
 
 ## Alternatives considered
 

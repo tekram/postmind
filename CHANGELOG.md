@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to mailtrim are documented here.
+All notable changes to postmind are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
@@ -14,8 +14,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [0.4.2] — 2026-05-03
 
 ### Added
-- `mailtrim version` command and `mailtrim --version` / `-V` flag — prints `mailtrim <version>`
-  and exits; version string sourced from `mailtrim.__version__` (single source of truth)
+- `postmind version` command and `postmind --version` / `-V` flag — prints `postmind <version>`
+  and exits; version string sourced from `postmind.__version__` (single source of truth)
 
 ---
 
@@ -23,11 +23,11 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - **Gmail setup now clears stale IMAP settings from `.env`** — switching from IMAP back to
-  Gmail via `mailtrim setup` previously left `MAILTRIM_IMAP_USER` and related keys in `.env`,
+  Gmail via `postmind setup` previously left `POSTMIND_IMAP_USER` and related keys in `.env`,
   causing every subsequent command to prompt for an IMAP password even on a Gmail account.
-  Setup now writes `MAILTRIM_PROVIDER=gmail` and strips all `MAILTRIM_IMAP_*` lines on success.
+  Setup now writes `POSTMIND_PROVIDER=gmail` and strips all `POSTMIND_IMAP_*` lines on success.
 - **Consistent provider resolution** — `_resolve_imap_settings` had two bugs:
-  1. The "gmail" fallback only fired when settings failed to load entirely; if `MAILTRIM_PROVIDER`
+  1. The "gmail" fallback only fired when settings failed to load entirely; if `POSTMIND_PROVIDER`
      was absent from `.env` (pre-v0.3.0 installs), the resolved provider silently became `""`.
      Fixed to `provider or persisted or "gmail"` — "gmail" is always the ultimate default.
   2. Stale IMAP settings (server, user, port, folder) were returned even when the resolved
@@ -48,9 +48,9 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [0.4.0] — 2026-05-03
 
 ### Added
-- **IMAP provider persistence** — `mailtrim setup` now writes all IMAP connection settings
-  (`MAILTRIM_PROVIDER`, `MAILTRIM_IMAP_SERVER`, `MAILTRIM_IMAP_USER`, `MAILTRIM_IMAP_PORT`,
-  `MAILTRIM_IMAP_FOLDER`) to `~/.mailtrim/.env`; every subsequent command reads these
+- **IMAP provider persistence** — `postmind setup` now writes all IMAP connection settings
+  (`POSTMIND_PROVIDER`, `MAILTRIM_IMAP_SERVER`, `POSTMIND_IMAP_USER`, `MAILTRIM_IMAP_PORT`,
+  `MAILTRIM_IMAP_FOLDER`) to `~/.postmind/.env`; every subsequent command reads these
   automatically — no flags required after first-time setup
 - `_resolve_imap_settings()` helper in CLI — merges CLI flags with persisted settings;
   CLI values always win, persisted values fill in any gaps
@@ -61,7 +61,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   separately (`✓ Restored N · ⚠ Skipped M`) with a brief explanation of why UIDs may change
   after a folder MOVE on non-Gmail IMAP servers
 - `_reset_settings` autouse fixture in test suite — resets `_settings` cache and sets IMAP
-  env vars to known defaults between tests; prevents the user's real `~/.mailtrim/.env` from
+  env vars to known defaults between tests; prevents the user's real `~/.postmind/.env` from
   affecting test outcomes
 
 ### Changed
@@ -86,11 +86,11 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [0.3.0] — 2026-05-01
 
 ### Added
-- `mailtrim setup` — guided first-time onboarding: provider selection (Gmail/IMAP),
+- `postmind setup` — guided first-time onboarding: provider selection (Gmail/IMAP),
   auth, health checks, and first inbox scan in ~2 minutes
-- `mailtrim stats --since <Nd>` and `mailtrim purge --since <Nd>` — time-based filtering;
+- `postmind stats --since <Nd>` and `postmind purge --since <Nd>` — time-based filtering;
   translates to `newer_than:Nd` for Gmail and `SINCE` criteria for IMAP
-- `mailtrim stats --share` — shareable summary output in Twitter (≤280 chars) or plain format;
+- `postmind stats --share` — shareable summary output in Twitter (≤280 chars) or plain format;
   no personal data, top domains only
 - **AI trust boundary system** — `ai_status_line()` helper; AI state badge (`AI: OFF / LOCAL / CLOUD`)
   visible in `stats`, `quickstart`, and `doctor`; `_cloud_ai_warning()` panel shown before any
@@ -107,18 +107,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [0.2.1] — 2026-04-11
 
 ### Added
-- `mailtrim doctor` — health check command: verifies auth token, Gmail connection,
+- `postmind doctor` — health check command: verifies auth token, Gmail connection,
   Trash access, data directory, undo storage, config, and optional local AI endpoint.
   Prints ✓/⚠/✗ per check with actionable fix hints. Exits non-zero when required checks fail.
-- `mailtrim quickstart` — guided first-run command: checks auth, scans 500 messages,
+- `postmind quickstart` — guided first-run command: checks auth, scans 500 messages,
   explains what was found, surfaces the single safest first cleanup action.
 - `--verbose` / `--simple` flags on `stats`:
   - `--verbose` shows ACCOUNT SUMMARY, KEY INSIGHTS, domain patterns, full TOP SENDERS table
   - `--simple` shows plain-language recommendations without scores or tables
-- `mailtrim stats --max-scan` default raised from 300 → 1000 for better coverage
+- `postmind stats --max-scan` default raised from 300 → 1000 for better coverage
 - Human-readable error messages: 401/expired token, network timeouts, permission errors,
   rate limits, and database corruption all show plain-language guidance instead of raw tracebacks
-- Local-only usage metrics (`~/.mailtrim/usage.json`): command runs, emails trashed,
+- Local-only usage metrics (`~/.postmind/usage.json`): command runs, emails trashed,
   undo count, first run date — never uploaded, used only for local product insight
 - `DEMO.md` — 60-second demo script for recording an asciinema/vhs walkthrough
 

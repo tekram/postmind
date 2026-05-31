@@ -1,5 +1,5 @@
 """
-Diagnostic checks for mailtrim doctor command.
+Diagnostic checks for postmind doctor command.
 
 Each check returns a CheckResult.  All checks are independent — a failure in
 one does not prevent the others from running.
@@ -35,7 +35,7 @@ def check_token_exists() -> CheckResult:
         label = "Auth token"
     if p.exists():
         return CheckResult(label, ok=True, message=f"Found at {p}")
-    return CheckResult(label, ok=False, message=f"Not found: {p}", fix="mailtrim auth")
+    return CheckResult(label, ok=False, message=f"Not found: {p}", fix="postmind auth")
 
 
 def check_token_valid() -> CheckResult:
@@ -54,7 +54,7 @@ def check_token_valid() -> CheckResult:
             label,
             ok=False,
             message="No token to validate",
-            fix="mailtrim auth",
+            fix="postmind auth",
         )
     try:
         from google.oauth2.credentials import Credentials
@@ -65,7 +65,7 @@ def check_token_valid() -> CheckResult:
                 label,
                 ok=False,
                 message="Token expired, no refresh token",
-                fix="mailtrim auth",
+                fix="postmind auth",
             )
         return CheckResult(label, ok=True, message="Token looks valid")
     except Exception as exc:
@@ -73,7 +73,7 @@ def check_token_valid() -> CheckResult:
             label,
             ok=False,
             message=f"Token unreadable: {exc}",
-            fix="mailtrim auth",
+            fix="postmind auth",
         )
 
 
@@ -100,7 +100,7 @@ def check_gmail_connection() -> CheckResult:
                 "Gmail connection",
                 ok=False,
                 message="Gmail session expired",
-                fix="mailtrim auth",
+                fix="postmind auth",
             )
         if "timed out" in _msg.lower() or "connection" in _msg.lower():
             return CheckResult(
@@ -113,7 +113,7 @@ def check_gmail_connection() -> CheckResult:
             "Gmail connection",
             ok=False,
             message=f"Connection failed: {_msg[:80]}",
-            fix="mailtrim auth",
+            fix="postmind auth",
         )
 
 
@@ -131,7 +131,7 @@ def check_trash_access() -> CheckResult:
             "Trash access",
             ok=False,
             message=f"Cannot read Trash: {str(exc)[:80]}",
-            fix="Check Gmail API scopes — may need to re-run mailtrim auth",
+            fix="Check Gmail API scopes — may need to re-run postmind auth",
         )
 
 
@@ -165,7 +165,7 @@ def check_undo_storage() -> CheckResult:
             "Undo storage",
             ok=False,
             message=f"Database error: {str(exc)[:80]}",
-            fix="Delete ~/.mailtrim/mailtrim.db and retry (undo history will be lost)",
+            fix="Delete ~/.postmind/postmind.db and retry (undo history will be lost)",
         )
 
 
@@ -181,7 +181,7 @@ def check_config() -> CheckResult:
             "Config",
             ok=False,
             message=f"Config error: {str(exc)[:80]}",
-            fix="Check ~/.mailtrim/.env for syntax errors",
+            fix="Check ~/.postmind/.env for syntax errors",
         )
 
 
@@ -197,7 +197,7 @@ def check_imap_connection(
             "IMAP connection",
             ok=False,
             message="Missing --imap-server, --imap-user, or password",
-            fix="Provide --imap-server, --imap-user, and set MAILTRIM_IMAP_PASSWORD",
+            fix="Provide --imap-server, --imap-user, and set POSTMIND_IMAP_PASSWORD",
         )
     try:
         from postmind.core.providers.imap import IMAPProvider
@@ -279,7 +279,7 @@ def run_imap_checks(server: str, user: str, password: str, port: int = 993) -> l
                     "check",
                     ok=False,
                     message=f"Check crashed: {exc}",
-                    fix="Please report this at github.com/tekram/mailtrim/issues",
+                    fix="Please report this at github.com/tekram/postmind/issues",
                 )
             )
     return results
@@ -328,7 +328,7 @@ def check_dependencies() -> CheckResult:
             "Required packages",
             ok=False,
             message=f"Missing: {', '.join(missing)}",
-            fix="pip install mailtrim",
+            fix="pip install postmind",
         )
     return CheckResult("Required packages", ok=True, message="All required packages present")
 
@@ -364,7 +364,7 @@ def run_all(include_optional: bool = True) -> list[CheckResult]:
                     fn.__name__,
                     ok=False,
                     message=f"Check crashed: {exc}",
-                    fix="Please report this at github.com/tekram/mailtrim/issues",
+                    fix="Please report this at github.com/tekram/postmind/issues",
                 )
             )
     if include_optional:

@@ -1,11 +1,11 @@
 # Threat Model
 
-This document maps every trust boundary in mailtrim and the threats considered at each one.
+This document maps every trust boundary in postmind and the threats considered at each one.
 Update it whenever a PR crosses a new boundary or adds a new data flow.
 
 ## Trust boundaries
 
-### 1. Gmail API → mailtrim (inbound email data)
+### 1. Gmail API → postmind (inbound email data)
 
 **What crosses this boundary:**
 - Email headers: `From`, `Subject`, `List-Unsubscribe`, `List-Unsubscribe-Post`, `Date`, `Message-ID`
@@ -27,7 +27,7 @@ A malicious sender controls every header field. Headers must be treated as untru
 
 ---
 
-### 2. mailtrim → Anthropic API (outbound AI data)
+### 2. postmind → Anthropic API (outbound AI data)
 
 **What crosses this boundary:**
 - Email subjects (plain text, truncated to 80 chars)
@@ -56,7 +56,7 @@ but not immune — this is a known limitation of LLM-based features.
 
 ---
 
-### 3. mailtrim → web (outbound URL fetches)
+### 3. postmind → web (outbound URL fetches)
 
 **What crosses this boundary:**
 - `List-Unsubscribe` header URLs (attacker-controlled)
@@ -84,13 +84,13 @@ on all `httpx` calls
 
 ---
 
-### 4. Local disk → mailtrim (config, tokens, database)
+### 4. Local disk → postmind (config, tokens, database)
 
 **What crosses this boundary:**
-- `~/.mailtrim/token.json` — OAuth refresh token
-- `~/.mailtrim/credentials.json` — OAuth client secrets
-- `~/.mailtrim/.env` — Anthropic API key
-- `~/.mailtrim/mailtrim.db` — SQLite database (cached email metadata, undo log, rules)
+- `~/.postmind/token.json` — OAuth refresh token
+- `~/.postmind/credentials.json` — OAuth client secrets
+- `~/.postmind/.env` — Anthropic API key
+- `~/.postmind/postmind.db` — SQLite database (cached email metadata, undo log, rules)
 
 **Threat: token theft via weak file permissions**
 OAuth tokens written with default permissions would be readable by other local users.
@@ -100,14 +100,14 @@ Mitigated: `token.json` is written `chmod 0o600` by `gmail_client.py`.
 API keys or tokens could be accidentally logged to stdout/stderr.
 Mitigated: no logging framework is used; `token.json` and `.env` contents are never printed.
 
-**Mitigations in place:** `chmod 0o600` on `token.json`; `chmod 600 ~/.mailtrim/.env`
+**Mitigations in place:** `chmod 0o600` on `token.json`; `chmod 600 ~/.postmind/.env`
 recommended in README
 
 ---
 
 ## What is explicitly out of scope
 
-- **Multi-user / server deployment**: mailtrim is a single-user local CLI. Server-side
+- **Multi-user / server deployment**: postmind is a single-user local CLI. Server-side
   multi-tenancy threats (account isolation, rate limiting, auth bypass) are not modelled.
 - **Physical access attacks**: if an attacker has physical or root access to the machine,
   all local secrets are compromised regardless. Out of scope.

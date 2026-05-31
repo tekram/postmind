@@ -1,6 +1,6 @@
 """AI mode enforcement — single place that decides whether an AI call is allowed.
 
-Three modes (set via `mailtrim config ai-mode` or MAILTRIM_AI_MODE env var):
+Three modes (set via `postmind config ai-mode` or POSTMIND_AI_MODE env var):
 
   off   → default; no AI calls whatsoever.  Privacy-safe out of the box.
   local → only local backends (Ollama, llama.cpp).  Nothing leaves the machine.
@@ -38,7 +38,7 @@ def require_local(mode: str) -> None:
     if mode == "off":
         raise AIModeError(
             "Local AI is disabled (ai_mode=off).\n"
-            "Enable it with:  mailtrim config ai-mode local\n"
+            "Enable it with:  postmind config ai-mode local\n"
             "Local AI runs entirely on your machine — no data leaves it."
         )
 
@@ -53,13 +53,13 @@ def require_cloud(mode: str) -> None:
     if mode == "off":
         raise AIModeError(
             "AI is disabled (ai_mode=off).\n"
-            "To use cloud AI:  mailtrim config ai-mode cloud\n"
+            "To use cloud AI:  postmind config ai-mode cloud\n"
             "Warning: cloud mode sends email subjects and snippets to Anthropic."
         )
     if mode == "local":
         raise AIModeError(
             "Cloud AI is blocked (ai_mode=local).\n"
-            "To allow external calls:  mailtrim config ai-mode cloud\n"
+            "To allow external calls:  postmind config ai-mode cloud\n"
             "Warning: cloud mode sends email subjects and snippets to Anthropic."
         )
 

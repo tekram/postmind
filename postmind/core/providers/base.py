@@ -14,7 +14,7 @@ from postmind.core.gmail_client import Message
 
 class EmailProvider(ABC):
     """
-    Minimal interface the mailtrim pipeline requires from any mail backend.
+    Minimal interface the postmind pipeline requires from any mail backend.
 
     Concrete implementations: GmailProvider, IMAPProvider.
     Adding a new backend requires implementing these eight methods only —

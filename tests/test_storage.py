@@ -14,7 +14,7 @@ def _use_clean_db(clean_db):
 
 
 def test_email_record_upsert():
-    from mailtrim.core.storage import EmailRecord, EmailRepo, get_session
+    from postmind.core.storage import EmailRecord, EmailRepo, get_session
 
     session = get_session()
     repo = EmailRepo(session)
@@ -47,7 +47,7 @@ def test_email_record_upsert():
 
 
 def test_follow_up_lifecycle():
-    from mailtrim.core.storage import FollowUp, FollowUpRepo, get_session
+    from postmind.core.storage import FollowUp, FollowUpRepo, get_session
 
     session = get_session()
     repo = FollowUpRepo(session)
@@ -79,7 +79,7 @@ def test_follow_up_lifecycle():
 
 
 def test_undo_log_record_and_undo():
-    from mailtrim.core.storage import UndoLogRepo, get_session
+    from postmind.core.storage import UndoLogRepo, get_session
 
     session = get_session()
     repo = UndoLogRepo(session)
@@ -106,7 +106,7 @@ def test_undo_log_record_and_undo():
 
 
 def test_rule_create_and_deactivate():
-    from mailtrim.core.storage import RuleDefinition, RuleRepo, get_session
+    from postmind.core.storage import RuleDefinition, RuleRepo, get_session
 
     session = get_session()
     repo = RuleRepo(session)
@@ -131,8 +131,8 @@ def test_rule_create_and_deactivate():
 
 
 def test_avoidance_view_tracking():
-    from mailtrim.config import get_settings
-    from mailtrim.core.storage import EmailRecord, EmailRepo, get_session
+    from postmind.config import get_settings
+    from postmind.core.storage import EmailRecord, EmailRepo, get_session
 
     session = get_session()
     repo = EmailRepo(session)

@@ -1,4 +1,4 @@
-"""mailtrim CLI — Rich terminal UI for world-class inbox management."""
+"""postmind CLI — Rich terminal UI for world-class inbox management."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from postmind import __version__
 from postmind.config import CREDENTIALS_PATH, DATA_DIR, get_settings
 
 app = typer.Typer(
-    name="mailtrim",
+    name="postmind",
     help="Privacy-first, AI-powered Gmail inbox management.",
     no_args_is_help=True,
     rich_markup_mode="rich",
@@ -43,7 +43,7 @@ def accounts_list() -> None:
     from postmind.config import token_path_for
     accounts = list_accounts()
     if not accounts:
-        console.print("[yellow]No accounts registered.[/yellow]  Run [cyan]mailtrim setup[/cyan] to add one.")
+        console.print("[yellow]No accounts registered.[/yellow]  Run [cyan]postmind setup[/cyan] to add one.")
         return
     active = get_active()
     table = Table(show_header=True, header_style="bold", border_style="dim")
@@ -86,7 +86,7 @@ def accounts_add(
         from postmind.core.gmail_client import authenticate
         from postmind.config import CREDENTIALS_PATH, TOKENS_DIR
         if not CREDENTIALS_PATH.exists():
-            console.print("[red]credentials.json not found.[/red]  Download it from Google Cloud Console and save to ~/.mailtrim/credentials.json")
+            console.print("[red]credentials.json not found.[/red]  Download it from Google Cloud Console and save to ~/.postmind/credentials.json")
             raise typer.Exit(1)
         console.print("Opening browser for Gmail authentication…")
         import tempfile, shutil
@@ -115,7 +115,7 @@ def accounts_add(
         if make_active:
             console.print("  Set as active account.")
     else:
-        console.print("[yellow]IMAP account add via CLI not yet implemented.[/yellow]  Run [cyan]mailtrim setup[/cyan] instead.")
+        console.print("[yellow]IMAP account add via CLI not yet implemented.[/yellow]  Run [cyan]postmind setup[/cyan] instead.")
 
 
 @accounts_app.command(name="remove")
@@ -170,7 +170,7 @@ def agents_list() -> None:
 
     agents = AgentRepo(get_session()).list_all()
     if not agents:
-        console.print("[yellow]No agents registered.[/yellow]  Run [cyan]mailtrim agents create[/cyan] to add one.")
+        console.print("[yellow]No agents registered.[/yellow]  Run [cyan]postmind agents create[/cyan] to add one.")
         return
 
     table = Table(show_header=True, header_style="bold", border_style="dim")
@@ -217,7 +217,7 @@ def agents_create(
     accounts = list_accounts()
     if not any(a.email == email for a in accounts):
         console.print(f"[red]Account not registered:[/red] {email}")
-        console.print("  Run [cyan]mailtrim accounts add[/cyan] first.")
+        console.print("  Run [cyan]postmind accounts add[/cyan] first.")
         raise typer.Exit(1)
     agent_name = name or email.split("@")[0].title()
     AgentRepo(get_session()).register(email, agent_name, interval)
@@ -274,14 +274,14 @@ def _main(
         pass
 
     if version:
-        typer.echo(f"mailtrim {__version__}")
+        typer.echo(f"postmind {__version__}")
         raise typer.Exit()
     if account:
         from postmind.core.account_registry import list_accounts
         _accounts = list_accounts()
         if _accounts and not any(a.email == account for a in _accounts):
             console.print(f"[red]Unknown account:[/red] {account}")
-            console.print("  Run [cyan]mailtrim accounts list[/cyan] to see registered accounts.")
+            console.print("  Run [cyan]postmind accounts list[/cyan] to see registered accounts.")
             raise typer.Exit(1)
         import os as _os
         _os.environ["_MAILTRIM_OVERRIDE_ACCOUNT"] = account
@@ -291,8 +291,8 @@ def _main(
 
 @app.command()
 def version() -> None:
-    """Show the installed mailtrim version."""
-    typer.echo(f"mailtrim {__version__}")
+    """Show the installed postmind version."""
+    typer.echo(f"postmind {__version__}")
 
 
 @app.command()
@@ -305,12 +305,12 @@ def serve(
     Start the local web interface — inbox triage in your browser.
 
     Binds to 127.0.0.1 only (localhost) by default — not accessible on the network.
-    Requires: pip install mailtrim[web]
+    Requires: pip install postmind[web]
 
     Examples:
-      mailtrim serve
-      mailtrim serve --port 9000
-      mailtrim serve --no-browser
+      postmind serve
+      postmind serve --port 9000
+      postmind serve --no-browser
     """
     try:
         import uvicorn
@@ -320,7 +320,7 @@ def serve(
             Panel(
                 "[bold red]Web dependencies not installed.[/bold red]\n\n"
                 "Install them with:\n"
-                "  [cyan]pip install mailtrim[web][/cyan]\n\n"
+                "  [cyan]pip install postmind[web][/cyan]\n\n"
                 "[dim]The web UI requires: fastapi, uvicorn, jinja2, python-multipart[/dim]",
                 border_style="red",
             )
@@ -335,7 +335,7 @@ def serve(
 
     console.print(
         Panel.fit(
-            f"[bold cyan]mailtrim web[/bold cyan]  ·  [bold]{url}[/bold]\n"
+            f"[bold cyan]postmind web[/bold cyan]  ·  [bold]{url}[/bold]\n"
             "[dim]Press Ctrl+C to stop.[/dim]",
             border_style="cyan",
         )
@@ -413,7 +413,7 @@ def _cloud_ai_warning() -> None:
             "[bold yellow]⚠  Cloud AI is enabled[/bold yellow]\n"
             "[dim]This command will send email subjects and/or snippets to Anthropic's servers.\n"
             "No full email bodies are transmitted. See PRIVACY.md for details.\n\n"
-            "To disable:  [cyan]mailtrim config ai-mode off[/cyan][/dim]",
+            "To disable:  [cyan]postmind config ai-mode off[/cyan][/dim]",
             border_style="yellow",
             padding=(0, 2),
         )
@@ -504,11 +504,11 @@ def _require_gmail(command_name: str) -> None:
                 "  This command uses Gmail-specific features (labels, OAuth) "
                 "not yet available over IMAP.\n\n"
                 "  Available for all providers:\n"
-                "    [cyan]mailtrim stats[/cyan]   — inbox analysis\n"
-                "    [cyan]mailtrim purge[/cyan]   — clean by sender or domain\n"
-                "    [cyan]mailtrim undo[/cyan]    — reverse a purge\n\n"
+                "    [cyan]postmind stats[/cyan]   — inbox analysis\n"
+                "    [cyan]postmind purge[/cyan]   — clean by sender or domain\n"
+                "    [cyan]postmind undo[/cyan]    — reverse a purge\n\n"
                 "  [dim]IMAP support for this command is planned. "
-                "Follow progress at github.com/tekram/mailtrim[/dim]"
+                "Follow progress at github.com/tekram/postmind[/dim]"
             )
             raise typer.Exit(1)
     except typer.Exit:
@@ -628,7 +628,7 @@ def setup():
     console.print()
     console.print(
         Panel.fit(
-            "[bold cyan]Welcome to mailtrim[/bold cyan]  ·  This takes [bold]~1–2 minutes[/bold].\n"
+            "[bold cyan]Welcome to postmind[/bold cyan]  ·  This takes [bold]~1–2 minutes[/bold].\n"
             "[dim]Nothing is deleted without your explicit command.[/dim]",
             border_style="cyan",
         )
@@ -666,7 +666,7 @@ def setup():
             console.print("    3. Create OAuth 2.0 credentials  (Desktop app type)")
             console.print(f"    4. Download and save as [cyan]{CREDENTIALS_PATH}[/cyan]")
             console.print()
-            console.print("  [dim]Then re-run:[/dim]  [bold cyan]mailtrim setup[/bold cyan]")
+            console.print("  [dim]Then re-run:[/dim]  [bold cyan]postmind setup[/bold cyan]")
             console.print()
             raise typer.Exit(1)
 
@@ -679,27 +679,27 @@ def setup():
             email = _client.get_email_address()
             console.print(f"  [green]✓[/green]  Authenticated as [bold]{email}[/bold]")
             # Persist Gmail as the active provider, clearing any stale IMAP settings.
-            # Without this a previous IMAP setup would leave MAILTRIM_IMAP_USER in
+            # Without this a previous IMAP setup would leave POSTMIND_IMAP_USER in
             # .env and every subsequent command would prompt for an IMAP password.
             _env_path = DATA_DIR / ".env"
             try:
                 _env_lines = _env_path.read_text().splitlines() if _env_path.exists() else []
                 _imap_prefixes = {
-                    "MAILTRIM_PROVIDER=",
-                    "MAILTRIM_IMAP_SERVER=",
-                    "MAILTRIM_IMAP_USER=",
-                    "MAILTRIM_IMAP_PORT=",
-                    "MAILTRIM_IMAP_FOLDER=",
+                    "POSTMIND_PROVIDER=",
+                    "POSTMIND_IMAP_SERVER=",
+                    "POSTMIND_IMAP_USER=",
+                    "POSTMIND_IMAP_PORT=",
+                    "POSTMIND_IMAP_FOLDER=",
                 }
                 _env_lines = [
                     ln for ln in _env_lines if not any(ln.startswith(p) for p in _imap_prefixes)
                 ]
-                _env_lines.append("MAILTRIM_PROVIDER=gmail")
+                _env_lines.append("POSTMIND_PROVIDER=gmail")
                 _env_path.write_text("\n".join(_env_lines) + "\n")
             except OSError as exc:
                 console.print(
                     f"  [yellow]⚠  Could not persist provider settings to .env: {exc}[/yellow]\n"
-                    "  Setup will continue — run [bold]mailtrim setup[/bold] again if "
+                    "  Setup will continue — run [bold]postmind setup[/bold] again if "
                     "commands later prompt for an IMAP password."
                 )
             # Register in account registry (Phase 4)
@@ -715,7 +715,7 @@ def setup():
             console.print()
             console.print(
                 "  Check that your credentials.json is valid, then retry:\n"
-                "  [cyan]mailtrim auth[/cyan]  →  [cyan]mailtrim setup[/cyan]"
+                "  [cyan]postmind auth[/cyan]  →  [cyan]postmind setup[/cyan]"
             )
             console.print()
             raise typer.Exit(1)
@@ -754,11 +754,11 @@ def setup():
             try:
                 _env_lines = _env_path.read_text().splitlines() if _env_path.exists() else []
                 _prefixes_to_remove = {
-                    "MAILTRIM_PROVIDER=",
-                    "MAILTRIM_IMAP_SERVER=",
-                    "MAILTRIM_IMAP_USER=",
-                    "MAILTRIM_IMAP_PORT=",
-                    "MAILTRIM_IMAP_FOLDER=",
+                    "POSTMIND_PROVIDER=",
+                    "POSTMIND_IMAP_SERVER=",
+                    "POSTMIND_IMAP_USER=",
+                    "POSTMIND_IMAP_PORT=",
+                    "POSTMIND_IMAP_FOLDER=",
                 }
                 _env_lines = [
                     ln
@@ -767,11 +767,11 @@ def setup():
                 ]
                 _env_lines.extend(
                     [
-                        "MAILTRIM_PROVIDER=imap",
-                        f"MAILTRIM_IMAP_SERVER={imap_server}",
-                        f"MAILTRIM_IMAP_USER={imap_user}",
-                        f"MAILTRIM_IMAP_PORT={imap_port}",
-                        "MAILTRIM_IMAP_FOLDER=INBOX",
+                        "POSTMIND_PROVIDER=imap",
+                        f"POSTMIND_IMAP_SERVER={imap_server}",
+                        f"POSTMIND_IMAP_USER={imap_user}",
+                        f"POSTMIND_IMAP_PORT={imap_port}",
+                        "POSTMIND_IMAP_FOLDER=INBOX",
                     ]
                 )
                 _env_path.write_text("\n".join(_env_lines) + "\n")
@@ -800,7 +800,7 @@ def setup():
             console.print()
             console.print(
                 "  Double-check your server, username, and password, then retry:\n"
-                "  [cyan]mailtrim setup[/cyan]"
+                "  [cyan]postmind setup[/cyan]"
             )
             console.print()
             raise typer.Exit(1)
@@ -848,7 +848,7 @@ def setup():
         console.print(
             f"  [red]{len(failed)} check(s) failed.[/red]  Fix the issues above, then re-run:"
         )
-        console.print("  [cyan]mailtrim setup[/cyan]")
+        console.print("  [cyan]postmind setup[/cyan]")
         console.print()
         raise typer.Exit(1)
 
@@ -873,7 +873,7 @@ def setup():
     except Exception as exc:
         console.print(f"  [yellow]⚠  Scan failed:[/yellow] {str(exc)[:80]}")
         console.print(
-            "\n  You're still set up correctly — try manually:\n  [cyan]mailtrim quickstart[/cyan]"
+            "\n  You're still set up correctly — try manually:\n  [cyan]postmind quickstart[/cyan]"
         )
         console.print()
         return  # not a fatal error — auth + doctor passed
@@ -920,16 +920,16 @@ def setup():
         console.print("  [green]Inbox looks clean![/green]  Nothing obvious to remove right now.")
 
     console.print()
-    console.print("  [dim]Undo anytime:[/dim]  mailtrim undo")
+    console.print("  [dim]Undo anytime:[/dim]  postmind undo")
 
     # ── Done ──────────────────────────────────────────────────────────────────
     console.print()
     console.print(
         Panel(
             "[green]You're all set![/green]\n\n"
-            "  [cyan]mailtrim quickstart[/cyan]   — guided first cleanup\n"
-            "  [cyan]mailtrim stats[/cyan]         — full inbox analysis\n"
-            "  [cyan]mailtrim doctor[/cyan]        — re-run health checks anytime",
+            "  [cyan]postmind quickstart[/cyan]   — guided first cleanup\n"
+            "  [cyan]postmind stats[/cyan]         — full inbox analysis\n"
+            "  [cyan]postmind doctor[/cyan]        — re-run health checks anytime",
             title="[bold green]Setup complete",
             border_style="green",
             padding=(0, 2),
@@ -954,8 +954,8 @@ def auth(
     Authenticate with Gmail (opens browser for OAuth consent).
 
     Examples:
-      mailtrim auth
-      mailtrim auth --credentials ~/Downloads/client_secret.json
+      postmind auth
+      postmind auth --credentials ~/Downloads/client_secret.json
     """
     from postmind.core.gmail_client import authenticate
 
@@ -963,7 +963,7 @@ def auth(
         Panel.fit(
             "[bold]MailTrim — Authentication[/bold]\n\n"
             "You'll be redirected to Google to grant access.\n"
-            "Your token is stored locally at [cyan]~/.mailtrim/token.json[/cyan].\n"
+            "Your token is stored locally at [cyan]~/.postmind/token.json[/cyan].\n"
             "[dim]Nothing is stored on external servers.[/dim]",
             border_style="blue",
         )
@@ -976,7 +976,7 @@ def auth(
             "1. Go to [link]https://console.cloud.google.com[/link]\n"
             "2. Create a project → Enable Gmail API\n"
             "3. Create OAuth 2.0 credentials (Desktop app)\n"
-            "4. Download and save as [cyan]~/.mailtrim/credentials.json[/cyan]"
+            "4. Download and save as [cyan]~/.postmind/credentials.json[/cyan]"
         )
         raise typer.Exit(1)
 
@@ -988,7 +988,7 @@ def auth(
         email = client.get_email_address()
 
     console.print(f"\n[green]Authenticated as:[/green] [bold]{email}[/bold]")
-    console.print("[dim]Token saved to ~/.mailtrim/token.json[/dim]")
+    console.print("[dim]Token saved to ~/.postmind/token.json[/dim]")
 
 
 # ── stats ────────────────────────────────────────────────────────────────────
@@ -1065,12 +1065,12 @@ def stats(
     No AI required. Works with Gmail and IMAP. All deletions go to Trash — recoverable for 30 days.
 
     Examples:
-      mailtrim stats
-      mailtrim stats --sort size
-      mailtrim stats --scope anywhere   # include archived and sent mail
-      mailtrim stats --max-scan 5000    # scan more of a large mailbox
-      mailtrim stats --since 30d        # only emails from the last 30 days
-      mailtrim stats --share            # twitter-style summary (≤280 chars)
+      postmind stats
+      postmind stats --sort size
+      postmind stats --scope anywhere   # include archived and sent mail
+      postmind stats --max-scan 5000    # scan more of a large mailbox
+      postmind stats --since 30d        # only emails from the last 30 days
+      postmind stats --share            # twitter-style summary (≤280 chars)
     """
     _record("stats")
     import json as json_lib
@@ -1127,7 +1127,7 @@ def stats(
     # Resolve IMAP password: env var → interactive prompt (never CLI flag)
     import os as _os
 
-    imap_password = _os.environ.get("MAILTRIM_IMAP_PASSWORD", "")
+    imap_password = _os.environ.get("POSTMIND_IMAP_PASSWORD", "")
     if provider == "imap" and imap_user and not imap_password:
         imap_password = typer.prompt(f"IMAP password for {imap_user}", hide_input=True, default="")
 
@@ -1207,7 +1207,7 @@ def stats(
         console.print(
             Panel(
                 share_text,
-                title="[bold green]Share mailtrim[/bold green]"
+                title="[bold green]Share postmind[/bold green]"
                 + (" [dim](twitter)[/dim]" if share_format == "twitter" else " [dim](plain)[/dim]"),
                 border_style="green",
                 padding=(0, 2),
@@ -1405,7 +1405,7 @@ def stats(
         if insights.total_scanned >= max_scan:
             console.print(
                 f"\n  [yellow]⚠ Scan capped at {max_scan:,} — your mailbox may have more. "
-                f"Run [bold]mailtrim stats --max-scan 5000[/bold] to analyze further.[/yellow]"
+                f"Run [bold]postmind stats --max-scan 5000[/bold] to analyze further.[/yellow]"
             )
         if total_messages > 10_000:
             console.print(
@@ -1414,7 +1414,7 @@ def stats(
         if scope == "inbox" and total_messages > insights.total_scanned * 3:
             console.print(
                 f"\n  [dim]💡 {total_messages:,} total messages in your account vs "
-                f"{insights.total_scanned:,} scanned. Run [bold]mailtrim stats --scope anywhere[/bold] "
+                f"{insights.total_scanned:,} scanned. Run [bold]postmind stats --scope anywhere[/bold] "
                 f"to include archived and sent mail.[/dim]"
             )
         console.print()
@@ -1580,10 +1580,10 @@ def stats(
                         f"     [cyan]{action.command}[/cyan]\n"
                     )
             console.print(
-                "[dim]  All emails moved to Trash — undo anytime with: mailtrim undo[/dim]\n"
+                "[dim]  All emails moved to Trash — undo anytime with: postmind undo[/dim]\n"
             )
         console.print(
-            "[dim]  Add --verbose for full details · mailtrim purge — interactive cleanup[/dim]\n"
+            "[dim]  Add --verbose for full details · postmind purge — interactive cleanup[/dim]\n"
         )
         return
 
@@ -1611,7 +1611,7 @@ def stats(
 
             _ai_handler = _logging.StreamHandler()
             _ai_handler.setFormatter(_logging.Formatter("[AI DEBUG] %(name)s — %(message)s"))
-            for _mod in ("postmind.core.ai.client", "mailtrim.core.llm"):
+            for _mod in ("postmind.core.ai.client", "postmind.core.llm"):
                 _log = _logging.getLogger(_mod)
                 _log.setLevel(_logging.DEBUG)
                 _log.addHandler(_ai_handler)
@@ -1762,18 +1762,18 @@ def stats(
                     console.print(f"      [dim]{_expl}[/dim]")
             console.print()
         console.print(
-            "[dim]  All emails moved to Trash (recoverable) — undo anytime with: mailtrim undo[/dim]\n"
+            "[dim]  All emails moved to Trash (recoverable) — undo anytime with: postmind undo[/dim]\n"
         )
     else:
         console.print("  [dim]Not enough data for recommendations.[/dim]\n")
 
     console.print(
         "[dim]  Next steps:[/dim]\n"
-        "  [cyan]mailtrim purge[/cyan]              — pick senders to move to Trash interactively\n"
-        "  [cyan]mailtrim stats --sort size[/cyan]  — re-sort by storage\n"
-        "  [cyan]mailtrim stats --verbose[/cyan]    — full account summary + all senders\n"
-        "  [cyan]mailtrim stats --simple[/cyan]     — plain-language view, no scores\n"
-        "  [cyan]mailtrim quickstart[/cyan]         — guided first cleanup\n"
+        "  [cyan]postmind purge[/cyan]              — pick senders to move to Trash interactively\n"
+        "  [cyan]postmind stats --sort size[/cyan]  — re-sort by storage\n"
+        "  [cyan]postmind stats --verbose[/cyan]    — full account summary + all senders\n"
+        "  [cyan]postmind stats --simple[/cyan]     — plain-language view, no scores\n"
+        "  [cyan]postmind quickstart[/cyan]         — guided first cleanup\n"
     )
 
 
@@ -1797,13 +1797,13 @@ def quickstart(
 
     Perfect for first-time users. Run this before anything else.
     Works with Gmail and IMAP (Outlook, Yahoo, custom servers).
-    All cleanups go to Trash — undo anytime with: mailtrim undo
+    All cleanups go to Trash — undo anytime with: postmind undo
 
-    After running `mailtrim setup`, no flags are needed:
-      mailtrim quickstart
+    After running `postmind setup`, no flags are needed:
+      postmind quickstart
 
     First-time IMAP setup (then no flags required afterwards):
-      mailtrim quickstart --provider imap --imap-server imap.example.com --imap-user you@example.com
+      postmind quickstart --provider imap --imap-server imap.example.com --imap-user you@example.com
     """
     import os as _os
 
@@ -1827,7 +1827,7 @@ def quickstart(
     console.print()
     imap_password = ""
     if provider == "imap":
-        imap_password = _os.environ.get("MAILTRIM_IMAP_PASSWORD", "")
+        imap_password = _os.environ.get("POSTMIND_IMAP_PASSWORD", "")
         if imap_user and not imap_password:
             imap_password = typer.prompt(
                 f"IMAP password for {imap_user}", hide_input=True, default=""
@@ -1847,10 +1847,10 @@ def quickstart(
         if provider == "imap":
             console.print(
                 "[red]✗ IMAP connection failed.[/red]  "
-                "Re-run [cyan]mailtrim setup[/cyan] to reconfigure."
+                "Re-run [cyan]postmind setup[/cyan] to reconfigure."
             )
         else:
-            console.print("[red]✗ Not authenticated.[/red]  Run [cyan]mailtrim auth[/cyan] first.")
+            console.print("[red]✗ Not authenticated.[/red]  Run [cyan]postmind auth[/cyan] first.")
         raise typer.Exit(1)
 
     # Step 2: Scan — fetch up to 500 messages from inbox
@@ -1920,17 +1920,17 @@ def quickstart(
         )
         console.print(f"    [bold cyan]{action.command}[/bold cyan]")
         console.print()
-        console.print("  [dim]Undo anytime:[/dim]  mailtrim undo")
-        console.print("  [dim]Full analysis:[/dim]  mailtrim stats")
+        console.print("  [dim]Undo anytime:[/dim]  postmind undo")
+        console.print("  [dim]Full analysis:[/dim]  postmind stats")
     elif recommendations:
         # Recs exist but nothing is high-confidence enough for an auto-suggest
         console.print(
-            "  Found senders worth reviewing — run [cyan]mailtrim stats[/cyan] to see them."
+            "  Found senders worth reviewing — run [cyan]postmind stats[/cyan] to see them."
         )
-        console.print("  [dim]Undo anytime:[/dim]  mailtrim undo")
+        console.print("  [dim]Undo anytime:[/dim]  postmind undo")
     else:
         console.print("  [green]Inbox looks clean.[/green]  Nothing to remove right now.")
-        console.print("  [dim]Full analysis:[/dim]  mailtrim stats")
+        console.print("  [dim]Full analysis:[/dim]  postmind stats")
 
     console.print()
 
@@ -1954,10 +1954,10 @@ def sync(
     Run before stats or triage when you want to avoid re-fetching from Gmail.
 
     Examples:
-      mailtrim sync
-      mailtrim sync --limit 500
-      mailtrim sync --query "in:inbox is:unread"
-      mailtrim sync --scope anywhere
+      postmind sync
+      postmind sync --limit 500
+      postmind sync --query "in:inbox is:unread"
+      postmind sync --scope anywhere
     """
     _require_gmail("sync")
     from postmind.core.storage import EmailRecord, EmailRepo, get_session
@@ -2034,12 +2034,12 @@ def triage(
     AI-powered inbox triage — classifies each unread email with priority, category, and a one-line reason.
 
     Requires ai_mode=cloud. Sends email subjects and snippets (≤300 chars) to Anthropic — never full body.
-    Run: mailtrim config ai-mode cloud
+    Run: postmind config ai-mode cloud
 
     Examples:
-      mailtrim triage
-      mailtrim triage --limit 50
-      mailtrim triage --no-actions
+      postmind triage
+      postmind triage --limit 50
+      postmind triage --no-actions
     """
     _require_gmail("triage")
     from postmind.core.ai.mode import require_cloud
@@ -2158,7 +2158,7 @@ def triage(
 
     console.print(table)
     console.print(
-        "\n[dim]Tip: Use [bold]mailtrim avoid[/bold] to see emails you've been putting off.[/dim]"
+        "\n[dim]Tip: Use [bold]postmind avoid[/bold] to see emails you've been putting off.[/dim]"
     )
 
 
@@ -2177,13 +2177,13 @@ def bulk(
     Execute a bulk operation using natural language.
 
     All destructive actions move email to Trash (recoverable for 30 days).
-    Requires ai_mode=cloud. Run: mailtrim config ai-mode cloud
+    Requires ai_mode=cloud. Run: postmind config ai-mode cloud
 
     Examples:
-      mailtrim bulk "archive all newsletters I haven't opened in 60 days"
-      mailtrim bulk "move to Trash all emails from noreply@* older than 1 year"
-      mailtrim bulk "label as 'receipts' everything from order confirmation senders"
-      mailtrim bulk "archive LinkedIn notifications" --dry-run   # preview first
+      postmind bulk "archive all newsletters I haven't opened in 60 days"
+      postmind bulk "move to Trash all emails from noreply@* older than 1 year"
+      postmind bulk "label as 'receipts' everything from order confirmation senders"
+      postmind bulk "archive LinkedIn notifications" --dry-run   # preview first
     """
     _require_gmail("bulk")
     from postmind.core.ai.mode import require_cloud
@@ -2242,7 +2242,7 @@ def bulk(
     console.print(
         f"\n[green]Done.[/green] {result.affected_count} messages {op.action}d. "
         f"Undo log ID: [bold]{result.undo_log_id}[/bold] "
-        f"(undo within {get_settings().undo_window_days} days with [cyan]mailtrim undo {result.undo_log_id}[/cyan])"
+        f"(undo within {get_settings().undo_window_days} days with [cyan]postmind undo {result.undo_log_id}[/cyan])"
     )
 
 
@@ -2267,12 +2267,12 @@ def undo(
     Undo a bulk operation within the 30-day window.
 
     Restores emails from Trash back to Inbox. Works with Gmail and IMAP providers.
-    After `mailtrim setup`, the correct provider is used automatically.
+    After `postmind setup`, the correct provider is used automatically.
 
     Examples:
-      mailtrim undo          # list all undoable operations
-      mailtrim undo 3        # restore operation #3
-      mailtrim undo 3 --yes  # restore without prompting
+      postmind undo          # list all undoable operations
+      postmind undo 3        # restore operation #3
+      postmind undo 3 --yes  # restore without prompting
     """
     import os as _os
 
@@ -2291,7 +2291,7 @@ def undo(
         if not imap_user:
             console.print("[red]--imap-user is required for provider=imap.[/red]")
             raise typer.Exit(1)
-        imap_password = _os.environ.get("MAILTRIM_IMAP_PASSWORD", "")
+        imap_password = _os.environ.get("POSTMIND_IMAP_PASSWORD", "")
         if not imap_password:
             imap_password = typer.prompt(
                 f"IMAP password for {imap_user}", hide_input=True, default=""
@@ -2302,7 +2302,7 @@ def undo(
             _gmail_client = _get_client()
             account_email = _get_account_email(_gmail_client)
         except Exception:
-            console.print("[red]✗ Not authenticated.[/red]  Run [cyan]mailtrim auth[/cyan] first.")
+            console.print("[red]✗ Not authenticated.[/red]  Run [cyan]postmind auth[/cyan] first.")
             raise typer.Exit(1)
 
     if log_id is None:
@@ -2333,7 +2333,7 @@ def undo(
                 f"{expires_in}d",
             )
         console.print(table)
-        console.print("\nRun [cyan]mailtrim undo <ID>[/cyan] to reverse an operation.")
+        console.print("\nRun [cyan]postmind undo <ID>[/cyan] to reverse an operation.")
         return
 
     entry = UndoLogRepo(get_session()).get(log_id)
@@ -2423,7 +2423,7 @@ def undo(
                 repo.add(account_email, s, reason="undo_feedback")
             console.print(
                 f"[green]Protected {len(senders)} sender(s).[/green] "
-                "Manage with [cyan]mailtrim protect --list[/cyan]"
+                "Manage with [cyan]postmind protect --list[/cyan]"
             )
 
 
@@ -2442,9 +2442,9 @@ def follow_up(
     [EXPERIMENTAL] Track an email for follow-up. Only reminds you if they haven't replied.
 
     Examples:
-      mailtrim follow-up 18bca72... --days 5
-      mailtrim follow-up --list
-      mailtrim follow-up --sync
+      postmind follow-up 18bca72... --days 5
+      postmind follow-up --list
+      postmind follow-up --sync
     """
     _require_gmail("follow-up")
     from postmind.core.follow_up import FollowUpTracker
@@ -2486,7 +2486,7 @@ def follow_up(
             )
         console.print(table)
         console.print(
-            "\n[dim]Options: dismiss with [cyan]mailtrim follow-up --dismiss <ID>[/cyan][/dim]"
+            "\n[dim]Options: dismiss with [cyan]postmind follow-up --dismiss <ID>[/cyan][/dim]"
         )
         return
 
@@ -2528,14 +2528,14 @@ def avoid(
     [EXPERIMENTAL] Show emails you've been putting off — viewed multiple times but never acted on.
     AI explains why you might be avoiding them and suggests one action.
 
-    Requires ai_mode=cloud. Run: mailtrim config ai-mode cloud
+    Requires ai_mode=cloud. Run: postmind config ai-mode cloud
     All Trash actions are recoverable for 30 days.
 
     Examples:
-      mailtrim avoid
-      mailtrim avoid --no-insights              # faster, no AI
-      mailtrim avoid --process <id> --action archive
-      mailtrim avoid --process <id> --action trash  # move to Trash
+      postmind avoid
+      postmind avoid --no-insights              # faster, no AI
+      postmind avoid --process <id> --action archive
+      postmind avoid --process <id> --action trash  # move to Trash
     """
     _require_gmail("avoid")
     from postmind.core.ai.mode import require_cloud
@@ -2585,8 +2585,8 @@ def avoid(
         if ae.ai_insight:
             panel_content += f"[yellow]{ae.ai_insight}[/yellow]\n"
         panel_content += (
-            f"\n[dim]mailtrim avoid --process {ae.record.gmail_id} --action archive[/dim]\n"
-            f"[dim]mailtrim avoid --process {ae.record.gmail_id} --action trash  "
+            f"\n[dim]postmind avoid --process {ae.record.gmail_id} --action archive[/dim]\n"
+            f"[dim]postmind avoid --process {ae.record.gmail_id} --action trash  "
             "(move to Trash — recoverable)[/dim]"
         )
 
@@ -2619,10 +2619,10 @@ def unsubscribe(
     This action is irreversible — unsubscribing cannot be undone.
 
     Examples:
-      mailtrim unsubscribe newsletters@example.com
-      mailtrim unsubscribe --from-query "label:newsletters" --limit 20
-      mailtrim unsubscribe --from-query "label:newsletters" --dry-run   # preview first
-      mailtrim unsubscribe --history
+      postmind unsubscribe newsletters@example.com
+      postmind unsubscribe --from-query "label:newsletters" --limit 20
+      postmind unsubscribe --from-query "label:newsletters" --dry-run   # preview first
+      postmind unsubscribe --history
     """
     _require_gmail("unsubscribe")
     from postmind.core.unsubscribe import UnsubscribeEngine
@@ -2671,7 +2671,7 @@ def unsubscribe(
                         messages.append(msg)
     else:
         console.print("[red]Error:[/red] Provide a sender email or --from-query.")
-        console.print("  [dim]Example: mailtrim unsubscribe newsletters@example.com[/dim]")
+        console.print("  [dim]Example: postmind unsubscribe newsletters@example.com[/dim]")
         raise typer.Exit(1)
 
     if not messages:
@@ -2714,10 +2714,10 @@ def rules(
     Manage recurring automation rules defined in natural language.
 
     Examples:
-      mailtrim rules --add "archive LinkedIn notifications older than 7 days"
-      mailtrim rules --add "label as 'receipts' anything from order@* or receipt@*"
-      mailtrim rules --run
-      mailtrim rules --list
+      postmind rules --add "archive LinkedIn notifications older than 7 days"
+      postmind rules --add "label as 'receipts' anything from order@* or receipt@*"
+      postmind rules --run
+      postmind rules --list
     """
     _require_gmail("rules")
     from postmind.core.bulk_engine import BulkEngine
@@ -2804,10 +2804,10 @@ def digest():
     [EXPERIMENTAL] Generate your weekly inbox digest — insights, action items, and one cleanup suggestion.
 
     Requires ai_mode=cloud. Sends inbox counts and sender names to Anthropic — no subjects or body content.
-    Run: mailtrim config ai-mode cloud
+    Run: postmind config ai-mode cloud
 
     Examples:
-      mailtrim digest
+      postmind digest
     """
     _require_gmail("digest")
     from postmind.core.ai.mode import require_cloud
@@ -2905,9 +2905,9 @@ def _print_cleanup_complete(
         title = "🗑  Cleanup Complete"
     else:
         undo_line = (
-            f"\n  [bold]Undo anytime:[/bold] [cyan]mailtrim undo {undo_id}[/cyan]"
+            f"\n  [bold]Undo anytime:[/bold] [cyan]postmind undo {undo_id}[/cyan]"
             if undo_id is not None
-            else "\n  [cyan]mailtrim undo[/cyan] — see recent operations"
+            else "\n  [cyan]postmind undo[/cyan] — see recent operations"
         )
         gmail_note = (
             "\n[dim]Gmail Trash shows threads, not messages — visible count there will be lower.[/dim]"
@@ -3025,15 +3025,15 @@ def purge(
 
     Scans your promotions/newsletters, ranks senders, lets you pick which
     ones to move to Trash. Works with Gmail and IMAP providers.
-    All deletions are recoverable for 30 days with: mailtrim undo
+    All deletions are recoverable for 30 days with: postmind undo
 
     Examples:
-      mailtrim purge
-      mailtrim purge --domain linkedin.com --yes
-      mailtrim purge --domain linkedin.com --keep 10
-      mailtrim purge --domain linkedin.com --older-than 90
-      mailtrim purge --scope anywhere            # scan all mail, not just inbox
-      mailtrim purge --since 30d                 # only emails from the last 30 days
+      postmind purge
+      postmind purge --domain linkedin.com --yes
+      postmind purge --domain linkedin.com --keep 10
+      postmind purge --domain linkedin.com --older-than 90
+      postmind purge --scope anywhere            # scan all mail, not just inbox
+      postmind purge --since 30d                 # only emails from the last 30 days
     """
     _record("purge")
     import os as _os
@@ -3064,7 +3064,7 @@ def purge(
     _print_provider_line(provider, imap_server)
 
     # Resolve IMAP password: env var → interactive prompt (never CLI flag)
-    imap_password = _os.environ.get("MAILTRIM_IMAP_PASSWORD", "")
+    imap_password = _os.environ.get("POSTMIND_IMAP_PASSWORD", "")
     if provider == "imap" and imap_user and not imap_password:
         imap_password = typer.prompt(f"IMAP password for {imap_user}", hide_input=True, default="")
 
@@ -3152,14 +3152,14 @@ def purge(
         if filtered_count:
             console.print(
                 f"[dim]({filtered_count} protected sender(s) hidden — "
-                "mailtrim protect --list to manage)[/dim]"
+                "postmind protect --list to manage)[/dim]"
             )
 
     if not groups:
         console.print("[yellow]No matching emails found.[/yellow]")
         if scope == "inbox":
             console.print(
-                "[dim]Tip: run [bold]mailtrim purge --scope anywhere[/bold] "
+                "[dim]Tip: run [bold]postmind purge --scope anywhere[/bold] "
                 "to include archived and sent mail.[/dim]"
             )
         return
@@ -3571,9 +3571,9 @@ def protect(
     Add a sender after an accidental purge (undo also prompts you).
 
     Examples:
-      mailtrim protect invoices@mybank.com
-      mailtrim protect --list
-      mailtrim protect --remove invoices@mybank.com
+      postmind protect invoices@mybank.com
+      postmind protect --list
+      postmind protect --remove invoices@mybank.com
     """
     from postmind.core.storage import BlocklistRepo, get_session
 
@@ -3585,7 +3585,7 @@ def protect(
         entries = repo.list_all(account_email)
         if not entries:
             console.print("[yellow]No protected senders.[/yellow]")
-            console.print("[dim]Add one with: mailtrim protect <email>[/dim]")
+            console.print("[dim]Add one with: postmind protect <email>[/dim]")
             return
         table = Table(title="Protected Senders", border_style="dim")
         table.add_column("Sender", min_width=35)
@@ -3598,7 +3598,7 @@ def protect(
                 e.created_at.strftime("%Y-%m-%d"),
             )
         console.print(table)
-        console.print("\nRemove with [cyan]mailtrim protect --remove <email>[/cyan]")
+        console.print("\nRemove with [cyan]postmind protect --remove <email>[/cyan]")
         return
 
     if remove:
@@ -3637,15 +3637,15 @@ def doctor(
     imap_port: int = typer.Option(993, "--imap-port", help="IMAP SSL port (default 993)."),
 ):
     """
-    Check that mailtrim is configured correctly and ready to use.
+    Check that postmind is configured correctly and ready to use.
 
     Verifies auth, connection, storage, and optional AI endpoint.
     Uses the persisted provider from setup — no flags required after first run.
 
     Examples:
-      mailtrim doctor
-      mailtrim doctor --ai        # also check local AI endpoint
-      mailtrim doctor --provider imap   # force IMAP checks (reads persisted server/user)
+      postmind doctor
+      postmind doctor --ai        # also check local AI endpoint
+      postmind doctor --provider imap   # force IMAP checks (reads persisted server/user)
     """
     import os as _os
 
@@ -3659,7 +3659,7 @@ def doctor(
     console.print()
     console.print(
         Panel.fit(
-            f"[bold cyan]mailtrim doctor[/bold cyan]  [dim]v{__version__}[/dim]\n"
+            f"[bold cyan]postmind doctor[/bold cyan]  [dim]v{__version__}[/dim]\n"
             f"[dim]Running system checks… (provider: {provider})[/dim]",
             border_style="cyan",
         )
@@ -3667,7 +3667,7 @@ def doctor(
     console.print()
 
     if provider == "imap":
-        imap_password = _os.environ.get("MAILTRIM_IMAP_PASSWORD", "")
+        imap_password = _os.environ.get("POSTMIND_IMAP_PASSWORD", "")
         if imap_user and not imap_password:
             imap_password = typer.prompt(
                 f"IMAP password for {imap_user}", hide_input=True, default=""
@@ -3718,11 +3718,11 @@ def doctor(
     if required_fail == 0:
         status_text = "[bold green]Ready[/bold green]"
         border = "green"
-        hint = "You're all set — try: mailtrim quickstart"
+        hint = "You're all set — try: postmind quickstart"
     else:
         status_text = "[bold red]Needs Attention[/bold red]"
         border = "red"
-        hint = "Fix the issues above, then re-run: mailtrim doctor"
+        hint = "Fix the issues above, then re-run: postmind doctor"
 
     if optional_warn:
         note = f"  [dim]{optional_warn} optional check(s) not passing — these won't block usage.[/dim]\n"
@@ -3754,9 +3754,9 @@ def config_cmd(
     Set a persistent configuration value.
 
     Examples:
-      mailtrim config ai-mode off     # disable all AI (default, privacy-safe)
-      mailtrim config ai-mode local   # allow local AI only (Ollama, llama.cpp)
-      mailtrim config ai-mode cloud   # allow Anthropic cloud AI
+      postmind config ai-mode off     # disable all AI (default, privacy-safe)
+      postmind config ai-mode local   # allow local AI only (Ollama, llama.cpp)
+      postmind config ai-mode cloud   # allow Anthropic cloud AI
     """
     if key != "ai-mode":
         console.print(f"[red]Unknown config key '[bold]{key}[/bold]'.[/red]")
@@ -3771,11 +3771,11 @@ def config_cmd(
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
 
-    # Persist to ~/.mailtrim/.env which Settings already reads.
+    # Persist to ~/.postmind/.env which Settings already reads.
     env_path = DATA_DIR / ".env"
     lines = env_path.read_text().splitlines() if env_path.exists() else []
-    key_line = f"MAILTRIM_AI_MODE={value}"
-    updated = [line for line in lines if not line.startswith("MAILTRIM_AI_MODE=")]
+    key_line = f"POSTMIND_AI_MODE={value}"
+    updated = [line for line in lines if not line.startswith("POSTMIND_AI_MODE=")]
     updated.append(key_line)
     env_path.write_text("\n".join(updated) + "\n")
 
@@ -3795,7 +3795,7 @@ def config_cmd(
                 "[green]ai_mode set to [bold]local[/bold][/green]\n\n"
                 "Local AI runs entirely on your machine — nothing leaves it.\n"
                 "Requires Ollama or llama.cpp to be running.\n\n"
-                "Try:  mailtrim stats --ai",
+                "Try:  postmind stats --ai",
                 border_style="green",
             )
         )
@@ -3812,7 +3812,7 @@ def config_cmd(
 
 @app.command()
 def privacy():
-    """Show what data mailtrim stores and whether any leaves your machine."""
+    """Show what data postmind stores and whether any leaves your machine."""
     from postmind.config import (
         CREDENTIALS_PATH,
         DATA_DIR,
@@ -3847,7 +3847,7 @@ def privacy():
     console.print()
     console.print(
         Panel.fit(
-            "[bold]mailtrim privacy report[/bold]",
+            "[bold]postmind privacy report[/bold]",
             border_style="cyan",
         )
     )
@@ -3876,7 +3876,7 @@ def privacy():
                 exists_str = "[green]exists[/green]" if p.exists() else "[dim]not created[/dim]"
                 console.print(f"  [bold]{'OAuth token':<20}[/bold]  {exists_str}  [dim]({acct.email})[/dim]")
                 console.print(f"  [dim]  {p}[/dim]")
-                console.print(f"  [dim]  Lets mailtrim access Gmail. Never shared.[/dim]")
+                console.print(f"  [dim]  Lets postmind access Gmail. Never shared.[/dim]")
                 console.print()
     else:
         # Legacy fallback for unmigrated single-account installs
@@ -3884,7 +3884,7 @@ def privacy():
         exists_str = "[green]exists[/green]" if TOKEN_PATH.exists() else "[dim]not created yet[/dim]"
         console.print(f"  [bold]{'OAuth token':<20}[/bold]  {exists_str}")
         console.print(f"  [dim]  {TOKEN_PATH}[/dim]")
-        console.print(f"  [dim]  Lets mailtrim access Gmail. Never shared.[/dim]")
+        console.print(f"  [dim]  Lets postmind access Gmail. Never shared.[/dim]")
         console.print()
 
     for label, path, note in rows:
@@ -3899,7 +3899,7 @@ def privacy():
     console.print(f"  Current mode:  {ai_label}")
     console.print(f"  [{ai_color}]{ai_note}[/{ai_color}]")
     console.print()
-    console.print("  Change with:  [cyan]mailtrim config ai-mode [off|local|cloud][/cyan]")
+    console.print("  Change with:  [cyan]postmind config ai-mode [off|local|cloud][/cyan]")
 
     console.print()
     console.print("[bold]Usage stats (local only)[/bold]")
@@ -3916,7 +3916,7 @@ def privacy():
     console.print()
     console.print("  [green]✓[/green]  No telemetry or analytics")
     console.print("  [green]✓[/green]  No email body content ever stored or sent")
-    console.print("  [green]✓[/green]  No account data shared with mailtrim project")
+    console.print("  [green]✓[/green]  No account data shared with postmind project")
     console.print("  [green]✓[/green]  OAuth token stored locally at chmod 600")
     console.print()
 
@@ -3956,11 +3956,11 @@ def watch(
     if not accounts:
         console.print(
             "[red]No accounts registered.[/red]  "
-            "Run [cyan]mailtrim setup[/cyan] or [cyan]mailtrim accounts add[/cyan] first."
+            "Run [cyan]postmind setup[/cyan] or [cyan]postmind accounts add[/cyan] first."
         )
         raise typer.Exit(1)
 
-    console.print(f"[bold]mailtrim watch[/bold]  interval=[cyan]{interval}m[/cyan]")
+    console.print(f"[bold]postmind watch[/bold]  interval=[cyan]{interval}m[/cyan]")
     for a in accounts:
         console.print(f"  [dim]·[/dim] {a.email} ({a.provider})")
     console.print()

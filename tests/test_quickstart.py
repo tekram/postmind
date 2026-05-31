@@ -1,4 +1,4 @@
-"""Tests for `mailtrim quickstart` command."""
+"""Tests for `postmind quickstart` command."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def _make_sender(
     inbox_days: int = 200,
     has_unsubscribe: bool = True,
 ):
-    from mailtrim.core.sender_stats import SenderGroup
+    from postmind.core.sender_stats import SenderGroup
 
     now = datetime.now(timezone.utc)
     from datetime import timedelta
@@ -42,7 +42,7 @@ def _make_sender(
 
 
 def _invoke(auth_ok: bool = True, groups: list | None = None):
-    from mailtrim.cli.main import app
+    from postmind.cli.main import app
 
     mock_client = MagicMock()
     mock_client.list_message_ids.return_value = []
@@ -51,12 +51,12 @@ def _invoke(auth_ok: bool = True, groups: list | None = None):
         groups = [_make_sender()]
 
     with (
-        patch("mailtrim.cli.main._get_provider", return_value=mock_client),
+        patch("postmind.cli.main._get_provider", return_value=mock_client),
         patch(
-            "mailtrim.cli.main._get_account_email",
+            "postmind.cli.main._get_account_email",
             side_effect=Exception("no auth") if not auth_ok else lambda _: "user@gmail.com",
         ),
-        patch("mailtrim.core.sender_stats.fetch_sender_groups", return_value=groups),
+        patch("postmind.core.sender_stats.fetch_sender_groups", return_value=groups),
     ):
         return runner.invoke(app, ["quickstart"], catch_exceptions=False)
 
@@ -67,7 +67,7 @@ def _invoke(auth_ok: bool = True, groups: list | None = None):
 def test_auth_failure_shows_hint():
     result = _invoke(auth_ok=False)
     assert result.exit_code == 1
-    assert "mailtrim auth" in result.output
+    assert "postmind auth" in result.output
 
 
 def test_auth_success_shows_account():
@@ -100,7 +100,7 @@ def test_shows_reclaimable_mb_when_nonzero():
 
 def test_shows_best_action_command():
     result = _invoke(groups=[_make_sender(email="news@example.com")])
-    assert "mailtrim purge" in result.output
+    assert "postmind purge" in result.output
     assert "example.com" in result.output
 
 
@@ -119,7 +119,7 @@ def test_shows_email_count_in_best_action():
 
 def test_shows_undo_hint():
     result = _invoke()
-    assert "mailtrim undo" in result.output
+    assert "postmind undo" in result.output
 
 
 # ── Output length ─────────────────────────────────────────────────────────────
@@ -149,4 +149,4 @@ def test_sensitive_sender_not_suggested():
     bank = _make_sender(email="alerts@bankofamerica.com", name="Bank of America")
     result = _invoke(groups=[bank])
     # Should not show purge command for a sensitive sender
-    assert "mailtrim purge --domain bankofamerica.com --yes" not in result.output
+    assert "postmind purge --domain bankofamerica.com --yes" not in result.output

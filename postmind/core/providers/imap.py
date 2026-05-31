@@ -51,7 +51,7 @@ def _gmail_query_to_imap(query: str) -> tuple[str, str]:
     """
     Translate a Gmail query string to (folder, IMAP SEARCH criteria).
 
-    Handles the subset of Gmail operators used by mailtrim:
+    Handles the subset of Gmail operators used by postmind:
         in:inbox          → INBOX, ALL
         in:anywhere       → INBOX, ALL  (full-folder walk not implemented; INBOX is the
                             primary target; users can pass --imap-folder for other folders)

@@ -34,7 +34,7 @@ def friendly_error(exc: BaseException) -> tuple[str, str]:
     ):
         return (
             "Your Gmail connection expired.",
-            "Run: mailtrim auth",
+            "Run: postmind auth",
         )
 
     if "credentials" in msg_lower and "not found" in msg_lower:
@@ -46,13 +46,13 @@ def friendly_error(exc: BaseException) -> tuple[str, str]:
     if "token" in msg_lower and ("expired" in msg_lower or "invalid" in msg_lower):
         return (
             "Gmail token is no longer valid.",
-            "Run: mailtrim auth",
+            "Run: postmind auth",
         )
 
     if "access_denied" in msg_lower or "403" in msg:
         return (
             "Gmail access denied — insufficient permissions.",
-            "Re-run: mailtrim auth  (grant all requested scopes)",
+            "Re-run: postmind auth  (grant all requested scopes)",
         )
 
     # ── Network ───────────────────────────────────────────────────────────────
@@ -81,19 +81,19 @@ def friendly_error(exc: BaseException) -> tuple[str, str]:
         path_match = re.search(r"'([^']+)'", msg)
         path_hint = f" ({path_match.group(1)})" if path_match else ""
         return (
-            f"mailtrim cannot write to your local config files{path_hint}.",
-            "Check folder permissions on ~/.mailtrim/",
+            f"postmind cannot write to your local config files{path_hint}.",
+            "Check folder permissions on ~/.postmind/",
         )
 
     if isinstance(exc, FileNotFoundError):
         return (
             f"Required file not found: {msg[:100]}",
-            "Check the path or run: mailtrim auth",
+            "Check the path or run: postmind auth",
         )
 
     if isinstance(exc, OSError) and "no space left" in msg_lower:
         return (
-            "No disk space left — mailtrim cannot save state.",
+            "No disk space left — postmind cannot save state.",
             "Free up disk space, then retry.",
         )
 
@@ -120,17 +120,17 @@ def friendly_error(exc: BaseException) -> tuple[str, str]:
     if "database" in msg_lower or "sqlite" in msg_lower or "no such table" in msg_lower:
         return (
             "Local database error — undo history may be unavailable.",
-            "If this persists, delete ~/.mailtrim/mailtrim.db and retry.",
+            "If this persists, delete ~/.postmind/postmind.db and retry.",
         )
 
     if "disk image is malformed" in msg_lower or "database disk image" in msg_lower:
         return (
             "Local database is corrupted.",
-            "Delete ~/.mailtrim/mailtrim.db — your Gmail is unaffected, but undo history will be lost.",
+            "Delete ~/.postmind/postmind.db — your Gmail is unaffected, but undo history will be lost.",
         )
 
     # ── Fallback ─────────────────────────────────────────────────────────────
     return (
         f"Unexpected error: {msg[:120]}",
-        "If this persists, report it at github.com/tekram/mailtrim/issues",
+        "If this persists, report it at github.com/tekram/postmind/issues",
     )

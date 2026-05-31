@@ -4,21 +4,21 @@
 check: lint format security test
 
 lint:
-	ruff check mailtrim/
+	ruff check postmind/
 
 format:
-	ruff format --check mailtrim/ tests/
+	ruff format --check postmind/ tests/
 
 security:
-	bandit -r mailtrim/ -ll -q
+	bandit -r postmind/ -ll -q
 
 test:
 	python -m pytest tests/ -q --tb=short
 
 # Fix lint and format issues in place (use before committing)
 fix:
-	ruff check mailtrim/ --fix
-	ruff format mailtrim/ tests/
+	ruff check postmind/ --fix
+	ruff format postmind/ tests/
 
 # Install all dev dependencies + pre-commit hooks
 install-dev:

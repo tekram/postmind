@@ -16,11 +16,11 @@ Closes #<!-- issue number -->
 
 ```bash
 # How to test this change manually
-mailtrim <command>
+postmind <command>
 ```
 
 - [ ] `python -m pytest tests/` passes
-- [ ] `ruff check mailtrim/` passes
+- [ ] `ruff check postmind/` passes
 - [ ] Tested manually with a real Gmail account (if applicable)
 - [ ] No email content (body text/HTML) is logged or stored by new code
 - [ ] New destructive operations have an undo path or explicit irreversibility warning
