@@ -70,11 +70,15 @@ def test_step2_enable_ai_options_present():
     assert 'name="anthropic_api_key"' in r.text
 
 
-def test_step3_done():
+def test_step3_starts_sync():
+    # Step 3 now auto-starts the initial mailbox scan and routes to /welcome.
     client = _client()
     r = client.get("/onboarding?step=3")
     assert r.status_code == 200
-    assert "all set" in r.text.lower()
+    assert "scanning your inbox" in r.text.lower()
+    # auto-triggers the background sync over the whole mailbox, bound for /welcome
+    assert 'hx-post="/sync/start"' in r.text
+    assert "/welcome" in r.text
 
 
 def test_ai_mode_off_is_default():

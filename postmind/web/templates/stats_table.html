@@ -126,7 +126,12 @@
             class="text-slate-500 hover:text-slate-700 text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">
       Clear
     </button>
-    <button type="submit" form="purge-form"
+    <button type="submit" form="purge-form" name="action" value="archive"
+            class="border border-slate-300 text-slate-700 hover:bg-slate-100 text-sm font-medium px-5 py-2 rounded-lg transition-colors"
+            title="Remove from inbox, keep in All Mail (reversible)">
+      Archive
+    </button>
+    <button type="submit" form="purge-form" name="action" value="trash"
             class="bg-red-600 hover:bg-red-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">
       Move to Trash →
     </button>

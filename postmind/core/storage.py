@@ -39,6 +39,7 @@ class Account(Base):
     added_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     last_synced_at = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
+    welcomed_at = Column(DateTime, nullable=True)  # first-run welcome screen seen
 
 
 class EmailRecord(Base):
@@ -218,25 +219,31 @@ _SessionLocal = None
 
 def _run_migrations(engine) -> None:
     """Apply incremental schema changes that SQLAlchemy's create_all cannot handle."""
-    new_columns = [
-        ("voice_style", "TEXT"),
-        ("user_context", "TEXT"),
-        ("writing_guidelines", "TEXT"),
-        ("run_rules", "INTEGER DEFAULT 1"),
-        ("run_followups", "INTEGER DEFAULT 1"),
-        ("run_avoidance", "INTEGER DEFAULT 0"),
-    ]
+    new_columns = {
+        "agents": [
+            ("voice_style", "TEXT"),
+            ("user_context", "TEXT"),
+            ("writing_guidelines", "TEXT"),
+            ("run_rules", "INTEGER DEFAULT 1"),
+            ("run_followups", "INTEGER DEFAULT 1"),
+            ("run_avoidance", "INTEGER DEFAULT 0"),
+        ],
+        "accounts": [
+            ("welcomed_at", "DATETIME"),
+        ],
+    }
     with engine.connect() as conn:
-        for col, col_type in new_columns:
-            try:
-                conn.execute(
-                    __import__("sqlalchemy").text(
-                        f"ALTER TABLE agents ADD COLUMN {col} {col_type}"
+        for table, cols in new_columns.items():
+            for col, col_type in cols:
+                try:
+                    conn.execute(
+                        __import__("sqlalchemy").text(
+                            f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"
+                        )
                     )
-                )
-                conn.commit()
-            except Exception:
-                pass  # column already exists — idempotent
+                    conn.commit()
+                except Exception:
+                    pass  # column already exists — idempotent
 
 
 def get_engine():
@@ -791,6 +798,13 @@ class AccountRepo:
         acct = self.get(email)
         if acct:
             acct.last_synced_at = datetime.now(timezone.utc)
+            self.s.commit()
+
+    def mark_welcomed(self, email: str) -> None:
+        from datetime import datetime, timezone
+        acct = self.get(email)
+        if acct and acct.welcomed_at is None:
+            acct.welcomed_at = datetime.now(timezone.utc)
             self.s.commit()
 
     def count(self) -> int:

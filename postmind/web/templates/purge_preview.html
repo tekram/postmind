@@ -12,27 +12,34 @@
     Back to Stats
   </a>
 
-  <h1 class="text-2xl font-semibold text-slate-900 mb-1">Confirm purge</h1>
+  {% set is_archive = action == 'archive' %}
+  {% set accent = 'slate' if is_archive else 'red' %}
+
+  <h1 class="text-2xl font-semibold text-slate-900 mb-1">{{ 'Confirm archive' if is_archive else 'Confirm purge' }}</h1>
   <p class="text-slate-500 text-sm mb-6">
+    {% if is_archive %}
+    Removes these emails from your inbox (kept in All Mail) — reversible for {{ undo_days }} days with <strong>Undo History</strong>.
+    {% else %}
     Everything goes to Trash — recoverable for {{ undo_days }} days with <strong>Undo History</strong>.
+    {% endif %}
   </p>
 
   <!-- Summary card -->
-  <div class="bg-red-50 border border-red-200 rounded-xl p-5 mb-6">
+  <div class="bg-{{ accent }}-50 border border-{{ accent }}-200 rounded-xl p-5 mb-6">
     <div class="flex items-center gap-6">
       <div class="text-center">
-        <p class="text-3xl font-bold text-red-700">{{ total_count }}</p>
-        <p class="text-red-500 text-xs mt-0.5">emails</p>
+        <p class="text-3xl font-bold text-{{ accent }}-700">{{ total_count }}</p>
+        <p class="text-{{ accent }}-500 text-xs mt-0.5">emails</p>
       </div>
-      <div class="text-red-300 text-2xl">·</div>
+      <div class="text-{{ accent }}-300 text-2xl">·</div>
       <div class="text-center">
-        <p class="text-3xl font-bold text-red-700">{{ total_mb }} MB</p>
-        <p class="text-red-500 text-xs mt-0.5">freed</p>
+        <p class="text-3xl font-bold text-{{ accent }}-700">{{ total_mb }} MB</p>
+        <p class="text-{{ accent }}-500 text-xs mt-0.5">{{ 'in inbox' if is_archive else 'freed' }}</p>
       </div>
-      <div class="text-red-300 text-2xl">·</div>
+      <div class="text-{{ accent }}-300 text-2xl">·</div>
       <div class="text-center">
-        <p class="text-3xl font-bold text-red-700">{{ selected | length }}</p>
-        <p class="text-red-500 text-xs mt-0.5">sender{{ 's' if selected|length != 1 else '' }}</p>
+        <p class="text-3xl font-bold text-{{ accent }}-700">{{ selected | length }}</p>
+        <p class="text-{{ accent }}-500 text-xs mt-0.5">sender{{ 's' if selected|length != 1 else '' }}</p>
       </div>
     </div>
   </div>
@@ -40,7 +47,7 @@
   <!-- Selected senders table -->
   <div class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden mb-6">
     <div class="px-5 py-3 border-b border-slate-100 bg-slate-50">
-      <p class="text-xs font-medium text-slate-500 uppercase tracking-wide">Senders to purge</p>
+      <p class="text-xs font-medium text-slate-500 uppercase tracking-wide">{{ 'Senders to archive' if is_archive else 'Senders to purge' }}</p>
     </div>
     {% for s in selected %}
     <div class="px-5 py-3.5 border-b border-slate-100 last:border-0 flex items-center justify-between">
@@ -63,7 +70,11 @@
       <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
     </svg>
     <p>
+      {% if is_archive %}
+      Emails are <strong>removed from your inbox</strong> but kept in All Mail — nothing is deleted.
+      {% else %}
       All emails go to <strong>Trash</strong>, not permanently deleted.
+      {% endif %}
       You can restore them from <a href="/undo" class="text-teal-600 hover:underline">Undo History</a>
       within {{ undo_days }} days.
     </p>
@@ -74,10 +85,11 @@
     {% for s in senders %}
     <input type="hidden" name="senders" value="{{ s }}">
     {% endfor %}
+    <input type="hidden" name="action" value="{{ action }}">
     <div class="flex items-center gap-3">
       <button type="submit"
-              class="bg-red-600 hover:bg-red-700 text-white font-medium px-6 py-2.5 rounded-lg text-sm transition-colors">
-        Move {{ total_count }} emails to Trash
+              class="{{ 'bg-teal-600 hover:bg-teal-700' if is_archive else 'bg-red-600 hover:bg-red-700' }} text-white font-medium px-6 py-2.5 rounded-lg text-sm transition-colors">
+        {{ 'Archive' if is_archive else 'Move' }} {{ total_count }} emails{{ '' if is_archive else ' to Trash' }}
       </button>
       <a href="/stats"
          class="text-slate-500 hover:text-slate-700 font-medium px-4 py-2.5 rounded-lg text-sm hover:bg-slate-100 transition-colors">

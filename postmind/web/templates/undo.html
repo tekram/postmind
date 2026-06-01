@@ -14,7 +14,7 @@
   <div class="bg-green-50 border border-green-200 rounded-xl p-4 mb-6 flex items-center gap-3">
     <span class="text-green-500 text-lg">✓</span>
     <p class="text-green-800 text-sm font-medium">
-      Moved <strong>{{ purged }} emails</strong> to Trash. Undo any time from this page.
+      {% if purged_action == 'archive' %}Archived <strong>{{ purged }} emails</strong> (removed from inbox).{% else %}Moved <strong>{{ purged }} emails</strong> to Trash.{% endif %} Undo any time from this page.
     </p>
   </div>
   {% endif %}

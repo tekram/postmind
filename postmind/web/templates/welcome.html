@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Welcome — postmind{% endblock %}
+{% block content %}
+
+<div class="p-8 max-w-3xl">
+
+  <!-- Header -->
+  <div class="mb-6">
+    <h1 class="text-2xl font-semibold text-slate-900">Here's your inbox at a glance</h1>
+    <p class="text-slate-500 text-sm mt-1">
+      {% if intro %}
+        {{ intro }}
+      {% else %}
+        We scanned <strong>{{ "{:,}".format(plan.total_emails) }}</strong> emails from
+        <strong>{{ "{:,}".format(plan.total_senders) }}</strong> senders{% if synced_at %} · {{ synced_at }}{% endif %}.
+      {% endif %}
+    </p>
+  </div>
+
+  {% if not plan.has_opportunity %}
+  <!-- Nothing obviously cleanable -->
+  <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-8 text-center mb-6">
+    <p class="text-3xl mb-2">✨</p>
+    <p class="text-slate-700 font-medium">Your inbox looks clean already.</p>
+    <p class="text-slate-500 text-sm mt-1">
+      Nothing jumped out as obvious bulk clutter. You can still explore senders in detail.
+    </p>
+    <a href="/stats" class="inline-block mt-4 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">
+      Explore senders →
+    </a>
+  </div>
+  {% else %}
+
+  <!-- Headline: the one big safe win -->
+  {% set h = plan.headline %}
+  <div class="bg-gradient-to-br from-teal-50 to-white border border-teal-200 rounded-xl shadow-sm p-6 mb-6">
+    <div class="flex items-start gap-3">
+      <span class="text-2xl">💡</span>
+      <div class="flex-1 min-w-0">
+        <p class="text-xs font-medium uppercase tracking-wide text-teal-700">Biggest win</p>
+        <h2 class="text-xl font-semibold text-slate-900 mt-0.5">{{ h.title }}</h2>
+        <p class="text-slate-600 text-sm mt-1">{{ h.rationale }}</p>
+        <div class="flex flex-wrap items-center gap-x-5 gap-y-1 mt-3 text-sm">
+          <span class="text-slate-700"><strong>{{ "{:,}".format(h.count) }}</strong> emails</span>
+          <span class="text-slate-700"><strong>{{ h.size_mb }}</strong> MB</span>
+          <span class="text-slate-500">{{ h.sender_count }} sender{{ 's' if h.sender_count != 1 else '' }}</span>
+        </div>
+      </div>
+    </div>
+    <form action="/purge/preview" method="POST" class="mt-5">
+      {% for e in h.sender_emails %}<input type="hidden" name="senders" value="{{ e }}">{% endfor %}
+      <input type="hidden" name="action" value="{{ h.suggested_action }}">
+      <button type="submit"
+              class="bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors">
+        Review &amp; {{ 'archive' if h.suggested_action == 'archive' else 'clean' }} →
+      </button>
+      <span class="text-slate-400 text-xs ml-3">You'll confirm before anything moves · undoable for {{ undo_days }} days</span>
+    </form>
+  </div>
+
+  <!-- Secondary buckets -->
+  {% if plan.secondary %}
+  <p class="text-xs font-medium uppercase tracking-wide text-slate-400 mb-3">Also worth a look</p>
+  <div class="space-y-3 mb-6">
+    {% for b in plan.secondary %}
+    <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
+      <div class="flex items-center justify-between gap-4">
+        <div class="min-w-0">
+          <h3 class="font-medium text-slate-800">{{ b.title }}</h3>
+          <p class="text-slate-500 text-sm mt-0.5">{{ b.rationale }}</p>
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-slate-500">
+            <span><strong class="text-slate-700">{{ "{:,}".format(b.count) }}</strong> emails</span>
+            <span><strong class="text-slate-700">{{ b.size_mb }}</strong> MB</span>
+            <span>{{ b.sender_count }} sender{{ 's' if b.sender_count != 1 else '' }}</span>
+          </div>
+        </div>
+        <form action="/purge/preview" method="POST" class="shrink-0">
+          {% for e in b.sender_emails %}<input type="hidden" name="senders" value="{{ e }}">{% endfor %}
+          <input type="hidden" name="action" value="{{ b.suggested_action }}">
+          <button type="submit"
+                  class="border border-slate-300 text-slate-700 hover:bg-slate-100 text-sm font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap">
+            {{ 'Archive' if b.suggested_action == 'archive' else 'Clean up' }} →
+          </button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% endif %}
+
+  <!-- Protected reassurance -->
+  {% if plan.protected_count %}
+  <div class="flex items-start gap-2.5 text-slate-500 text-sm mb-6">
+    <span class="text-base">🔒</span>
+    <p>{{ plan.protected_note }}</p>
+  </div>
+  {% endif %}
+
+  <!-- Footer actions -->
+  <div class="flex items-center gap-4 pt-2 border-t border-slate-100">
+    <a href="/stats" class="text-teal-600 hover:text-teal-700 text-sm font-medium">See all senders →</a>
+    <a href="/" class="text-slate-400 hover:text-slate-600 text-sm">Skip to dashboard</a>
+  </div>
+
+</div>
+
+{% endblock %}

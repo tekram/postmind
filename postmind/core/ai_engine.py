@@ -280,6 +280,62 @@ Respond with valid JSON only.\
             confidence=float(data.get("confidence", 0.8)),
         )
 
+    # ── First-run cleanup narration ──────────────────────────────────────────
+
+    def summarize_cleanup_plan(self, digest: list[dict], total_emails: int,
+                               total_senders: int) -> dict:
+        """Rewrite a cleanup plan's bucket titles/rationales in warm, plain language
+        and add a one-line intro.
+
+        ``digest`` is the body-free output of ``sender_stats.cleanup_plan_digest``
+        (key/title/senders/emails/size_mb/action per bucket). The model only
+        rephrases text and may only reference the bucket ``key``s it was given — it
+        never sees or sets sender lists or numbers, so the caller can safely apply
+        the returned text onto the server-side plan without trusting any figures.
+
+        Returns ``{"intro": str, "buckets": {key: {"title": str, "rationale": str}}}``.
+        Bucket keys not present in ``digest`` are dropped by the caller."""
+        if not digest:
+            return {"intro": "", "buckets": {}}
+
+        valid_keys = {b["key"] for b in digest}
+        prompt = f"""\
+A user just connected an inbox with {total_emails:,} emails from {total_senders:,} \
+senders. We analyzed it and grouped the safely-cleanable mail into these buckets \
+(numbers already computed — do NOT change them, do NOT invent senders):
+
+{json.dumps(digest, indent=2)}
+
+Write encouraging, plain-language copy that makes cleaning up feel easy and safe. \
+Respond with a single JSON object:
+- intro: one short sentence summarizing the overall opportunity (mention the scale).
+- buckets: an object keyed by each bucket's "key" (only use these keys: \
+{sorted(valid_keys)}). Each value is an object with:
+  - title: a short, friendly bucket title (max ~6 words)
+  - rationale: one short sentence on why it's safe to {{action}} these
+
+Keep it honest and concrete. Never claim emails will be deleted permanently — \
+everything is reversible. Respond with valid JSON only. No markdown.\
+"""
+        raw = self._complete(SYSTEM_PROMPT, prompt, max_tokens=768)
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
+
+        data = json.loads(raw)
+        buckets_in = data.get("buckets", {}) or {}
+        buckets: dict[str, dict] = {}
+        for key, val in buckets_in.items():
+            if key in valid_keys and isinstance(val, dict):
+                entry = {}
+                if isinstance(val.get("title"), str) and val["title"].strip():
+                    entry["title"] = val["title"].strip()
+                if isinstance(val.get("rationale"), str) and val["rationale"].strip():
+                    entry["rationale"] = val["rationale"].strip()
+                if entry:
+                    buckets[key] = entry
+        intro = data.get("intro", "")
+        return {"intro": intro if isinstance(intro, str) else "", "buckets": buckets}
+
     # ── Weekly digest summary ────────────────────────────────────────────────
 
     def generate_digest(
@@ -387,8 +443,9 @@ then the body. No preamble, no sign-off commentary.
         ``messages`` is a list of ``{"role": "user"|"assistant", "content": str}``.
         In cloud mode the model can call ``tools`` (Anthropic tool-use); each call
         is dispatched through ``tool_executor(name, input) -> str``. In local mode
-        tools are ignored — the model answers conversationally from ``system``
-        context only (Ollama tool-use is unreliable across models).
+        the same tools are attempted via Ollama's native tool-use; if the model
+        can't tool-call (or anything fails) it degrades to plain conversation
+        grounded only in ``system`` context.
         """
         if self._mode == "cloud":
             return self._chat_cloud(

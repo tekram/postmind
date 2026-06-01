@@ -1126,6 +1126,195 @@ def quick_win(recs: list[Recommendation]) -> Recommendation | None:
     return max(valid, key=_score)
 
 
+# ── First-run cleanup plan ─────────────────────────────────────────────────────
+
+
+@dataclass
+class CleanupBucket:
+    """A group of senders the first-run flow proposes cleaning in one action.
+
+    ``sender_emails`` are the exact targets; ``count``/``size_mb`` are the honest
+    sums for *only* those senders so the headline figure matches what the confirm
+    flow will actually act on. ``rationale`` is a one-line human explanation —
+    deterministic by default, optionally rewritten by the LLM (presentation only)."""
+
+    key: str  # stable identifier: "headline" | "old" | "frequent" | "review"
+    title: str
+    sender_emails: list[str]
+    count: int
+    size_mb: float
+    suggested_action: str  # "trash" | "archive"
+    rationale: str
+
+    @property
+    def sender_count(self) -> int:
+        return len(self.sender_emails)
+
+
+@dataclass
+class CleanupPlan:
+    headline: CleanupBucket | None
+    secondary: list[CleanupBucket]
+    protected_note: str
+    protected_count: int  # number of sensitive senders left untouched
+    total_senders: int
+    total_emails: int
+
+    @property
+    def has_opportunity(self) -> bool:
+        return self.headline is not None
+
+
+def _bucket_from(key: str, title: str, senders: list[SenderGroup], action: str,
+                 rationale: str) -> CleanupBucket:
+    return CleanupBucket(
+        key=key,
+        title=title,
+        sender_emails=[g.sender_email for g in senders],
+        count=sum(g.count for g in senders),
+        size_mb=round(sum(g.total_size_bytes for g in senders) / (1024 * 1024), 1),
+        suggested_action=action,
+        rationale=rationale,
+    )
+
+
+def build_cleanup_plan(
+    groups: list[SenderGroup],
+    max_secondary_buckets: int = 3,
+) -> CleanupPlan:
+    """Turn scored sender groups into a first-run cleanup plan: one headline win
+    plus a few secondary buckets, with sensitive senders excluded from every
+    actionable bucket and reported in ``protected_note``.
+
+    Deterministic and AI-free — this is the baseline plan everyone gets; the LLM
+    only re-phrases ``title``/``rationale`` on top of it (see
+    ``AIEngine.summarize_cleanup_plan``). Expects ``groups`` to already carry
+    impact scores (call ``compute_impact_scores`` first)."""
+    if not groups:
+        return CleanupPlan(
+            headline=None, secondary=[], protected_note="", protected_count=0,
+            total_senders=0, total_emails=0,
+        )
+
+    total_senders = len(groups)
+    total_emails = sum(g.count for g in groups)
+
+    sensitive = [g for g in groups if classify_sender_risk(g) == "sensitive"]
+    candidates = [g for g in groups if classify_sender_risk(g) != "sensitive"]
+
+    conf: dict[str, int] = {g.sender_email: compute_confidence_score(g) for g in candidates}
+    used: set[str] = set()
+
+    def _take(pred, *, sort_key, reverse=True, limit: int | None = None) -> list[SenderGroup]:
+        picked = sorted(
+            [g for g in candidates if g.sender_email not in used and pred(g)],
+            key=sort_key, reverse=reverse,
+        )
+        if limit is not None:
+            picked = picked[:limit]
+        for g in picked:
+            used.add(g.sender_email)
+        return picked
+
+    # Headline: confidently-safe bulk mail (newsletters/promos), biggest first.
+    # Trash is the proposed action because the appeal is reclaiming storage — and
+    # it stays fully undoable for the undo window.
+    headline_senders = _take(
+        lambda g: conf[g.sender_email] >= 70,
+        sort_key=lambda g: g.total_size_bytes,
+    )
+    headline: CleanupBucket | None = None
+    if headline_senders:
+        headline = _bucket_from(
+            "headline",
+            "Newsletters & promotions you haven't been opening",
+            headline_senders, "trash",
+            "High-volume senders with unsubscribe links and old, untouched mail — "
+            "safe to clear.",
+        )
+
+    secondary: list[CleanupBucket] = []
+
+    # Old clutter: anything left that's been sitting well over a year.
+    old_senders = _take(
+        lambda g: g.inbox_days >= 365,
+        sort_key=lambda g: g.total_size_bytes,
+    )
+    if old_senders:
+        secondary.append(_bucket_from(
+            "old", "Old mail from years ago", old_senders, "archive",
+            "Mail older than a year you haven't acted on — archive to clear the inbox.",
+        ))
+
+    # Frequent senders: high-count notifications/updates.
+    frequent_senders = _take(
+        lambda g: g.count >= 100,
+        sort_key=lambda g: g.count,
+    )
+    if frequent_senders:
+        secondary.append(_bucket_from(
+            "frequent", "Senders flooding your inbox", frequent_senders, "archive",
+            "Senders with hundreds of emails each — mostly notifications and updates.",
+        ))
+
+    # Worth a quick look: remaining medium-confidence senders.
+    review_senders = _take(
+        lambda g: conf[g.sender_email] >= 40,
+        sort_key=lambda g: g.impact_score,
+    )
+    if review_senders:
+        secondary.append(_bucket_from(
+            "review", "Worth a quick look", review_senders, "archive",
+            "Likely cleanable, but skim these before acting.",
+        ))
+
+    # If nothing cleared the safe bar, promote the strongest secondary bucket so the
+    # user still gets a headline rather than an empty "all clean" screen.
+    if headline is None and secondary:
+        promoted = max(secondary, key=lambda b: b.size_mb)
+        secondary = [b for b in secondary if b is not promoted]
+        headline = promoted
+
+    secondary = secondary[:max_secondary_buckets]
+
+    protected_count = len(sensitive)
+    protected_note = ""
+    if protected_count:
+        protected_note = (
+            f"Left {protected_count} sender{'s' if protected_count != 1 else ''} "
+            "alone — banks, health, and personal mail are never in a one-click batch."
+        )
+
+    return CleanupPlan(
+        headline=headline,
+        secondary=secondary,
+        protected_note=protected_note,
+        protected_count=protected_count,
+        total_senders=total_senders,
+        total_emails=total_emails,
+    )
+
+
+def cleanup_plan_digest(plan: CleanupPlan) -> list[dict]:
+    """Compact, body-free digest of a plan's buckets for the LLM narration call.
+
+    Carries only aggregate signals (never email content) so it's cheap, private,
+    and cacheable. The model rewrites titles/rationales; it never sees or sets the
+    actual sender lists or numbers — those stay server-side on the CleanupPlan."""
+    buckets = ([plan.headline] if plan.headline else []) + plan.secondary
+    return [
+        {
+            "key": b.key,
+            "title": b.title,
+            "senders": b.sender_count,
+            "emails": b.count,
+            "size_mb": b.size_mb,
+            "action": b.suggested_action,
+        }
+        for b in buckets
+    ]
+
+
 # ── Fetch + pipeline ─────────────────────────────────────────────────────────
 
 

@@ -237,6 +237,20 @@ async def dashboard(request: Request):
     if not _list_accts() and not _is_authed():
         return RedirectResponse("/onboarding", status_code=302)
 
+    # First-run: once an account has synced data but hasn't seen the welcome
+    # summary yet, send them there instead of the empty/standard dashboard.
+    _acct = _get_web_account()
+    if _acct:
+        from postmind.core.storage import AccountRepo as _AR, EmailRepo as _ER, get_session as _gs
+        _s = _gs()
+        try:
+            _row = _AR(_s).get(_acct)
+            _has = bool(_ER(_s).get_inbox(_acct, limit=1))
+            if _has and _row is not None and _row.welcomed_at is None:
+                return RedirectResponse("/welcome", status_code=302)
+        finally:
+            _s.close()
+
     from postmind.core.sender_stats import (
         best_next_step,
         fetch_sender_groups_from_db,
@@ -305,6 +319,104 @@ async def dashboard(request: Request):
         ctx["has_scan"] = False
 
     return _resp(request, "dashboard.html", ctx)
+
+
+# ── Welcome (smart first-run cleanup summary) ──────────────────────────────────
+
+
+@app.get("/welcome", response_class=HTMLResponse)
+async def welcome(request: Request):
+    """First-run summary: scan the synced back-catalogue, build a deterministic
+    cleanup plan, optionally narrate it with the LLM, and present one big safe win
+    plus a few secondary buckets. The 'Review & clean' buttons deep-link into the
+    existing confirm-first purge/archive flow with the bucket's senders preselected.
+    """
+    ctx = _base()
+    ctx["active"] = "dashboard"
+    account_email = _get_web_account() or ""
+
+    if not account_email:
+        return RedirectResponse("/onboarding", status_code=302)
+
+    def _build():
+        from postmind.core.sender_stats import (
+            build_cleanup_plan,
+            cleanup_plan_digest,
+            compute_impact_scores,
+            fetch_sender_groups_from_db,
+        )
+        from postmind.core.storage import AccountRepo, get_session
+
+        # Whole back-catalogue is the point on first run — scope "anywhere".
+        groups = fetch_sender_groups_from_db(
+            account_email=account_email, scope="anywhere", min_count=1, top_n=1000,
+            sort_by="score",
+        )
+        compute_impact_scores(groups)
+        plan = build_cleanup_plan(groups)
+
+        # Cache the groups so the purge preview can resolve the bucket senders.
+        _cache_set(groups, {"emailAddress": account_email}, account_email)
+
+        session = get_session()
+        try:
+            row = AccountRepo(session).get(account_email)
+            synced_at = (
+                row.last_synced_at.strftime("%-d %b %Y")
+                if (row and row.last_synced_at) else None
+            )
+        finally:
+            session.close()
+        return plan, cleanup_plan_digest(plan), synced_at
+
+    try:
+        loop = asyncio.get_event_loop()
+        plan, digest, synced_at = await loop.run_in_executor(_executor, _build)
+    except Exception as exc:
+        return _resp(request, "error.html", {"error": str(exc)})
+
+    # Optional LLM narration — presentation only. Numbers/senders stay server-side;
+    # we apply only the returned title/rationale text by bucket key.
+    intro = ""
+    if _ai_mode() != "off" and plan.has_opportunity:
+        try:
+            from postmind.core.ai_engine import AIEngine
+
+            def _narrate():
+                engine = AIEngine()
+                return engine.summarize_cleanup_plan(
+                    digest, plan.total_emails, plan.total_senders
+                )
+
+            narration = await loop.run_in_executor(_executor, _narrate)
+            intro = narration.get("intro", "")
+            text_by_key = narration.get("buckets", {})
+            for bucket in ([plan.headline] if plan.headline else []) + plan.secondary:
+                t = text_by_key.get(bucket.key)
+                if t:
+                    bucket.title = t.get("title", bucket.title)
+                    bucket.rationale = t.get("rationale", bucket.rationale)
+        except Exception:
+            intro = ""  # any AI failure → deterministic plan stands on its own
+
+    # Mark welcomed so subsequent visits to / go to the normal dashboard.
+    def _mark():
+        from postmind.core.storage import AccountRepo, get_session
+        AccountRepo(get_session()).mark_welcomed(account_email)
+
+    try:
+        await loop.run_in_executor(_executor, _mark)
+    except Exception:
+        pass
+
+    ctx.update({
+        "plan": plan,
+        "intro": intro,
+        "synced_at": synced_at,
+        "account_email": account_email,
+        "undo_days": get_settings().undo_window_days,
+    })
+    return _resp(request, "welcome.html", ctx)
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
@@ -1378,6 +1490,11 @@ async def sync_start(request: Request):
     scope = form.get("scope", "inbox")
     raw_limit = int(form.get("limit", "1000"))
     limit = None if raw_limit == 0 else raw_limit
+    # Where to send the user when the sync finishes. Only same-site relative paths
+    # are allowed, so this can't be turned into an open redirect.
+    next_url = form.get("next", "/stats")
+    if not next_url.startswith("/") or next_url.startswith("//"):
+        next_url = "/stats"
 
     task_id = uuid.uuid4().hex[:8]
     _sync_tasks[task_id] = {
@@ -1388,6 +1505,7 @@ async def sync_start(request: Request):
         "total": 0,
         "error": None,
         "started_at": time.time(),
+        "next_url": next_url,
     }
 
     def _run():
@@ -1494,6 +1612,8 @@ async def sync_poll(task_id: str):
 </div>""")
 
     if status == "done":
+        next_url = state.get("next_url", "/stats")
+        cta = "See your cleanup plan →" if next_url == "/welcome" else "View Stats →"
         return HTMLResponse(f"""
 <div id="sync-result" class="bg-green-50 border border-green-200 rounded-xl p-4">
   <div class="flex items-center justify-between">
@@ -1501,8 +1621,8 @@ async def sync_poll(task_id: str):
       <p class="text-green-800 font-medium text-sm">✓ {msg}</p>
       <p class="text-green-600 text-xs mt-0.5">Local cache is up to date</p>
     </div>
-    <a href="/stats" class="bg-teal-600 hover:bg-teal-700 text-white text-xs font-medium px-4 py-2 rounded-lg transition-colors">
-      View Stats →
+    <a href="{next_url}" class="bg-teal-600 hover:bg-teal-700 text-white text-xs font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap">
+      {cta}
     </a>
   </div>
 </div>""")
@@ -1786,17 +1906,20 @@ async def triage_classify_stream(request: Request):
 
 # ── Assistant (floating chat) ──────────────────────────────────────────────────
 
+# Each page is keyed by its route path (the stable identifier the `navigate`
+# tool emits) and carries a human-friendly display name plus a description.
+# The name — never the path — is what the assistant shows the user.
 _PAGES = {
-    "/": "Dashboard — inbox overview at a glance",
-    "/agent": "Super Agent — natural-language command center that can clean up, unsubscribe, send, and automate (with confirm-first cards)",
-    "/stats": "Stats — senders ranked by storage impact, with a Purge button",
-    "/triage": "Triage — AI-classified unread inbox (priority, category, action)",
-    "/agents": "Agents — per-account heartbeat watchers and their voice/soul config",
-    "/sync": "Sync — pull the mailbox into the local cache",
-    "/accounts": "Accounts — add / switch / remove Gmail and IMAP accounts",
-    "/watch": "Watch — start/stop the heartbeat daemon that runs agents",
-    "/undo": "Undo History — reverse recent operations within the undo window",
-    "/settings": "Settings — AI mode, protected senders, data location",
+    "/": {"name": "Dashboard", "desc": "inbox overview at a glance"},
+    "/agent": {"name": "Super Agent", "desc": "natural-language command center that can clean up, unsubscribe, send, and automate (with confirm-first cards)"},
+    "/stats": {"name": "Stats", "desc": "senders ranked by storage impact, with a Purge button"},
+    "/triage": {"name": "Triage", "desc": "AI-classified unread inbox (priority, category, action)"},
+    "/agents": {"name": "Agents", "desc": "per-account heartbeat watchers and their voice/soul config"},
+    "/sync": {"name": "Sync", "desc": "pull the mailbox into the local cache"},
+    "/accounts": {"name": "Accounts", "desc": "add / switch / remove Gmail and IMAP accounts"},
+    "/watch": {"name": "Watch", "desc": "start/stop the heartbeat daemon that runs agents"},
+    "/undo": {"name": "Undo History", "desc": "reverse recent operations within the undo window"},
+    "/settings": {"name": "Settings", "desc": "AI mode, protected senders, data location"},
 }
 
 
@@ -1824,8 +1947,9 @@ def _chat_overview_text(account_email: str) -> str:
 
     if not groups:
         return (
-            "No inbox scan data is available yet. The user should open Stats or run a "
-            "Sync first so concrete numbers can be quoted."
+            "No inbox data yet — there's nothing to quote numbers from. Offer the user the "
+            "Sync page via the `navigate` tool (label \"Sync your inbox\") so they can pull "
+            "their mailbox in first."
         )
 
     domain_map = {d.domain: d for d in group_by_domain(groups)}
@@ -2026,9 +2150,10 @@ def _split_draft(draft: str) -> tuple[str, str]:
 
 
 def _build_chat_system(page: str, account_email: str, ai_mode: str) -> str:
-    here = _PAGES.get(page, "the app")
+    here_info = _PAGES.get(page)
+    here = f"{here_info['name']} — {here_info['desc']}" if here_info else "the app"
     overview = _chat_overview_text(account_email)
-    pages = "\n".join(f"  {p} — {desc}" for p, desc in _PAGES.items())
+    pages = "\n".join(f"  {info['name']} — {info['desc']}" for info in _PAGES.values())
     return f"""\
 You are the postmind Assistant — a friendly, concise helper embedded in postmind, a \
 privacy-first email management tool that runs locally. You help the user understand and \
@@ -2041,6 +2166,12 @@ specific senders, use `propose_cleanup` to stage them; it gives the user a butto
 confirm-first purge preview (deletes go to Trash and are undoable) — you must never imply \
 the cleanup already happened. For anything else, use `navigate` to point the user to the \
 right page. When they want an email written, use `draft_email`.
+
+Never write a URL or route path (like `/sync` or `/stats`) in your reply — those \
+are not commands the user types. To send the user to a page, always call the `navigate` \
+tool, which renders a clickable button; refer to pages by name ("the Sync page", "Stats"), \
+never by path. If the inbox snapshot below shows no data yet, don't tell the user to "sync" \
+in prose — call `navigate` to "/sync" with the label "Sync your inbox".
 
 You are read-only and can only stage a trash cleanup. For anything that ACTS on the inbox — \
 archiving, labeling, marking read, unsubscribing, sending email, or creating agents/rules — \
@@ -2143,13 +2274,14 @@ async def chat_endpoint(request: Request):
                     label = tool_input.get("label") or "Open page"
                     if not any(a["href"] == page_path for a in actions):
                         actions.append({"label": label, "href": page_path})
-                    return f"Added a '{label}' button linking to {page_path}."
+                    return f"Added a '{label}' button to the {_PAGES[page_path]['name']} page."
                 return "Unknown page."
             return f"Unknown tool: {name}"
 
-        # Tools only work in cloud mode; local mode answers conversationally.
-        tools = _CHAT_TOOLS if mode == "cloud" else None
-        return ai.chat(messages, system=system, tools=tools, tool_executor=_executor_tool)
+        # Cloud always supports tools; local attempts native Ollama tool-use
+        # (qwen2.5/llama3.1+) and degrades to plain conversation inside
+        # AIEngine.chat if the model can't. Same pattern as the Super Agent.
+        return ai.chat(messages, system=system, tools=_CHAT_TOOLS, tool_executor=_executor_tool)
 
     try:
         loop = asyncio.get_event_loop()
@@ -2200,6 +2332,8 @@ name).
 execute immediately (no card) because they are fully reversible — tell the user what you \
 did and that it's undoable. Trash, unsubscribe, and send ALWAYS require a confirm card even \
 under autopilot.
+- Never write a URL or route path (like `/sync` or `/stats`) in your reply — refer to \
+pages by name ("the Sync page", "Stats"). Those are not commands the user types.
 
 Active account: {account_email or 'none connected yet'}. AI mode: {mode}.
 

@@ -32,12 +32,19 @@
         </select>
       </div>
       <div class="flex items-center gap-2">
-        <label class="text-slate-500 text-sm">Since</label>
+        <label class="text-slate-500 text-sm">Age</label>
         <select id="since-sel" class="text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30">
           <option value="" {% if not since %}selected{% endif %}>All time</option>
-          <option value="30d"  {% if since == '30d'  %}selected{% endif %}>Last 30 days</option>
-          <option value="90d"  {% if since == '90d'  %}selected{% endif %}>Last 90 days</option>
-          <option value="365d" {% if since == '365d' %}selected{% endif %}>Last year</option>
+          <optgroup label="Recent">
+            <option value="30d"  {% if since == '30d'  %}selected{% endif %}>Last 30 days</option>
+            <option value="90d"  {% if since == '90d'  %}selected{% endif %}>Last 90 days</option>
+            <option value="365d" {% if since == '365d' %}selected{% endif %}>Last year</option>
+          </optgroup>
+          <optgroup label="Old back-catalogue">
+            <option value="older:365d"  {% if since == 'older:365d'  %}selected{% endif %}>Older than 1 year</option>
+            <option value="older:730d"  {% if since == 'older:730d'  %}selected{% endif %}>Older than 2 years</option>
+            <option value="older:1825d" {% if since == 'older:1825d' %}selected{% endif %}>Older than 5 years</option>
+          </optgroup>
         </select>
       </div>
       <button id="rescan-btn"
@@ -49,7 +56,7 @@
 
   <!-- Data area: loaded via HTMX -->
   <div id="stats-data"
-       hx-get="/stats/data?sort={{ sort_by }}&scope={{ scope }}&since={{ since }}"
+       hx-get="/stats/data?sort={{ sort_by }}&scope={{ scope }}&since={{ since | urlencode }}"
        hx-trigger="load"
        hx-target="this"
        hx-swap="outerHTML">
@@ -81,7 +88,7 @@
     const sort  = document.getElementById('sort-sel').value;
     const scope = document.getElementById('scope-sel').value;
     const since = document.getElementById('since-sel').value;
-    const url   = `/stats/data?sort=${sort}&scope=${scope}&since=${since}`;
+    const url   = `/stats/data?sort=${sort}&scope=${scope}&since=${encodeURIComponent(since)}`;
 
     const el = document.getElementById('stats-data');
     if (!el) return;
