@@ -2131,21 +2131,42 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                 extra = f" ({len(blocked)} protected sender(s) skipped)" if blocked else ""
                 return f"No matching senders to {action.replace('_', ' ')}{extra} — nothing staged."
             total = sum(g.count for g in staged)
+            verb = action.replace("_", " ")
+            title = {"archive": "Archive emails", "label": f"Label emails “{label_name}”", "mark_read": "Mark emails as read"}[action]
             # Autopilot: auto-execute reversible actions without a confirm card
-            # (opt-in, off by default; trash/unsubscribe/send never qualify).
+            # (opt-in, off by default; trash/unsubscribe/send never qualify). Even
+            # under autopilot, SENSITIVE senders (bank/legal/health) keep the human
+            # gate — they're routed to a confirm card, never auto-executed.
             if _autopilot_on() and action in _AUTOPILOT_ACTIONS:
-                try:
-                    undo_id, count = _execute_reversible_action(account_email, action, staged, label_name)
-                except Exception as exc:
-                    return f"Couldn't {action.replace('_', ' ')}: {exc}"
-                _scan_cache.pop(account_email or "default", None)
-                if not any(a.get("href") == "/undo" for a in actions):
-                    actions.append({"label": "Undo", "href": "/undo"})
-                note = f" ({len(blocked)} protected skipped)" if blocked else ""
-                return f"Autopilot: {action.replace('_', ' ')}d {count} emails from {len(staged)} sender(s){note}. Reversible from Undo for 30 days."
+                sset = set(sensitive)
+                auto = [g for g in staged if g.sender_email not in sset]
+                held = [g for g in staged if g.sender_email in sset]
+                parts = []
+                if auto:
+                    try:
+                        _undo_id, count = _execute_reversible_action(account_email, action, auto, label_name)
+                    except Exception as exc:
+                        return f"Couldn't {verb}: {exc}"
+                    if not any(a.get("href") == "/undo" for a in actions):
+                        actions.append({"label": "Undo", "href": "/undo"})
+                    parts.append(f"Autopilot: {verb}d {count} emails from {len(auto)} sender(s); reversible from Undo for 30 days.")
+                if held:
+                    cards.append({
+                        "type": "bulk_action",
+                        "title": title,
+                        "fields": {
+                            "action": action, "label_name": label_name,
+                            "targets": _enrich_targets(held), "total_count": sum(g.count for g in held),
+                            "blocked": blocked, "sensitive": sensitive, "undoable": True,
+                        },
+                    })
+                    parts.append(f"{len(held)} sensitive sender(s) (bank/legal/health) need your confirmation — shown as a card.")
+                if blocked:
+                    parts.append(f"{len(blocked)} protected sender(s) skipped.")
+                return " ".join(parts) or "Nothing to do."
             cards.append({
                 "type": "bulk_action",
-                "title": {"archive": "Archive emails", "label": f"Label emails “{label_name}”", "mark_read": "Mark emails as read"}[action],
+                "title": title,
                 "fields": {
                     "action": action,
                     "label_name": label_name,

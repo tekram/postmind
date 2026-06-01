@@ -174,6 +174,47 @@ def test_autopilot_off_stages_card(monkeypatch):
     assert any(c["type"] == "bulk_action" for c in d["cards"])
 
 
+def test_autopilot_holds_sensitive_senders_for_confirmation(monkeypatch):
+    """Even with autopilot on, bank/legal/health senders must NOT auto-execute —
+    they get routed to a confirm card."""
+    monkeypatch.setattr(s, "_get_web_account", lambda: "me@example.com")
+    s._scan_cache["me@example.com"] = {
+        "groups": [_grp("news@promo.com", "Promo", 12, 2048), _grp("alerts@chase.com", "Chase", 5, 1024)],
+        "profile": {}, "account_email": "me@example.com", "scanned_at": "now", "expires": time.time() + 300,
+    }
+    monkeypatch.setattr(s, "_chat_mode", lambda: "cloud")
+    monkeypatch.setattr(s, "_chat_engine_kwargs", lambda: {"mode": "cloud", "cloud_model": "m", "ollama_model": "o"})
+    monkeypatch.setattr(s, "_autopilot_on", lambda: True)
+
+    class FakeBlock:
+        def __init__(self, *a, **k):
+            pass
+
+        def blocked_emails(self, a):
+            return set()
+
+    monkeypatch.setattr(st, "BlocklistRepo", FakeBlock)
+    monkeypatch.setattr(s, "_build_provider", lambda: type("P", (), {"supports": lambda self, x: True})())
+
+    archived = []
+    monkeypatch.setattr(s, "_execute_reversible_action",
+                        lambda acct, action, staged, label="": (archived.extend(g.sender_email for g in staged), (1, 12))[1])
+
+    class AI:
+        def __init__(self, *a, **k):
+            pass
+
+        def chat(self, m, system, tools=None, tool_executor=None, **k):
+            return tool_executor("stage_archive", {"query": "@"})  # matches both senders
+
+    monkeypatch.setattr(ae, "AIEngine", AI)
+    d = TestClient(s.app).post("/agent", json={"messages": [{"role": "user", "content": "archive all"}]}).json()
+    # promo auto-archived; chase (sensitive) held for a confirm card
+    assert archived == ["news@promo.com"], archived
+    assert any(c["type"] == "bulk_action" for c in d["cards"])
+    assert "alerts@chase.com" in str(d["cards"])
+
+
 def test_local_mode_allowed_for_agent():
     assert s._agent_mode_guidance("local") is None
     assert s._agent_mode_guidance("cloud") is None
