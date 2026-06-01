@@ -133,14 +133,41 @@ class AIEngine:
 
     # ── Classification ───────────────────────────────────────────────────────
 
-    def classify_emails(self, messages: list[Message]) -> list[ClassifiedEmail]:
-        """Classify a batch of emails. Returns one ClassifiedEmail per message."""
+    def classify_emails(
+        self, messages: list[Message], parallelism: int | None = None
+    ) -> list[ClassifiedEmail]:
+        """Classify emails. Returns one ClassifiedEmail per message, in order.
+
+        Batches (``ai_max_classify_batch`` emails each) are dispatched to the LLM
+        concurrently — up to ``parallelism`` in flight (default
+        ``ai_classify_parallelism``) — so wall-clock time scales with the slowest
+        batch rather than the sum of all batches.
+        """
+        chunks = list(_chunks(messages, self._max_batch))
+        if not chunks:
+            return []
+        if len(chunks) == 1:
+            return self.classify_batch(chunks[0])
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        workers = parallelism or get_settings().ai_classify_parallelism
+        workers = max(1, min(workers, len(chunks)))
+
+        ordered: list[list[ClassifiedEmail]] = [[] for _ in chunks]
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            # Submit every batch up front so they run concurrently, then collect
+            # results in chunk order (.result() blocks but all calls are in flight).
+            futures = {pool.submit(self.classify_batch, ch): i for i, ch in enumerate(chunks)}
+            for fut, i in futures.items():
+                ordered[i] = fut.result()
+
         results: list[ClassifiedEmail] = []
-        for chunk in _chunks(messages, self._max_batch):
-            results.extend(self._classify_batch(chunk))
+        for batch in ordered:
+            results.extend(batch)
         return results
 
-    def _classify_batch(self, messages: list[Message]) -> list[ClassifiedEmail]:
+    def classify_batch(self, messages: list[Message]) -> list[ClassifiedEmail]:
         email_summaries = []
         for i, msg in enumerate(messages):
             email_summaries.append(

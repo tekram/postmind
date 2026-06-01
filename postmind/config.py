@@ -127,6 +127,7 @@ class Settings(BaseSettings):
     # Rate limiting
     gmail_batch_size: int = 50  # Max messages per Gmail batch request
     ai_max_classify_batch: int = 20  # Emails per AI classification call
+    ai_classify_parallelism: int = 4  # Concurrent classification batches (in-flight LLM calls)
 
 
 _settings: Settings | None = None

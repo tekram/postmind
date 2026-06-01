@@ -174,6 +174,28 @@ class UnsubscribeRecord(Base):
     last_received_at = Column(DateTime, nullable=True)  # Last email from this sender post-unsub
 
 
+class ClassificationCacheRecord(Base):
+    """Cached AI triage classification for a single message.
+
+    Keyed by ``gmail_id`` — a Gmail message id is immutable and its
+    subject/sender/snippet never change, so a classification is valid for the
+    life of the message. This lets the Triage tab skip re-classifying (and re-
+    paying the LLM latency for) messages it has already seen.
+    """
+
+    __tablename__ = "classification_cache"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    gmail_id = Column(String, nullable=False, unique=True)
+    category = Column(String, default="other")
+    priority = Column(String, default="medium")
+    explanation = Column(Text, default="")
+    suggested_action = Column(String, default="keep")
+    requires_reply = Column(Boolean, default=False)
+    deadline_hint = Column(String, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class SenderBlocklist(Base):
     """Senders the user has protected from future purge operations."""
 
@@ -540,6 +562,78 @@ class BlocklistRepo:
             self.s.query(SenderBlocklist.sender_email).filter_by(account_email=account_email).all()
         )
         return {r.sender_email for r in rows}
+
+
+class ClassificationCacheRepo:
+    """Read/write cached triage classifications, keyed by gmail_id.
+
+    Works with plain dicts (keys mirror :class:`ClassificationCacheRecord`
+    columns minus ``id``/``created_at``) so the storage layer stays decoupled
+    from the AI engine's ``ClassifiedEmail`` dataclass.
+    """
+
+    _FIELDS = (
+        "category",
+        "priority",
+        "explanation",
+        "suggested_action",
+        "requires_reply",
+        "deadline_hint",
+    )
+
+    def __init__(self, session: Session):
+        self.s = session
+
+    def get_many(self, gmail_ids: list[str]) -> dict[str, dict]:
+        """Return {gmail_id: {field: value, ...}} for whichever ids are cached."""
+        if not gmail_ids:
+            return {}
+        rows = (
+            self.s.query(ClassificationCacheRecord)
+            .filter(ClassificationCacheRecord.gmail_id.in_(gmail_ids))
+            .all()
+        )
+        return {
+            r.gmail_id: {f: getattr(r, f) for f in self._FIELDS} for r in rows
+        }
+
+    def upsert_many(self, items: list[dict]) -> None:
+        """Bulk-upsert classifications. Each item must include ``gmail_id``."""
+        if not items:
+            return
+        try:
+            from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+            cols = ["gmail_id", *self._FIELDS]
+            rows = [{c: item.get(c) for c in cols} for item in items]
+            stmt = sqlite_insert(ClassificationCacheRecord.__table__).values(rows)
+            update_cols = {c: stmt.excluded[c] for c in self._FIELDS}
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["gmail_id"], set_=update_cols
+            )
+            self.s.execute(stmt)
+            self.s.commit()
+        except Exception:
+            self.s.rollback()
+            for item in items:
+                gid = item.get("gmail_id")
+                if not gid:
+                    continue
+                existing = (
+                    self.s.query(ClassificationCacheRecord)
+                    .filter_by(gmail_id=gid)
+                    .first()
+                )
+                if existing:
+                    for f in self._FIELDS:
+                        setattr(existing, f, item.get(f))
+                else:
+                    self.s.add(
+                        ClassificationCacheRecord(
+                            gmail_id=gid, **{f: item.get(f) for f in self._FIELDS}
+                        )
+                    )
+            self.s.commit()
 
 
 class Agent(Base):

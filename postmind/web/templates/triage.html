@@ -32,7 +32,7 @@
         Classify
       </button>
       {% if results %}
-      <span class="text-slate-400 text-xs">{{ results | length }} results · {{ scanned_at }}</span>
+      <span id="triage-meta" class="text-slate-400 text-xs"><span id="triage-count">{{ results | length }}</span> results · {{ scanned_at }}</span>
       {% endif %}
     </form>
   </div>
@@ -72,87 +72,188 @@
   </div>
 
   {% else %}
-  <!-- Results grid -->
-  <div class="grid gap-3 max-w-4xl">
-    {% for item in results %}
-    <div class="bg-white border rounded-xl shadow-sm p-4 transition-colors hover:border-slate-300
-                {% if item.priority == 'high' %}border-red-200{% elif item.priority == 'medium' %}border-yellow-200{% else %}border-slate-200{% endif %}">
-
-      <div class="flex items-start gap-4">
-
-        <!-- Priority indicator -->
-        <div class="shrink-0 mt-0.5">
-          {% if item.priority == 'high' %}
-          <span class="inline-flex items-center gap-1 text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
-            ⚡ HIGH
-          </span>
-          {% elif item.priority == 'medium' %}
-          <span class="inline-flex items-center gap-1 text-xs font-bold text-yellow-700 bg-yellow-50 border border-yellow-200 px-2 py-0.5 rounded-full">
-            · MED
-          </span>
-          {% else %}
-          <span class="inline-flex items-center gap-1 text-xs font-medium text-slate-400 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full">
-            LOW
-          </span>
-          {% endif %}
-        </div>
-
-        <!-- Main content -->
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="text-sm font-semibold text-slate-900 truncate">{{ item.subject[:70] }}</span>
-            {% if item.deadline_hint %}
-            <span class="text-xs text-red-500 font-medium bg-red-50 px-1.5 py-0.5 rounded shrink-0">
-              {{ item.deadline_hint }}
-            </span>
-            {% endif %}
-          </div>
-
-          <div class="flex items-center gap-3 mt-0.5">
-            <span class="text-xs text-slate-500">{{ item.sender_name[:40] }}</span>
-            <span class="text-xs text-slate-300">·</span>
-            <span class="text-xs text-slate-400">{{ item.category_icon }} {{ item.category | replace('_', ' ') | title }}</span>
-          </div>
-
-          {% if item.snippet %}
-          <p class="text-xs text-slate-400 mt-1.5 line-clamp-2">{{ item.snippet }}</p>
-          {% endif %}
-
-          <p class="text-xs text-slate-500 mt-1.5 italic">{{ item.explanation }}</p>
-        </div>
-
-        <!-- Action badge -->
-        <div class="shrink-0">
-          {% set action = item.suggested_action %}
-          {% if action == 'reply' %}
-          <span class="text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-lg">Reply</span>
-          {% elif action == 'archive' %}
-          <span class="text-xs font-medium text-slate-500 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg">Archive</span>
-          {% elif action == 'delete' or action == 'unsubscribe' %}
-          <span class="text-xs font-medium text-red-600 bg-red-50 border border-red-200 px-2.5 py-1 rounded-lg capitalize">{{ action }}</span>
-          {% else %}
-          <span class="text-xs font-medium text-slate-400 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg capitalize">{{ action }}</span>
-          {% endif %}
-        </div>
-
-      </div>
-    </div>
-    {% endfor %}
+  <!-- Progress banner while pending rows are still being classified -->
+  <div id="triage-progress" class="hidden mb-4 flex items-center gap-2 text-sm text-slate-500 max-w-4xl">
+    <svg class="animate-spin h-4 w-4 text-teal-500" viewBox="0 0 24 24" fill="none">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+    </svg>
+    <span>Classifying <span id="triage-pending-count">{{ pending_count }}</span> email<span id="triage-pending-plural">{% if pending_count != 1 %}s{% endif %}</span>…</span>
   </div>
+
+  <!-- Results grid (rendered client-side from the JSON below for instant paint) -->
+  <div id="triage-list" class="grid gap-3 max-w-4xl"></div>
 
   <!-- Summary footer -->
   <div class="mt-6 flex items-center gap-6 text-xs text-slate-400 border-t border-slate-100 pt-4 max-w-4xl">
-    {% set high = results | selectattr("priority", "eq", "high") | list | length %}
-    {% set med  = results | selectattr("priority", "eq", "medium") | list | length %}
-    {% set need_reply = results | selectattr("requires_reply") | list | length %}
-    <span>{{ high }} high priority</span>
-    <span>{{ med }} medium</span>
-    {% if need_reply %}<span>{{ need_reply }} need reply</span>{% endif %}
+    <span><span id="triage-high">0</span> high priority</span>
+    <span><span id="triage-med">0</span> medium</span>
+    <span id="triage-needreply-wrap" class="hidden"><span id="triage-needreply">0</span> need reply</span>
     <span class="ml-auto">
       Only subjects + snippets sent to Anthropic — never full body.
       <a href="/settings" class="underline hover:text-slate-600">AI settings</a>
     </span>
   </div>
+
+  <script type="application/json" id="triage-data">{{ results | tojson }}</script>
+  <script>
+  (function () {
+    const rows = JSON.parse(document.getElementById("triage-data").textContent);
+    const pendingToken = {{ (pending_token | tojson) if pending_token else 'null' }};
+    const list = document.getElementById("triage-list");
+    const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 };
+    const byId = {};
+    rows.forEach(r => { byId[r.id] = r; });
+
+    function el(tag, cls, text) {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text != null) e.textContent = text;
+      return e;
+    }
+
+    function priorityBadge(p) {
+      if (p === "high")
+        return el("span", "inline-flex items-center gap-1 text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full", "⚡ HIGH");
+      if (p === "medium")
+        return el("span", "inline-flex items-center gap-1 text-xs font-bold text-yellow-700 bg-yellow-50 border border-yellow-200 px-2 py-0.5 rounded-full", "· MED");
+      return el("span", "inline-flex items-center gap-1 text-xs font-medium text-slate-400 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full", "LOW");
+    }
+
+    function actionBadge(action) {
+      const a = action || "keep";
+      if (a === "reply")
+        return el("span", "text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-lg", "Reply");
+      if (a === "archive")
+        return el("span", "text-xs font-medium text-slate-500 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg", "Archive");
+      if (a === "delete" || a === "unsubscribe")
+        return el("span", "text-xs font-medium text-red-600 bg-red-50 border border-red-200 px-2.5 py-1 rounded-lg capitalize", a);
+      return el("span", "text-xs font-medium text-slate-400 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg capitalize", a);
+    }
+
+    function titleCase(s) {
+      return (s || "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function buildCard(r) {
+      const cls = r.cls;
+      const p = cls ? cls.priority : null;
+      const border = p === "high" ? "border-red-200" : p === "medium" ? "border-yellow-200" : "border-slate-200";
+      const card = el("div", "bg-white border rounded-xl shadow-sm p-4 transition-colors hover:border-slate-300 " + border);
+      card.dataset.id = r.id;
+
+      const flex = el("div", "flex items-start gap-4");
+
+      // Priority indicator
+      const pind = el("div", "shrink-0 mt-0.5");
+      if (cls) {
+        pind.appendChild(priorityBadge(p));
+      } else {
+        pind.appendChild(el("span", "inline-flex items-center gap-1 text-xs font-medium text-slate-300 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full animate-pulse", "···"));
+      }
+      flex.appendChild(pind);
+
+      // Main content
+      const main = el("div", "flex-1 min-w-0");
+      const titleRow = el("div", "flex items-center gap-2 flex-wrap");
+      titleRow.appendChild(el("span", "text-sm font-semibold text-slate-900 truncate", (r.subject || "").slice(0, 70)));
+      if (cls && cls.deadline_hint)
+        titleRow.appendChild(el("span", "text-xs text-red-500 font-medium bg-red-50 px-1.5 py-0.5 rounded shrink-0", cls.deadline_hint));
+      main.appendChild(titleRow);
+
+      const meta = el("div", "flex items-center gap-3 mt-0.5");
+      meta.appendChild(el("span", "text-xs text-slate-500", (r.sender_name || "").slice(0, 40)));
+      meta.appendChild(el("span", "text-xs text-slate-300", "·"));
+      meta.appendChild(el("span", "text-xs text-slate-400", cls ? (cls.category_icon + " " + titleCase(cls.category)) : "classifying…"));
+      main.appendChild(meta);
+
+      if (r.snippet)
+        main.appendChild(el("p", "text-xs text-slate-400 mt-1.5 line-clamp-2", r.snippet));
+
+      main.appendChild(el("p", "text-xs text-slate-500 mt-1.5 italic", cls ? cls.explanation : ""));
+      flex.appendChild(main);
+
+      // Action badge
+      const act = el("div", "shrink-0");
+      if (cls) act.appendChild(actionBadge(cls.suggested_action));
+      flex.appendChild(act);
+
+      card.appendChild(flex);
+      return card;
+    }
+
+    function sortRows() {
+      rows.sort((a, b) => {
+        const pa = a.cls ? (PRIORITY_ORDER[a.cls.priority] ?? 3) : 99;
+        const pb = b.cls ? (PRIORITY_ORDER[b.cls.priority] ?? 3) : 99;
+        return pa - pb;
+      });
+    }
+
+    function renderAll() {
+      sortRows();
+      list.replaceChildren(...rows.map(buildCard));
+    }
+
+    function updateCounts() {
+      let high = 0, med = 0, needReply = 0;
+      rows.forEach(r => {
+        if (!r.cls) return;
+        if (r.cls.priority === "high") high++;
+        else if (r.cls.priority === "medium") med++;
+        if (r.cls.requires_reply) needReply++;
+      });
+      document.getElementById("triage-high").textContent = high;
+      document.getElementById("triage-med").textContent = med;
+      const nrWrap = document.getElementById("triage-needreply-wrap");
+      if (needReply > 0) {
+        document.getElementById("triage-needreply").textContent = needReply;
+        nrWrap.classList.remove("hidden");
+      } else {
+        nrWrap.classList.add("hidden");
+      }
+    }
+
+    renderAll();
+    updateCounts();
+
+    if (!pendingToken) return;
+
+    const progress = document.getElementById("triage-progress");
+    const pendingCountEl = document.getElementById("triage-pending-count");
+    progress.classList.remove("hidden");
+    let remaining = rows.filter(r => !r.cls).length;
+
+    const src = new EventSource("/triage/classify-stream?token=" + encodeURIComponent(pendingToken));
+    src.onmessage = function (ev) {
+      let data;
+      try { data = JSON.parse(ev.data); } catch (e) { return; }
+      if (data.type === "row") {
+        const r = byId[data.id];
+        if (r && !r.cls) {
+          r.cls = data;
+          remaining = Math.max(0, remaining - 1);
+          pendingCountEl.textContent = remaining;
+          document.getElementById("triage-pending-plural").textContent = remaining === 1 ? "" : "s";
+          // Update this card in place without disturbing scroll/order yet.
+          const existing = list.querySelector('[data-id="' + (window.CSS && CSS.escape ? CSS.escape(r.id) : r.id) + '"]');
+          if (existing) existing.replaceWith(buildCard(r));
+          updateCounts();
+        }
+      } else if (data.type === "done") {
+        src.close();
+        progress.classList.add("hidden");
+        renderAll();        // final reorder by priority
+        updateCounts();
+      }
+    };
+    src.onerror = function () {
+      // Network/stream error — stop spinning; whatever classified stays rendered.
+      src.close();
+      progress.classList.add("hidden");
+    };
+  })();
+  </script>
 
   {% endif %}
 

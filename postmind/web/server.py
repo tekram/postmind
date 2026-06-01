@@ -213,6 +213,7 @@ def _enrich_groups(groups) -> list[dict]:
             "size_str": size_str,
             "size_mb": g.total_size_mb,
             "oldest": g.earliest_date.strftime("%b %Y"),
+            "oldest_ts": int(g.earliest_date.timestamp()),
             "has_unsubscribe": g.has_unsubscribe,
             "confidence": conf,
             "safety_label": confidence_safety_label(conf),
@@ -307,6 +308,25 @@ async def dashboard(request: Request):
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
+
+
+def _parse_age_filter(since: str) -> tuple[int | None, int | None]:
+    """Parse the Stats "age" filter value into (newer_than_days, older_than_days).
+
+    ``"30d"`` → newer than 30 days (mail from the last month).
+    ``"older:365d"`` → older than 365 days (the stale back-catalogue).
+    Empty/unrecognised → (None, None), i.e. no age restriction.
+    """
+    if not since:
+        return None, None
+    if since.startswith("older:"):
+        val = since[len("older:"):]
+        if val.endswith("d") and val[:-1].isdigit():
+            return None, int(val[:-1])
+        return None, None
+    if since.endswith("d") and since[:-1].isdigit():
+        return int(since[:-1]), None
+    return None, None
 
 
 @app.get("/stats", response_class=HTMLResponse)
@@ -1478,6 +1498,79 @@ async def sync_poll(task_id: str):
 
 # ── Triage ────────────────────────────────────────────────────────────────────
 
+_PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+_CATEGORY_ICONS = {
+    "action_required": "⚡",
+    "conversation": "💬",
+    "newsletter": "📰",
+    "notification": "🔔",
+    "receipt": "🧾",
+    "calendar": "📅",
+    "social": "👥",
+    "spam": "🗑",
+    "other": "📧",
+}
+
+# Messages fetched for the triage page that still need classification, stashed so
+# the /triage/classify-stream endpoint can pick them up without a second Gmail
+# fetch. token → {"messages": [Message...], "created": float}.
+_triage_pending: dict[str, dict] = {}
+_TRIAGE_PENDING_TTL = 600  # 10 minutes
+
+
+def _prune_triage_pending() -> None:
+    cutoff = time.time() - _TRIAGE_PENDING_TTL
+    for tok in [t for t, v in _triage_pending.items() if v["created"] < cutoff]:
+        _triage_pending.pop(tok, None)
+
+
+def _cls_payload(gmail_id: str, priority: str, category: str, explanation: str,
+                 suggested_action: str, requires_reply: bool, deadline_hint: str) -> dict:
+    """Build the classification dict the template + stream both render from."""
+    return {
+        "id": gmail_id,
+        "priority": priority,
+        "category": category,
+        "category_icon": _CATEGORY_ICONS.get(category, "📧"),
+        "explanation": explanation,
+        "suggested_action": suggested_action,
+        "requires_reply": bool(requires_reply),
+        "deadline_hint": deadline_hint,
+    }
+
+
+def _fetch_triage_messages(scope: str, limit: int):
+    """Fetch the inbox slice to triage (no classification). Returns (messages, account_email)."""
+    from postmind.core.gmail_client import GmailClient, Message, MessageHeader
+
+    account_email = _get_web_account() or ""
+    if scope == "all":
+        # Read from the local synced DB — no Gmail API calls needed.
+        from postmind.core.storage import EmailRepo, get_session
+        repo = EmailRepo(get_session())
+        records = repo.get_inbox(account_email=account_email, limit=limit)
+        messages = []
+        for r in records:
+            from_ = f"{r.sender_name} <{r.sender_email}>" if r.sender_name else r.sender_email
+            messages.append(Message(
+                id=r.gmail_id,
+                thread_id=r.thread_id or "",
+                snippet=r.snippet or "",
+                headers=MessageHeader(subject=r.subject or "", from_=from_),
+                label_ids=[],
+                size_estimate=r.size_estimate or 0,
+                internal_date=0,
+            ))
+        return messages, account_email
+
+    client = GmailClient()
+    profile = client.get_profile()
+    account_email = profile.get("emailAddress", "")
+    ids = client.list_message_ids(query="in:inbox is:unread", max_results=limit)
+    if not ids:
+        return [], account_email
+    return client.get_messages_batch(ids), account_email
+
 
 @app.get("/triage", response_class=HTMLResponse)
 async def triage_page(request: Request):
@@ -1494,97 +1587,169 @@ async def triage_page(request: Request):
     scope = request.query_params.get("scope", "unread")  # "unread" or "all"
 
     def _run():
-        from postmind.core.ai_engine import AIEngine
-        from postmind.core.gmail_client import GmailClient, Message, MessageHeader
+        """Fetch the inbox slice and apply any cached classifications.
 
-        account_email = _get_web_account() or ""
+        Returns the rows to render immediately (cached rows carry their
+        classification; uncached rows render a placeholder and are streamed in
+        afterwards) plus the messages still needing classification.
+        """
+        from postmind.core.storage import ClassificationCacheRepo, get_session
 
-        if scope == "all":
-            # Read from local synced DB — no Gmail API calls needed
-            from postmind.core.storage import EmailRepo, get_session
-            session = get_session()
-            repo = EmailRepo(session)
-            records = repo.get_inbox(account_email=account_email, limit=limit)
-            messages = []
-            for r in records:
-                from_ = f"{r.sender_name} <{r.sender_email}>" if r.sender_name else r.sender_email
-                messages.append(Message(
-                    id=r.gmail_id,
-                    thread_id=r.thread_id or "",
-                    snippet=r.snippet or "",
-                    headers=MessageHeader(subject=r.subject or "", from_=from_),
-                    label_ids=[],
-                    size_estimate=r.size_estimate or 0,
-                    internal_date=0,
-                ))
-        else:
-            client = GmailClient()
-            profile = client.get_profile()
-            account_email = profile.get("emailAddress", "")
-            ids = client.list_message_ids(query="in:inbox is:unread", max_results=limit)
-            if not ids:
-                return [], account_email
-            messages = client.get_messages_batch(ids)
-
+        messages, account_email = _fetch_triage_messages(scope, limit)
         if not messages:
-            return [], account_email
+            return [], [], account_email
 
-        ai = AIEngine()
-        classified = ai.classify_emails(messages)
+        cached = ClassificationCacheRepo(get_session()).get_many([m.id for m in messages])
 
-        msg_map = {m.id: m for m in messages}
-        PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
-        CATEGORY_ICONS = {
-            "action_required": "⚡",
-            "conversation": "💬",
-            "newsletter": "📰",
-            "notification": "🔔",
-            "receipt": "🧾",
-            "calendar": "📅",
-            "social": "👥",
-            "spam": "🗑",
-            "other": "📧",
-        }
+        rows = []
+        pending = []
+        for m in messages:
+            meta = {
+                "id": m.id,
+                "subject": m.headers.subject or "(no subject)",
+                "sender_name": m.sender_name or m.sender_email,
+                "sender_email": m.sender_email,
+                "snippet": (m.snippet or "")[:200],
+            }
+            c = cached.get(m.id)
+            if c:
+                meta["cls"] = _cls_payload(m.id, **c)
+            else:
+                meta["cls"] = None
+                pending.append(m)
+            rows.append(meta)
 
-        results = []
-        for c in sorted(classified, key=lambda x: PRIORITY_ORDER.get(x.priority, 3)):
-            msg = msg_map.get(c.gmail_id)
-            if not msg:
-                continue
-            results.append({
-                "id": c.gmail_id,
-                "priority": c.priority,
-                "category": c.category,
-                "category_icon": CATEGORY_ICONS.get(c.category, "📧"),
-                "explanation": c.explanation,
-                "suggested_action": c.suggested_action,
-                "requires_reply": c.requires_reply,
-                "deadline_hint": c.deadline_hint,
-                "subject": msg.headers.subject or "(no subject)",
-                "sender_name": msg.sender_name or msg.sender_email,
-                "sender_email": msg.sender_email,
-                "snippet": (msg.snippet or "")[:200],
-            })
-
-        return results, account_email
+        # Classified rows first (by priority); not-yet-classified rows trail them
+        # in fetch order — the client reorders once the stream fills them in.
+        rows.sort(key=lambda r: _PRIORITY_ORDER.get(r["cls"]["priority"], 3) if r["cls"] else 99)
+        return rows, pending, account_email
 
     try:
         loop = asyncio.get_event_loop()
-        results, account_email = await loop.run_in_executor(_executor, _run)
+        rows, pending, account_email = await loop.run_in_executor(_executor, _run)
     except Exception as exc:
         ctx["error"] = str(exc)
         return _resp(request, "triage.html", {**ctx, "ai_off": False, "results": []})
 
+    pending_token = None
+    if pending:
+        _prune_triage_pending()
+        pending_token = uuid.uuid4().hex
+        _triage_pending[pending_token] = {"messages": pending, "created": time.time()}
+
     ctx.update({
         "ai_off": False,
         "auth_error": False,
-        "results": results,
+        "results": rows,
+        "pending_token": pending_token,
+        "pending_count": len(pending),
         "account_email": account_email,
         "limit": limit,
         "scope": scope,
         "scanned_at": datetime.now(timezone.utc).strftime("%H:%M"),
     })
     return _resp(request, "triage.html", ctx)
+
+
+@app.get("/triage/classify-stream")
+async def triage_classify_stream(request: Request):
+    """Stream classifications for the pending messages stashed under ``token``.
+
+    Server-Sent Events: one ``{"type":"row", ...}`` event per classified message
+    (emitted batch-by-batch as the parallel LLM calls complete), then ``done``.
+    Results are persisted to the classification cache so re-opening Triage is
+    instant for these messages.
+    """
+    token = request.query_params.get("token", "")
+    entry = _triage_pending.pop(token, None) if token else None
+
+    if _ai_mode() == "off" or not entry:
+        async def _empty():
+            yield _sse({"type": "done"})
+        return StreamingResponse(_empty(), media_type="text/event-stream")
+
+    messages = entry["messages"]
+    loop = asyncio.get_event_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+    _SENTINEL = object()
+
+    def _produce():
+        from concurrent.futures import ThreadPoolExecutor as _Pool, as_completed
+        from postmind.core.ai_engine import AIEngine, _chunks
+        from postmind.core.storage import ClassificationCacheRepo, get_session
+
+        def _put(item):
+            loop.call_soon_threadsafe(queue.put_nowait, item)
+
+        try:
+            ai = AIEngine()
+            settings = get_settings()
+            chunks = list(_chunks(messages, settings.ai_max_classify_batch))
+            workers = max(1, min(settings.ai_classify_parallelism, len(chunks)))
+            cache_repo = ClassificationCacheRepo(get_session())
+
+            def _do(chunk):
+                try:
+                    return ai.classify_batch(chunk)
+                except Exception:
+                    # A batch that fails to classify shouldn't hang the row — fall
+                    # back to a neutral classification so the UI resolves.
+                    from postmind.core.ai_engine import ClassifiedEmail
+                    return [
+                        ClassifiedEmail(
+                            gmail_id=m.id, category="other", priority="medium",
+                            explanation="Could not classify automatically.",
+                            suggested_action="keep", requires_reply=False, deadline_hint="",
+                        )
+                        for m in chunk
+                    ]
+
+            with _Pool(max_workers=workers) as pool:
+                futures = [pool.submit(_do, ch) for ch in chunks]
+                for fut in as_completed(futures):
+                    classified = fut.result()
+                    cache_repo.upsert_many([
+                        {
+                            "gmail_id": c.gmail_id, "category": c.category, "priority": c.priority,
+                            "explanation": c.explanation, "suggested_action": c.suggested_action,
+                            "requires_reply": c.requires_reply, "deadline_hint": c.deadline_hint,
+                        }
+                        for c in classified
+                    ])
+                    for c in classified:
+                        _put({"type": "row", **_cls_payload(
+                            c.gmail_id, c.priority, c.category, c.explanation,
+                            c.suggested_action, c.requires_reply, c.deadline_hint,
+                        )})
+        except Exception as exc:
+            _put({"type": "error", "message": str(exc)})
+        finally:
+            _put(_SENTINEL)
+
+    async def _event_stream():
+        future = loop.run_in_executor(_executor, _produce)
+        try:
+            while True:
+                item = await queue.get()
+                if item is _SENTINEL:
+                    break
+                if await request.is_disconnected():
+                    break
+                yield _sse(item)
+            if not await request.is_disconnected():
+                yield _sse({"type": "done"})
+        finally:
+            if not future.done():
+                try:
+                    await asyncio.wrap_future(future)
+                except Exception:
+                    pass
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ── Assistant (floating chat) ──────────────────────────────────────────────────
