@@ -38,19 +38,25 @@
 <form id="purge-form" action="/purge/preview" method="POST">
 <div class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
 
-  <!-- Table header -->
+  <!-- Table header (click to sort) -->
   <div class="grid grid-cols-[auto_1fr_auto_auto_auto_auto] items-center gap-4 px-5 py-3 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-500 uppercase tracking-wide">
     <div class="w-4"></div>
-    <div>Sender</div>
-    <div class="text-right">Emails</div>
-    <div class="text-right">Size</div>
-    <div>Oldest</div>
-    <div>Safety</div>
+    <button type="button" class="sort-btn flex items-center gap-1 text-left hover:text-slate-700 uppercase tracking-wide" data-sort-key="sender" data-sort-type="text">Sender <span class="sort-caret text-slate-300"></span></button>
+    <button type="button" class="sort-btn flex items-center justify-end gap-1 hover:text-slate-700 uppercase tracking-wide" data-sort-key="count" data-sort-type="num">Emails <span class="sort-caret text-slate-300"></span></button>
+    <button type="button" class="sort-btn flex items-center justify-end gap-1 hover:text-slate-700 uppercase tracking-wide" data-sort-key="size" data-sort-type="num">Size <span class="sort-caret text-slate-300"></span></button>
+    <button type="button" class="sort-btn flex items-center gap-1 text-left hover:text-slate-700 uppercase tracking-wide" data-sort-key="oldest" data-sort-type="num">Oldest <span class="sort-caret text-slate-300"></span></button>
+    <button type="button" class="sort-btn flex items-center gap-1 text-left hover:text-slate-700 uppercase tracking-wide" data-sort-key="safety" data-sort-type="num">Safety <span class="sort-caret text-slate-300"></span></button>
   </div>
 
   <!-- Table rows -->
+  <div id="sender-rows">
   {% for s in senders %}
-  <div class="grid grid-cols-[auto_1fr_auto_auto_auto_auto] items-center gap-4 px-5 py-3.5 border-b border-slate-100 last:border-0 hover:bg-slate-50/60 transition-colors">
+  <div class="sender-row grid grid-cols-[auto_1fr_auto_auto_auto_auto] items-center gap-4 px-5 py-3.5 border-b border-slate-100 last:border-0 hover:bg-slate-50/60 transition-colors"
+       data-sender="{{ (s.sender_name or s.sender_email) | lower }}"
+       data-count="{{ s.count }}"
+       data-size="{{ s.size_mb }}"
+       data-oldest="{{ s.oldest_ts }}"
+       data-safety="{% if s.safety_label == 'Safe to clean' %}0{% elif s.safety_label == 'Needs review' %}1{% else %}2{% endif %}">
 
     <!-- Checkbox -->
     <div>
@@ -103,6 +109,7 @@
     </div>
   </div>
   {% endfor %}
+  </div>
 
 </div>
 
@@ -154,5 +161,46 @@
     cbs.forEach(cb => { cb.checked = false; });
     update();
   };
+
+  // ── Sortable columns ──────────────────────────────────────────────────────
+  const rowsContainer = document.getElementById('sender-rows');
+  const sortBtns = document.querySelectorAll('.sort-btn');
+  let sortState = { key: null, dir: 1 };  // dir: 1 asc, -1 desc
+
+  function applySort(key, type, dir) {
+    const rows = [...rowsContainer.querySelectorAll('.sender-row')];
+    rows.sort((a, b) => {
+      const av = a.dataset[key], bv = b.dataset[key];
+      let cmp;
+      if (type === 'num') cmp = parseFloat(av) - parseFloat(bv);
+      else cmp = av.localeCompare(bv);
+      return cmp * dir;
+    });
+    rows.forEach(r => rowsContainer.appendChild(r));
+  }
+
+  sortBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key  = btn.dataset.sortKey;
+      const type = btn.dataset.sortType;
+      // Toggle direction if same column, else default ascending
+      sortState.dir = (sortState.key === key) ? -sortState.dir : 1;
+      sortState.key = key;
+      applySort(key, type, sortState.dir);
+      // Update carets
+      sortBtns.forEach(b => {
+        const caret = b.querySelector('.sort-caret');
+        if (b === btn) {
+          caret.textContent = sortState.dir === 1 ? '▲' : '▼';
+          caret.classList.remove('text-slate-300');
+          caret.classList.add('text-teal-600');
+        } else {
+          caret.textContent = '';
+          caret.classList.add('text-slate-300');
+          caret.classList.remove('text-teal-600');
+        }
+      });
+    });
+  });
 })();
 </script>

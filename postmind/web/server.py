@@ -366,6 +366,7 @@ async def stats_data(
 
         account_email = _get_web_account() or ""
         valid_sort = sort if sort in ("score", "count", "size", "oldest") else "score"
+        newer_days, older_days = _parse_age_filter(since)
 
         data_source = "Gmail API"
         total_emails_in_scope = 0
@@ -374,7 +375,10 @@ async def stats_data(
         try:
             has_local_data = bool(account_email and EmailRepo(session).get_inbox(account_email, limit=1))
 
-            if has_local_data and not since:
+            if has_local_data:
+                # Prefer the local cache: it holds the full synced history, so age
+                # filters (esp. "older than") cover the whole back-catalogue rather
+                # than just the most recent ~1000 messages the API path samples.
                 db_scope = "inbox" if scope != "anywhere" else "anywhere"
                 groups = fetch_sender_groups_from_db(
                     account_email=account_email,
@@ -382,21 +386,31 @@ async def stats_data(
                     min_count=1,
                     top_n=top,
                     sort_by=valid_sort,
+                    newer_than_days=newer_days,
+                    older_than_days=older_days,
                 )
                 profile = {"emailAddress": account_email}
                 data_source = "local cache"
+                import time as _time
                 from postmind.core.storage import EmailRecord
                 db_q = session.query(EmailRecord).filter(EmailRecord.account_email == account_email)
                 if db_scope == "inbox":
                     db_q = db_q.filter(EmailRecord.is_inbox.is_(True))
+                _now_ms = int(_time.time() * 1000)
+                if newer_days:
+                    db_q = db_q.filter(EmailRecord.internal_date >= _now_ms - newer_days * 86_400_000)
+                if older_days:
+                    db_q = db_q.filter(EmailRecord.internal_date <= _now_ms - older_days * 86_400_000)
                 total_emails_in_scope = db_q.count()
             else:
                 client = _build_provider()
                 profile = client.get_profile()
                 account_email = profile.get("emailAddress", "")
                 query = "in:anywhere -in:trash -in:spam" if scope == "anywhere" else "in:inbox"
-                if since:
-                    query += f" newer_than:{since}"
+                if newer_days:
+                    query += f" newer_than:{newer_days}d"
+                if older_days:
+                    query += f" older_than:{older_days}d"
                 groups = fetch_sender_groups(
                     client,
                     query=query,
@@ -451,12 +465,15 @@ async def stats_data(
 # ── Purge ─────────────────────────────────────────────────────────────────────
 
 
-def _render_purge_preview(request: Request, senders: list[str]) -> HTMLResponse:
-    """Render the confirm-first purge preview for the given senders from the
-    current scan cache. Shared by the POST form flow and the GET deep-link the
-    chat assistant produces. Trashing still requires the explicit confirm button."""
+def _render_purge_preview(request: Request, senders: list[str], action: str = "trash") -> HTMLResponse:
+    """Render the confirm-first preview for the given senders from the current
+    scan cache. Shared by the POST form flow and the GET deep-link the chat
+    assistant produces. ``action`` is "trash" (move to Trash) or "archive"
+    (remove from inbox); both still require the explicit confirm button."""
     if not senders:
         return RedirectResponse("/stats", status_code=303)
+    if action not in ("trash", "archive"):
+        action = "trash"
 
     cached = _cache_get()
     if not cached:
@@ -476,6 +493,7 @@ def _render_purge_preview(request: Request, senders: list[str]) -> HTMLResponse:
         "senders": [g.sender_email for g in selected_groups],
         "total_count": total_count,
         "total_mb": total_mb,
+        "action": action,
         "undo_days": get_settings().undo_window_days,
     })
     return _resp(request, "purge_preview.html", ctx)
@@ -484,20 +502,27 @@ def _render_purge_preview(request: Request, senders: list[str]) -> HTMLResponse:
 @app.post("/purge/preview", response_class=HTMLResponse)
 async def purge_preview(request: Request):
     form = await request.form()
-    return _render_purge_preview(request, form.getlist("senders"))
+    return _render_purge_preview(request, form.getlist("senders"), form.get("action", "trash"))
 
 
 @app.get("/purge/preview", response_class=HTMLResponse)
 async def purge_preview_get(request: Request):
     """Deep-link entrypoint (e.g. from the chat assistant): renders the same
-    confirm-first preview. Read-only — nothing is trashed until the user confirms."""
-    return _render_purge_preview(request, request.query_params.getlist("senders"))
+    confirm-first preview. Read-only — nothing happens until the user confirms."""
+    return _render_purge_preview(
+        request,
+        request.query_params.getlist("senders"),
+        request.query_params.get("action", "trash"),
+    )
 
 
 @app.post("/purge/confirm", response_class=HTMLResponse)
 async def purge_confirm(request: Request):
     form = await request.form()
     senders = form.getlist("senders")
+    action = form.get("action", "trash")
+    if action not in ("trash", "archive"):
+        action = "trash"
 
     if not senders:
         return RedirectResponse("/stats", status_code=303)
@@ -510,12 +535,12 @@ async def purge_confirm(request: Request):
     groups = cached["groups"]
     account_email = cached["account_email"]
     # Enforce protected senders at confirm time (not just at stage time): a sender
-    # blocked after the cache was populated must never be trashed.
+    # blocked after the cache was populated must never be touched.
     blocked_set = BlocklistRepo(_gs()).blocked_emails(account_email) if account_email else set()
     selected_groups = [g for g in groups if g.sender_email in senders and g.sender_email not in blocked_set]
 
     if not selected_groups:
-        return _resp(request, "error.html", {"error": "Nothing to purge — selected senders are protected or no longer in the scan."})
+        return _resp(request, "error.html", {"error": "Nothing to do — selected senders are protected or no longer in the scan."})
 
     def _do_purge():
         from postmind.core.storage import UndoLogRepo, get_session
@@ -523,20 +548,25 @@ async def purge_confirm(request: Request):
         client = _build_provider()
         all_ids = [mid for g in selected_groups for mid in g.message_ids]
 
-        # Record undo BEFORE the destructive call so a crash/partial failure still
-        # leaves a reversible log entry (matches BulkEngine.execute ordering).
+        verb = "Archived" if action == "archive" else "Purged"
+        # Record undo BEFORE the operation so a crash/partial failure still leaves
+        # a reversible log entry (matches BulkEngine.execute ordering). The undo
+        # path keys off `operation` — "archive" restores INBOX, "trash" untrashes.
         entry = UndoLogRepo(get_session()).record(
             account_email=account_email,
-            operation="trash",
+            operation=action,
             message_ids=all_ids,
             description=(
-                f"Purged {len(all_ids)} emails from {len(selected_groups)} sender(s): "
+                f"{verb} {len(all_ids)} emails from {len(selected_groups)} sender(s): "
                 + ", ".join(g.sender_email for g in selected_groups[:3])
                 + ("…" if len(selected_groups) > 3 else "")
             ),
             metadata={"senders": [g.sender_email for g in selected_groups]},
         )
-        client.batch_trash(all_ids)
+        if action == "archive":
+            client.batch_archive(all_ids)
+        else:
+            client.batch_trash(all_ids)
         return entry.id, len(all_ids)
 
     try:
@@ -546,7 +576,7 @@ async def purge_confirm(request: Request):
     except Exception as exc:
         return _resp(request, "error.html", {"error": str(exc)})
 
-    return RedirectResponse(f"/undo?purged={count}&undo_id={undo_id}", status_code=303)
+    return RedirectResponse(f"/undo?purged={count}&undo_id={undo_id}&action={action}", status_code=303)
 
 
 # ── Undo ─────────────────────────────────────────────────────────────────────
@@ -557,6 +587,7 @@ async def undo_page(request: Request):
     purged = request.query_params.get("purged")
     restored = request.query_params.get("restored")
     undo_id = request.query_params.get("undo_id")
+    purged_action = request.query_params.get("action", "trash")
 
     def _get_entries():
         from postmind.core.storage import UndoLogRepo, get_session
@@ -592,6 +623,7 @@ async def undo_page(request: Request):
         "entries": rows,
         "account_email": account_email,
         "purged": purged,
+        "purged_action": purged_action,
         "restored": restored,
         "undo_id": undo_id,
         "undo_days": get_settings().undo_window_days,

@@ -1279,13 +1279,20 @@ def fetch_sender_groups_from_db(
     top_n: int = 30,
     sort_by: SortKey = "score",
     promo_only: bool = False,
+    newer_than_days: int | None = None,
+    older_than_days: int | None = None,
 ) -> list[SenderGroup]:
     """Build sender groups from locally synced DB — no Gmail API calls.
 
     Requires prior ``mailtrim sync`` to populate the local database.
     Use ``scope="inbox"`` to restrict to inbox-only records.
     Use ``promo_only=True`` to filter to promotional emails only (no LLM needed).
+    Use ``newer_than_days`` / ``older_than_days`` to restrict by message age
+    (``internal_date`` is epoch milliseconds); these are the local-DB equivalent
+    of Gmail's ``newer_than:``/``older_than:`` operators.
     """
+    import time
+
     from postmind.core.gmail_client import Message, MessageHeader
     from postmind.core.storage import EmailRecord, get_session
 
@@ -1293,6 +1300,11 @@ def fetch_sender_groups_from_db(
     q = session.query(EmailRecord).filter(EmailRecord.account_email == account_email)
     if scope == "inbox":
         q = q.filter(EmailRecord.is_inbox.is_(True))
+    now_ms = int(time.time() * 1000)
+    if newer_than_days:
+        q = q.filter(EmailRecord.internal_date >= now_ms - newer_than_days * 86_400_000)
+    if older_than_days:
+        q = q.filter(EmailRecord.internal_date <= now_ms - older_than_days * 86_400_000)
     records = q.all()
 
     if promo_only:
