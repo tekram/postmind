@@ -1,13 +1,15 @@
 # Plan: Super Agent — postmind's natural-language email command center
 
-Status: **Phases 1–2 SHIPPED** (branch `super-agent`). Phase 1 (NL command center,
+Status: **ALL PHASES SHIPPED** (branch `super-agent`). Phase 1 (NL command center,
 READ tools, stage_trash, create_agent/create_rule), Phase 2 backend (generalized
-archive/label/mark_read confirm flow, real unsubscribe, confirm-and-send), and
-streaming (SSE step-cards) are implemented and tested; a security red-team review
-was completed and its findings fixed (record-before-trash, blocklist-at-confirm,
-same-origin CSRF guard, single-recipient send validation). Phase 3 (local tool-use
-via Ollama, "never open" detection) and Phase 4 (convergence, opt-in auto-execute)
-remain as future work. Author: codebase research + web research, May 2026.
+archive/label/mark_read confirm flow, real unsubscribe, confirm-and-send),
+streaming (SSE step-cards), Phase 3 (local Ollama tool-use with graceful fallback;
+"never opened" subscription detection), and Phase 4 (floating→agent handoff; opt-in
+autopilot for reversible archive/label/mark_read) are implemented and tested. Two
+security red-team reviews were completed and all findings fixed (record-before-trash,
+blocklist-at-confirm, same-origin CSRF guard, single-recipient send validation, and
+autopilot keeping the sensitive-sender human gate). Author: codebase + web research,
+May 2026.
 
 This document specifies a dedicated "Super Agent" page where the user types
 natural language and postmind plans + executes a wide range of inbox operations —
