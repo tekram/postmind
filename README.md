@@ -12,13 +12,16 @@
 
 postmind is a privacy-first email management tool with both a CLI and a web UI. It helps you:
 
+- **Talk to your inbox** — the **Super Agent** turns plain English ("what's eating my storage?", "delete everything from blah.com", "unsubscribe from newsletters I never open", "create an agent that archives newsletters weekly") into real actions, with a confirm-first, undoable safety model
+- **Ask from anywhere** — a floating AI assistant on every page answers questions about your inbox and drafts emails in your voice
 - **Bulk-clean** years of inbox clutter in seconds — everything goes to Trash, never permanent
 - **Triage** unread email with AI — priority, category, and a one-line reason per message
 - **Manage multiple accounts** — Gmail and IMAP side-by-side
 - **Run heartbeat agents** — per-account background watchers that act on your inbox automatically
 - **Deep-sync locally** — cache your full mailbox for fast offline queries
 
-All core features run entirely on your machine. AI is opt-in and off by default.
+All core features run entirely on your machine. AI is opt-in and off by default — and the
+assistant can run on a **local model (Ollama)** so nothing leaves your device.
 
 ---
 
@@ -33,6 +36,10 @@ Requires Python 3.11+.
 ---
 
 ## First-time setup
+
+> **Prefer the browser?** Run `postmind serve` and open the app — a guided **onboarding
+> wizard** walks you through connecting Gmail or IMAP and (optionally) enabling AI. The
+> CLI steps below do the same thing from the terminal.
 
 ### Gmail
 
@@ -96,6 +103,7 @@ postmind serve
 
 | Page | What it does |
 |---|---|
+| **Super Agent** | Natural-language command center — analyze, clean up, unsubscribe, draft/send, and create automation, all confirm-first |
 | **Dashboard** | Inbox overview — stats at a glance |
 | **Stats** | Sender rankings by storage impact |
 | **Triage** | AI-classified unread inbox — priority, category, action |
@@ -105,6 +113,30 @@ postmind serve
 | **Watch** | Control the heartbeat daemon (start / stop) |
 | **Sync** | Trigger a local cache sync from the browser |
 | **Undo** | Review and reverse recent operations |
+| **Settings** | AI mode, **Chat Assistant** backend (local/cloud), **Super Agent autopilot**, protected senders |
+
+A floating **AI assistant** is available on every page (bottom-right) for quick questions and drafts.
+First-time users get a guided **onboarding wizard** (Gmail or IMAP + optional AI setup).
+
+### The Super Agent
+
+Open **Super Agent** (top of the sidebar, ✦) and type what you want. It plans and runs
+multi-step work using tools, and **never does anything destructive without your confirmation**:
+
+- **Reads** instantly: inbox overview, storage analysis, sender search, largest emails,
+  ignored subscriptions, and your current automation.
+- **Writes** only after you confirm a card: trash, archive, label, mark-read, **unsubscribe**
+  (real List-Unsubscribe / one-click), **send** a drafted email, and **create heartbeat agents
+  and rules** conversationally.
+
+Safety model: deletes go to Trash and are **undoable for 30 days**; protected senders are
+skipped and sensitive senders (banks, legal, health) are flagged; confirmation targets are
+resolved server-side; cross-origin requests are blocked. Tool-use runs on **cloud (Claude)**
+in full, and **degrades gracefully on local (Ollama)** models.
+
+**Autopilot** (Settings → Super Agent, off by default) lets the agent auto-apply only the
+fully-reversible actions — archive, label, mark-read — without a card. Trash, unsubscribe,
+send, and sensitive senders always require explicit confirmation.
 
 ---
 
@@ -208,6 +240,10 @@ Settings via `~/.postmind/.env` or environment variables:
 | `POSTMIND_AI_MODE` | `off` | AI mode: `off` · `local` · `cloud` |
 | `ANTHROPIC_API_KEY` | *(not set)* | Required for cloud AI features |
 | `POSTMIND_AI_MODEL` | `claude-sonnet-4-6` | Claude model for cloud AI |
+| `POSTMIND_CHAT_AI_MODE` | *(inherit)* | Backend for the assistant/Super Agent, independent of `AI_MODE`: empty = inherit · `off` · `local` · `cloud` |
+| `POSTMIND_CHAT_CLOUD_MODEL` | *(→ `AI_MODEL`)* | Claude model the assistant uses |
+| `POSTMIND_CHAT_OLLAMA_MODEL` | *(→ `OLLAMA_MODEL`)* | Local model the assistant uses |
+| `POSTMIND_AGENT_AUTOPILOT` | `false` | Auto-run reversible Super Agent actions (archive/label/mark-read) without a confirm card |
 | `POSTMIND_DRY_RUN` | `false` | Preview without executing |
 | `POSTMIND_UNDO_WINDOW_DAYS` | `30` | How long undo logs are kept |
 | `POSTMIND_DIR` | `~/.postmind` | Data directory |
