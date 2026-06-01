@@ -634,6 +634,7 @@ async def settings_page(request: Request):
             "chat_ai_mode": s.chat_ai_mode,  # "" = inherit
             "chat_cloud_model": s.chat_cloud_model or s.ai_model,
             "chat_ollama_model": s.chat_ollama_model or s.ollama_model,
+            "agent_autopilot": s.agent_autopilot,
         })
     except Exception:
         ctx.update({
@@ -644,6 +645,7 @@ async def settings_page(request: Request):
             "ollama_model": "llama3.2",
             "chat_ai_mode": "", "chat_cloud_model": "claude-sonnet-4-6",
             "chat_ollama_model": "qwen2.5:32b",
+            "agent_autopilot": False,
         })
 
     ctx.update({
@@ -767,12 +769,10 @@ async def gmail_add_start(request: Request):
 async def gmail_add_poll(task_id: str):
     state = _oauth_tasks.get(task_id, {"status": "error", "error": "Task expired"})
     if state["status"] == "done":
-        email = state["email"]
         _scan_cache.clear()
-        return HTMLResponse(f"""<div class="bg-green-50 border border-green-200 rounded-xl p-4">
-  <p class="text-green-800 font-medium text-sm">&#10003; Account added: {email}</p>
-  <a href="/accounts" class="text-teal-600 text-sm font-medium mt-2 inline-block">View accounts &rarr;</a>
-</div>""")
+        resp = HTMLResponse("")
+        resp.headers["HX-Redirect"] = "/accounts?added=1"
+        return resp
     if state["status"] == "error":
         return HTMLResponse(f"""<div class="bg-red-50 border border-red-200 rounded-xl p-4">
   <p class="text-red-800 text-sm font-medium">Authentication failed</p>
@@ -1238,6 +1238,15 @@ async def update_chat_settings(request: Request):
     return RedirectResponse("/settings?success=chat", status_code=303)
 
 
+@app.post("/settings/agent")
+async def update_agent_settings(request: Request):
+    """Toggle Super Agent autopilot (auto-execute reversible actions, opt-in)."""
+    form = await request.form()
+    on = form.get("agent_autopilot") == "on"
+    _write_env({"POSTMIND_AGENT_AUTOPILOT": "true" if on else "false"})
+    return RedirectResponse("/settings?success=agent", status_code=303)
+
+
 # ── Protected senders ─────────────────────────────────────────────────────────
 
 
@@ -1582,6 +1591,7 @@ async def triage_page(request: Request):
 
 _PAGES = {
     "/": "Dashboard — inbox overview at a glance",
+    "/agent": "Super Agent — natural-language command center that can clean up, unsubscribe, send, and automate (with confirm-first cards)",
     "/stats": "Stats — senders ranked by storage impact, with a Purge button",
     "/triage": "Triage — AI-classified unread inbox (priority, category, action)",
     "/agents": "Agents — per-account heartbeat watchers and their voice/soul config",
@@ -1717,7 +1727,7 @@ _CHAT_TOOLS = [
             "properties": {
                 "page": {
                     "type": "string",
-                    "enum": ["/", "/stats", "/triage", "/agents", "/sync", "/accounts", "/watch", "/undo", "/settings"],
+                    "enum": ["/", "/agent", "/stats", "/triage", "/agents", "/sync", "/accounts", "/watch", "/undo", "/settings"],
                 },
                 "label": {"type": "string", "description": "Short button label, e.g. 'Open Stats'."},
             },
@@ -1834,6 +1844,11 @@ specific senders, use `propose_cleanup` to stage them; it gives the user a butto
 confirm-first purge preview (deletes go to Trash and are undoable) — you must never imply \
 the cleanup already happened. For anything else, use `navigate` to point the user to the \
 right page. When they want an email written, use `draft_email`.
+
+You are read-only and can only stage a trash cleanup. For anything that ACTS on the inbox — \
+archiving, labeling, marking read, unsubscribing, sending email, or creating agents/rules — \
+hand off to the Super Agent: briefly say it can do that and use `navigate` to "/agent" with \
+a label like "Open Super Agent". Don't attempt those yourself.
 
 The user is currently on: {here}.
 Active account: {account_email or 'none connected yet'}. AI mode: {ai_mode}.
@@ -1960,6 +1975,7 @@ async def agent_page(request: Request):
 
 def _build_agent_system(account_email: str, mode: str) -> str:
     overview = _chat_overview_text(account_email)
+    autopilot = "ON" if _autopilot_on() else "OFF"
     return f"""\
 You are the postmind Super Agent — an autonomous but careful email assistant. The user \
 describes an outcome in plain English and you use tools to achieve it: analyze storage, \
@@ -1983,6 +1999,10 @@ are flagged and pre-unchecked on the card.
 - Be concise. After staging something, tell the user to review and confirm the card. Ask a \
 brief clarifying question only when genuinely ambiguous (e.g. which account, or the label \
 name).
+- AUTOPILOT is currently {autopilot}. When ON, stage_archive/stage_label/stage_mark_read \
+execute immediately (no card) because they are fully reversible — tell the user what you \
+did and that it's undoable. Trash, unsubscribe, and send ALWAYS require a confirm card even \
+under autopilot.
 
 Active account: {account_email or 'none connected yet'}. AI mode: {mode}.
 
@@ -2003,18 +2023,14 @@ def _parse_agent_messages(body) -> list[dict]:
 
 
 def _agent_mode_guidance(mode: str) -> dict | None:
-    """For off/local/non-cloud modes, return the guidance payload to return as-is.
+    """For ``off`` mode, return the guidance payload to return as-is.
 
-    ``None`` means cloud mode — proceed with the agent loop."""
+    ``None`` means proceed with the agent loop. Both cloud and local proceed —
+    local attempts Ollama native tool-use and degrades to plain conversation if
+    the model can't (handled inside ``AIEngine.chat``). Only ``off`` is blocked."""
     if mode == "off":
         return {
             "reply": "The assistant's AI is off (your data stays fully local). Choose a local or cloud backend under Settings → Chat Assistant to use the Super Agent.",
-            "actions": [{"label": "Open Settings", "href": "/settings"}],
-            "cards": [],
-        }
-    if mode != "cloud":
-        return {
-            "reply": "The Super Agent's multi-step tools need cloud AI (Anthropic). On local AI I can still answer questions from the floating assistant, or switch the Chat Assistant to cloud in Settings.",
             "actions": [{"label": "Open Settings", "href": "/settings"}],
             "cards": [],
         }
@@ -2055,6 +2071,17 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                 return agent_tools.find_largest_messages(provider, tool_input.get("query", ""), int(tool_input.get("limit", 10) or 10))
             except Exception as exc:
                 return f"Couldn't fetch message sizes: {exc}"
+        if name == "find_unopened_subscriptions":
+            from postmind.core import agent_tools
+            from postmind.core.storage import get_session
+            if not account_email:
+                return "No active account."
+            rows = agent_tools.find_unopened_subscriptions(
+                get_session(), account_email,
+                int(tool_input.get("min_count", 3) or 3),
+                int(tool_input.get("limit", 15) or 15),
+            )
+            return agent_tools.format_unopened(rows)
         if name == "list_automation":
             from postmind.core.storage import AgentRepo, RuleRepo, get_session
             session = get_session()
@@ -2104,6 +2131,18 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                 extra = f" ({len(blocked)} protected sender(s) skipped)" if blocked else ""
                 return f"No matching senders to {action.replace('_', ' ')}{extra} — nothing staged."
             total = sum(g.count for g in staged)
+            # Autopilot: auto-execute reversible actions without a confirm card
+            # (opt-in, off by default; trash/unsubscribe/send never qualify).
+            if _autopilot_on() and action in _AUTOPILOT_ACTIONS:
+                try:
+                    undo_id, count = _execute_reversible_action(account_email, action, staged, label_name)
+                except Exception as exc:
+                    return f"Couldn't {action.replace('_', ' ')}: {exc}"
+                _scan_cache.pop(account_email or "default", None)
+                if not any(a.get("href") == "/undo" for a in actions):
+                    actions.append({"label": "Undo", "href": "/undo"})
+                note = f" ({len(blocked)} protected skipped)" if blocked else ""
+                return f"Autopilot: {action.replace('_', ' ')}d {count} emails from {len(staged)} sender(s){note}. Reversible from Undo for 30 days."
             cards.append({
                 "type": "bulk_action",
                 "title": {"archive": "Archive emails", "label": f"Label emails “{label_name}”", "mark_read": "Mark emails as read"}[action],
@@ -2329,18 +2368,31 @@ async def agent_stream_endpoint(request: Request):
             ai = AIEngine(**engine_kwargs)
             system = _build_agent_system(account_email, mode)
             executor_tool = _build_agent_tool_executor(account_email, ai, actions, cards)
-            for event in ai.chat_stream(
-                messages,
-                system=system,
-                tools=agent_tools.ALL_TOOLS,
-                tool_executor=executor_tool,
-                max_tool_iterations=12,
-            ):
-                # tool_start carries raw tool input; the client only needs the name.
-                if event.get("type") == "tool_start":
-                    _put({"type": "tool_start", "name": event.get("name", "")})
-                else:
-                    _put(event)
+            if mode == "cloud":
+                for event in ai.chat_stream(
+                    messages,
+                    system=system,
+                    tools=agent_tools.ALL_TOOLS,
+                    tool_executor=executor_tool,
+                    max_tool_iterations=12,
+                ):
+                    # tool_start carries raw tool input; the client only needs the name.
+                    if event.get("type") == "tool_start":
+                        _put({"type": "tool_start", "name": event.get("name", "")})
+                    else:
+                        _put(event)
+            else:
+                # Local: no token streaming (Ollama tool-use isn't reliably
+                # streamable). Run the non-streaming loop and emit the reply once.
+                reply = ai.chat(
+                    messages,
+                    system=system,
+                    tools=agent_tools.ALL_TOOLS,
+                    tool_executor=executor_tool,
+                    max_tool_iterations=12,
+                )
+                _put({"type": "text_delta", "text": reply})
+                _put({"type": "done"})
         except Exception as exc:
             _put({"type": "text_delta", "text": f"Sorry — I hit an error: {exc}"})
             _put({"type": "done"})
@@ -2478,6 +2530,56 @@ async def agent_action_preview_post(request: Request):
     return _render_action_preview(request, form.get("action", ""), form.getlist("senders"), form.get("label_name", ""))
 
 
+_AUTOPILOT_ACTIONS = ("archive", "label", "mark_read")  # reversible, undoable; never trash/unsubscribe/send
+
+
+def _autopilot_on() -> bool:
+    try:
+        return bool(get_settings().agent_autopilot)
+    except Exception:
+        return False
+
+
+def _execute_reversible_action(account_email: str, action: str, staged, label_name: str = ""):
+    """Record undo, then execute a reversible bulk action (archive/label/mark_read).
+
+    Shared by the confirm endpoint and autopilot. Records the undo entry BEFORE
+    the provider call so the op is always reversible from /undo. Returns
+    ``(undo_id, count)``.
+    """
+    from postmind.core.storage import UndoLogRepo, get_session
+
+    client = _build_provider()
+    if action in _AUTOPILOT_ACTIONS and not client.supports("labels"):
+        raise ValueError("This account's provider does not support this action — only Gmail does.")
+    all_ids = [mid for g in staged for mid in g.message_ids]
+    params = {"label_name": label_name} if action == "label" else {}
+
+    entry = UndoLogRepo(get_session()).record(
+        account_email=account_email,
+        operation=action,
+        message_ids=all_ids,
+        description=(
+            f"{action} {len(all_ids)} emails from {len(staged)} sender(s): "
+            + ", ".join(g.sender_email for g in staged[:3])
+            + ("…" if len(staged) > 3 else "")
+        ),
+        metadata={"senders": [g.sender_email for g in staged], "action_params": params},
+    )
+
+    if action == "archive":
+        client.batch_archive(all_ids)
+    elif action == "mark_read":
+        client.batch_label(all_ids, remove=["UNREAD"])
+    elif action == "label":
+        gc = getattr(client, "gmail_client", None)
+        if gc is None:
+            raise ValueError("Labels require a Gmail account.")
+        label_id = gc.get_or_create_label(label_name)
+        client.batch_label(all_ids, add=[label_id])
+    return entry.id, len(all_ids)
+
+
 @app.post("/agent/action/confirm", response_class=HTMLResponse)
 async def agent_action_confirm(request: Request):
     form = await request.form()
@@ -2501,43 +2603,11 @@ async def agent_action_confirm(request: Request):
     if not staged:
         return _resp(request, "error.html", {"error": "Scan data expired or all senders protected. Re-run Stats."})
 
-    def _do_action():
-        from postmind.core.storage import UndoLogRepo, get_session
-
-        client = _build_provider()
-        if action in ("archive", "label", "mark_read") and not client.supports("labels"):
-            raise ValueError("This account's provider does not support this action — only Gmail does.")
-        all_ids = [mid for g in staged for mid in g.message_ids]
-        params = {"label_name": label_name} if action == "label" else {}
-
-        # Record undo BEFORE acting so it is always reversible.
-        entry = UndoLogRepo(get_session()).record(
-            account_email=account_email,
-            operation=action,
-            message_ids=all_ids,
-            description=(
-                f"{action} {len(all_ids)} emails from {len(staged)} sender(s): "
-                + ", ".join(g.sender_email for g in staged[:3])
-                + ("…" if len(staged) > 3 else "")
-            ),
-            metadata={"senders": [g.sender_email for g in staged], "action_params": params},
-        )
-
-        if action == "archive":
-            client.batch_archive(all_ids)
-        elif action == "mark_read":
-            client.batch_label(all_ids, remove=["UNREAD"])
-        elif action == "label":
-            gc = getattr(client, "gmail_client", None)
-            if gc is None:
-                raise ValueError("Labels require a Gmail account.")
-            label_id = gc.get_or_create_label(label_name)
-            client.batch_label(all_ids, add=[label_id])
-        return entry.id, len(all_ids)
-
     try:
         loop = asyncio.get_event_loop()
-        undo_id, count = await loop.run_in_executor(_executor, _do_action)
+        undo_id, count = await loop.run_in_executor(
+            _executor, _execute_reversible_action, account_email, action, staged, label_name
+        )
         _scan_cache.pop(_get_web_account() or "default", None)
     except Exception as exc:
         return _resp(request, "error.html", {"error": str(exc)})

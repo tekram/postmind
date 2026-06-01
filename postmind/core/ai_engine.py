@@ -368,7 +368,16 @@ then the body. No preamble, no sign-off commentary.
                 messages, system, tools, tool_executor, max_tokens, max_tool_iterations
             )
         if self._mode == "local":
-            # Flatten the conversation into a single prompt for /api/chat.
+            # Newer Ollama models (qwen2.5, llama3.1+) support native tool-use. Try
+            # it when tools are provided; on any failure (model can't, network,
+            # parse) fall back to plain conversation so the assistant still works.
+            if tools and tool_executor:
+                try:
+                    return self._chat_local_tools(
+                        messages, system, tools, tool_executor, max_tokens, max_tool_iterations
+                    )
+                except Exception:
+                    pass
             transcript = "\n".join(
                 f"{m['role'].capitalize()}: {m['content']}" for m in messages
             )
@@ -381,6 +390,62 @@ then the body. No preamble, no sign-off commentary.
         raise ValueError(
             f"AI mode is '{self._mode}'. Enable cloud or local AI mode to chat."
         )
+
+    def _chat_local_tools(
+        self, messages, system, tools, tool_executor, max_tokens, max_tool_iterations
+    ) -> str:
+        """Tool-use loop against Ollama's /api/chat ``tools`` API.
+
+        Converts our Anthropic-style tool schemas to Ollama's function format,
+        dispatches ``tool_calls`` through ``tool_executor``, and loops. Raises on
+        any transport/protocol error so :meth:`chat` can fall back to plain
+        conversation (Ollama tool-use support varies by model).
+        """
+        import httpx
+
+        ollama_tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t.get("description", ""),
+                    "parameters": t.get("input_schema", {"type": "object", "properties": {}}),
+                },
+            }
+            for t in tools
+        ]
+        convo = [{"role": "system", "content": system}]
+        convo += [{"role": m["role"], "content": m["content"]} for m in messages]
+
+        for _ in range(max_tool_iterations):
+            resp = httpx.post(
+                f"{self._ollama_url}/api/chat",
+                json={"model": self._ollama_model, "messages": convo, "tools": ollama_tools, "stream": False},
+                timeout=180.0,
+            )
+            resp.raise_for_status()
+            msg = resp.json()["message"]
+            tool_calls = msg.get("tool_calls") or []
+            if not tool_calls:
+                return (msg.get("content") or "").strip()
+
+            convo.append({"role": "assistant", "content": msg.get("content", ""), "tool_calls": tool_calls})
+            for tc in tool_calls:
+                fn = tc.get("function", {})
+                name = fn.get("name", "")
+                args = fn.get("arguments", {})
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except Exception:
+                        args = {}
+                try:
+                    result = tool_executor(name, args) if tool_executor else "Tool unavailable."
+                except Exception as exc:
+                    result = f"Error running {name}: {exc}"
+                convo.append({"role": "tool", "content": str(result)})
+
+        return "I wasn't able to finish that — could you rephrase or break it into smaller steps?"
 
     def _chat_cloud(
         self, messages, system, tools, tool_executor, max_tokens, max_tool_iterations

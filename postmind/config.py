@@ -118,6 +118,12 @@ class Settings(BaseSettings):
     chat_cloud_model: str = ""  # "" → ai_model
     chat_ollama_model: str = ""  # "" → ollama_model
 
+    # Super Agent autopilot — when on, the agent auto-executes ONLY the low-risk,
+    # fully-reversible actions (archive, label, mark_read) without a confirm card.
+    # Trash, unsubscribe, and send always require explicit confirmation regardless.
+    # Off by default; everything stays undoable from /undo.
+    agent_autopilot: bool = False
+
     # Rate limiting
     gmail_batch_size: int = 50  # Max messages per Gmail batch request
     ai_max_classify_batch: int = 20  # Emails per AI classification call

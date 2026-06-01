@@ -58,6 +58,17 @@ READ_TOOLS: list[dict] = [
         },
     },
     {
+        "name": "find_unopened_subscriptions",
+        "description": "Find newsletters/subscriptions the user almost never opens — senders that have a List-Unsubscribe header and a high unread ratio. Use for 'unsubscribe me from newsletters I never open' / 'what subscriptions do I ignore'. Requires locally synced data.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "min_count": {"type": "integer", "description": "Minimum emails from a sender to consider (default 3)."},
+                "limit": {"type": "integer", "description": "How many to return (default 15)."},
+            },
+        },
+    },
+    {
         "name": "list_automation",
         "description": "Show the user's current automation: their heartbeat agent (if any) and active rules. Use before creating new ones or when asked 'what automations do I have'.",
         "input_schema": {"type": "object", "properties": {}},
@@ -208,6 +219,58 @@ def summarize_storage(groups, group_by: str = "sender", top_n: int = 10) -> str:
     for g in top:
         size = f"{g.total_size_mb:.1f} MB" if g.total_size_mb >= 0.1 else f"{g.total_size_bytes // 1024} KB"
         lines.append(f"- {g.display_name} <{g.sender_email}> — {size} across {g.count} emails")
+    return "\n".join(lines)
+
+
+def find_unopened_subscriptions(session, account_email: str, min_count: int = 3, limit: int = 15):
+    """Return senders the user rarely opens: have a List-Unsubscribe header and a
+    high unread ratio in the local cache. Returns a list of dicts
+    ``{sender_email, total, unread, unread_pct}`` sorted by volume, plus the count.
+
+    Pure DB query (no provider call). Caller formats / stages the result.
+    """
+    from sqlalchemy import case, func
+
+    from postmind.core.storage import EmailRecord
+
+    rows = (
+        session.query(
+            EmailRecord.sender_email,
+            func.count().label("total"),
+            func.sum(case((EmailRecord.is_unread.is_(True), 1), else_=0)).label("unread"),
+        )
+        .filter(
+            EmailRecord.account_email == account_email,
+            EmailRecord.list_unsubscribe != "",
+            EmailRecord.is_inbox.is_(True),
+        )
+        .group_by(EmailRecord.sender_email)
+        .having(func.count() >= max(1, min_count))
+        .all()
+    )
+    out = []
+    for sender, total, unread in rows:
+        unread = unread or 0
+        if not total:
+            continue
+        pct = unread / total
+        if pct >= 0.6:  # rarely opened
+            out.append({
+                "sender_email": sender,
+                "total": int(total),
+                "unread": int(unread),
+                "unread_pct": round(pct * 100),
+            })
+    out.sort(key=lambda r: r["total"], reverse=True)
+    return out[: max(1, limit)]
+
+
+def format_unopened(rows: list[dict]) -> str:
+    if not rows:
+        return "No clearly-ignored subscriptions found (need locally synced data with unread/unsubscribe info — try a Sync first)."
+    lines = [f"{len(rows)} subscription(s) you rarely open (unsubscribe candidates):"]
+    for r in rows:
+        lines.append(f"- {r['sender_email']} — {r['total']} emails, {r['unread_pct']}% unread")
     return "\n".join(lines)
 
 
