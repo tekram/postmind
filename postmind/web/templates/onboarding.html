@@ -1,26 +1,35 @@
 {% extends "base.html" %}
 {% block title %}Setup — postmind{% endblock %}
 {% block content %}
-<div class="px-8 py-8 max-w-xl mx-auto">
+<div class="px-8 py-12 max-w-xl mx-auto">
 
   <div class="mb-8 text-center">
-    <span class="text-teal-400 text-4xl leading-none">✂</span>
-    <h1 class="text-2xl font-bold text-slate-900 mt-3">Welcome to postmind</h1>
-    <p class="text-slate-500 text-sm mt-1">Let's get your inbox connected. Takes about 2 minutes.</p>
+    <div class="w-12 h-12 rounded-card bg-accent-subtle border border-accent-border flex items-center justify-center mx-auto">
+      <!-- Lucide: sparkles -->
+      <svg class="w-6 h-6 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9.94 14.06l-1.06 2.32a1 1 0 01-1.82 0l-1.06-2.32a1 1 0 00-.5-.5L3.18 12.5a1 1 0 010-1.82l2.32-1.06a1 1 0 00.5-.5l1.06-2.32a1 1 0 011.82 0l1.06 2.32a1 1 0 00.5.5l2.32 1.06a1 1 0 010 1.82l-2.32 1.06a1 1 0 00-.5.5z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" d="M18 4v4M20 6h-4M18 16v3M19.5 17.5h-3"/>
+      </svg>
+    </div>
+    <h1 class="text-2xl font-semibold tracking-tight text-ink mt-4">Welcome to postmind</h1>
+    <p class="text-ink-subtle text-sm mt-1.5">Let's get your inbox connected. Takes about 2 minutes.</p>
   </div>
 
   <!-- Step indicators -->
   <div class="flex items-center justify-center gap-2 mb-8">
     {% for s in [1, 2, 3] %}
     <div class="flex items-center gap-2">
-      <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold
-                  {% if step > s %}bg-teal-500 text-white
-                  {% elif step == s %}bg-teal-600 text-white ring-2 ring-teal-200
-                  {% else %}bg-slate-200 text-slate-500{% endif %}">
-        {% if step > s %}✓{% else %}{{ s }}{% endif %}
+      <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold tabular transition-colors
+                  {% if step > s %}bg-accent text-white
+                  {% elif step == s %}bg-accent text-white ring-2 ring-accent-border
+                  {% else %}bg-surface-2 text-ink-subtle border border-hairline{% endif %}">
+        {% if step > s %}
+        <!-- Lucide: check -->
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M20 6L9 17l-5-5"/></svg>
+        {% else %}{{ s }}{% endif %}
       </div>
       {% if not loop.last %}
-      <div class="w-10 h-0.5 {% if step > s %}bg-teal-400{% else %}bg-slate-200{% endif %}"></div>
+      <div class="w-10 h-px {% if step > s %}bg-accent{% else %}bg-hairline-strong{% endif %}"></div>
       {% endif %}
     </div>
     {% endfor %}
@@ -29,8 +38,10 @@
   <!-- Error banner -->
   {% set err = request.query_params.get('error') if request else '' %}
   {% if err %}
-  <div class="mb-5 bg-red-50 border border-red-200 rounded-xl p-4">
-    <p class="text-red-800 text-sm font-medium">
+  <div class="mb-5 bg-danger-bg border border-danger-border rounded-card p-4 flex items-start gap-2.5">
+    <!-- Lucide: alert-circle -->
+    <svg class="w-4 h-4 text-danger shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+    <p class="text-danger text-sm font-medium">
       {% if err == 'no_file' %}No file was uploaded. Please select your credentials.json file.
       {% elif err == 'invalid' %}That file doesn't look like a valid OAuth credentials file. Download it fresh from Google Cloud Console.
       {% else %}Something went wrong. Please try again.
@@ -41,46 +52,49 @@
 
   <!-- Step 1: Connect account (Gmail or IMAP) -->
   {% if step == 1 %}
-  <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
-    <div class="flex items-center gap-3 mb-4">
-      <div class="w-9 h-9 bg-teal-50 rounded-full flex items-center justify-center shrink-0">
-        <svg class="w-5 h-5 text-teal-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+  <div class="pm-card p-6">
+    <div class="flex items-center gap-3 mb-5">
+      <div class="w-9 h-9 bg-accent-subtle border border-accent-border rounded-button flex items-center justify-center shrink-0">
+        <!-- Lucide: mail -->
+        <svg class="w-5 h-5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
           <path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
         </svg>
       </div>
       <div>
-        <h2 class="text-sm font-semibold text-slate-900">Step 1: Connect your inbox</h2>
-        <p class="text-xs text-slate-500 mt-0.5">Choose Gmail (OAuth) or any IMAP provider</p>
+        <h2 class="text-sm font-semibold text-ink">Step 1: Connect your inbox</h2>
+        <p class="text-xs text-ink-subtle mt-0.5">Choose Gmail (OAuth) or any IMAP provider</p>
       </div>
     </div>
 
     {% if has_accounts %}
-    <div class="bg-green-50 border border-green-200 rounded-xl p-3 mb-4 flex items-center gap-2">
-      <svg class="w-4 h-4 text-green-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+    <div class="bg-success-bg border border-success-border rounded-button p-3 mb-4 flex items-center gap-2">
+      <!-- Lucide: check -->
+      <svg class="w-4 h-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M20 6L9 17l-5-5"/>
       </svg>
-      <p class="text-green-800 text-xs font-medium">Account connected</p>
+      <p class="text-success text-xs font-medium">Account connected</p>
     </div>
-    <a href="/onboarding?step=2"
-       class="block w-full text-center bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors">
-      Continue &rarr;
+    <a href="/onboarding?step=2" class="pm-btn w-full">
+      Continue
+      <!-- Lucide: arrow-right -->
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M12 5l7 7-7 7"/></svg>
     </a>
     {% else %}
 
     <!-- Tab switcher -->
-    <div class="flex gap-1 bg-slate-100 p-1 rounded-xl mb-5">
+    <div class="flex gap-1 bg-surface-2 p-1 rounded-button mb-5">
       <a href="/onboarding?step=1&tab=gmail"
-         class="flex-1 text-center py-2 px-4 rounded-lg text-sm font-medium transition-colors
-                {% if tab == 'gmail' %}bg-white text-slate-900 shadow-sm{% else %}text-slate-500 hover:text-slate-700{% endif %}">
-        <svg class="w-4 h-4 inline-block mr-1.5 -mt-0.5" fill="currentColor" viewBox="0 0 24 24">
+         class="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-4 rounded-chip text-sm font-medium transition-colors
+                {% if tab == 'gmail' %}bg-surface text-ink shadow-whisper{% else %}text-ink-subtle hover:text-ink{% endif %}">
+        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
           <path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 010 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.907 1.528-1.147C21.69 2.28 24 3.434 24 5.457z"/>
         </svg>
         Gmail
       </a>
       <a href="/onboarding?step=1&tab=imap"
-         class="flex-1 text-center py-2 px-4 rounded-lg text-sm font-medium transition-colors
-                {% if tab == 'imap' %}bg-white text-slate-900 shadow-sm{% else %}text-slate-500 hover:text-slate-700{% endif %}">
-        <svg class="w-4 h-4 inline-block mr-1.5 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+         class="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-4 rounded-chip text-sm font-medium transition-colors
+                {% if tab == 'imap' %}bg-surface text-ink shadow-whisper{% else %}text-ink-subtle hover:text-ink{% endif %}">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
           <path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
         </svg>
         IMAP
@@ -90,102 +104,96 @@
     {% if tab == 'gmail' %}
     <!-- Gmail path: upload credentials.json (if missing) then OAuth -->
     {% if not has_credentials %}
-    <ol class="space-y-2 text-sm text-slate-600 mb-5 ml-1">
-      <li class="flex items-start gap-2"><span class="text-slate-400 font-mono text-xs mt-0.5">1.</span>Go to <a href="https://console.cloud.google.com" class="text-teal-600 underline">console.cloud.google.com</a></li>
-      <li class="flex items-start gap-2"><span class="text-slate-400 font-mono text-xs mt-0.5">2.</span>Create a project → Enable Gmail API</li>
-      <li class="flex items-start gap-2"><span class="text-slate-400 font-mono text-xs mt-0.5">3.</span>APIs &amp; Services → Credentials → Create OAuth 2.0 Client ID (Desktop app)</li>
-      <li class="flex items-start gap-2"><span class="text-slate-400 font-mono text-xs mt-0.5">4.</span>Download JSON → upload it here</li>
+    <ol class="space-y-2 text-sm text-ink-muted mb-5 ml-1">
+      <li class="flex items-start gap-2"><span class="text-ink-tertiary font-mono text-xs mt-0.5">1.</span>Go to <a href="https://console.cloud.google.com" class="text-accent hover:text-accent-hover underline">console.cloud.google.com</a></li>
+      <li class="flex items-start gap-2"><span class="text-ink-tertiary font-mono text-xs mt-0.5">2.</span>Create a project → Enable Gmail API</li>
+      <li class="flex items-start gap-2"><span class="text-ink-tertiary font-mono text-xs mt-0.5">3.</span>APIs &amp; Services → Credentials → Create OAuth 2.0 Client ID (Desktop app)</li>
+      <li class="flex items-start gap-2"><span class="text-ink-tertiary font-mono text-xs mt-0.5">4.</span>Download JSON → upload it here</li>
     </ol>
 
     <form method="POST" action="/onboarding/upload-credentials" enctype="multipart/form-data" class="space-y-3">
       <div>
-        <label class="block text-xs font-medium text-slate-700 mb-1.5">credentials.json</label>
+        <label class="block text-xs font-medium text-ink-muted mb-1.5">credentials.json</label>
         <input type="file" name="credentials_file" accept=".json" required
-               class="block w-full text-sm text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100">
+               class="block w-full text-sm text-ink-subtle file:mr-3 file:py-1.5 file:px-3 file:rounded-button file:border-0 file:text-sm file:font-medium file:bg-accent-subtle file:text-accent hover:file:bg-accent-border/40 file:transition-colors">
       </div>
-      <button type="submit"
-              class="w-full bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors">
+      <button type="submit" class="pm-btn w-full">
         Upload credentials
       </button>
     </form>
     {% else %}
-    <div class="bg-green-50 border border-green-200 rounded-xl p-3 mb-4 flex items-center gap-2">
-      <svg class="w-4 h-4 text-green-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+    <div class="bg-success-bg border border-success-border rounded-button p-3 mb-4 flex items-center gap-2">
+      <!-- Lucide: check -->
+      <svg class="w-4 h-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M20 6L9 17l-5-5"/>
       </svg>
-      <p class="text-green-800 text-xs font-medium">credentials.json present</p>
+      <p class="text-success text-xs font-medium">credentials.json present</p>
     </div>
-    <p class="text-sm text-slate-600 mb-4">Click below — your browser will open and ask you to grant postmind access to your inbox.</p>
+    <p class="text-sm text-ink-muted mb-4">Click below — your browser will open and ask you to grant postmind access to your inbox.</p>
     <div id="oauth-result">
       <button
         hx-post="/accounts/add/gmail/start"
         hx-target="#oauth-result"
         hx-swap="innerHTML"
-        class="w-full inline-flex items-center justify-center gap-2 bg-white border border-slate-300 hover:border-slate-400 text-slate-700 font-medium px-5 py-2.5 rounded-lg shadow-sm transition-colors text-sm">
-        <svg class="w-4 h-4 text-red-500" fill="currentColor" viewBox="0 0 24 24">
+        class="pm-btn-secondary w-full">
+        <svg class="w-4 h-4 text-danger" fill="currentColor" viewBox="0 0 24 24">
           <path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 010 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.907 1.528-1.147C21.69 2.28 24 3.434 24 5.457z"/>
         </svg>
         Sign in with Google
       </button>
     </div>
-    <p class="text-slate-400 text-xs mt-3 text-center">Runs on your machine. Token stored at ~/.postmind/tokens/.</p>
-    <a href="/onboarding?step=1" class="block text-center text-teal-600 text-xs font-medium mt-3">Already signed in? Refresh &rarr;</a>
+    <p class="text-ink-tertiary text-xs mt-3 text-center">Runs on your machine. Token stored at ~/.postmind/tokens/.</p>
+    <a href="/onboarding?step=1" class="block text-center text-accent hover:text-accent-hover text-xs font-medium mt-3">Already signed in? Refresh &rarr;</a>
     {% endif %}
 
     {% else %}
     <!-- IMAP path -->
     {% if imap_error %}
-    <div class="mb-4 bg-red-50 border border-red-200 rounded-xl p-3 flex items-start gap-2">
-      <svg class="w-4 h-4 text-red-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+    <div class="mb-4 bg-danger-bg border border-danger-border rounded-button p-3 flex items-start gap-2">
+      <!-- Lucide: alert-circle -->
+      <svg class="w-4 h-4 text-danger shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
       </svg>
-      <p class="text-red-800 text-sm">{{ imap_error }}</p>
+      <p class="text-danger text-sm">{{ imap_error }}</p>
     </div>
     {% endif %}
-    <p class="text-sm text-slate-600 mb-4">Works with any IMAP provider (Outlook, Fastmail, iCloud, self-hosted, etc.)</p>
+    <p class="text-sm text-ink-muted mb-4">Works with any IMAP provider (Outlook, Fastmail, iCloud, self-hosted, etc.)</p>
 
     <form method="POST" action="/onboarding/connect/imap" class="space-y-4">
       <div class="grid grid-cols-3 gap-4">
         <div class="col-span-2">
-          <label class="block text-xs font-medium text-slate-700 mb-1">IMAP server</label>
-          <input type="text" name="imap_server" placeholder="imap.example.com" required
-                 class="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400">
+          <label class="block text-xs font-medium text-ink-muted mb-1.5">IMAP server</label>
+          <input type="text" name="imap_server" placeholder="imap.example.com" required class="pm-input">
         </div>
         <div>
-          <label class="block text-xs font-medium text-slate-700 mb-1">Port</label>
-          <input type="number" name="imap_port" value="993" min="1" max="65535"
-                 class="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400">
+          <label class="block text-xs font-medium text-ink-muted mb-1.5">Port</label>
+          <input type="number" name="imap_port" value="993" min="1" max="65535" class="pm-input tabular">
         </div>
       </div>
 
       <div>
-        <label class="block text-xs font-medium text-slate-700 mb-1">Username / email</label>
-        <input type="text" name="imap_user" placeholder="you@example.com" required
-               class="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400">
+        <label class="block text-xs font-medium text-ink-muted mb-1.5">Username / email</label>
+        <input type="text" name="imap_user" placeholder="you@example.com" required class="pm-input">
       </div>
 
       <div>
-        <label class="block text-xs font-medium text-slate-700 mb-1">Password / app password</label>
-        <input type="password" name="imap_password" required
-               class="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400">
-        <p class="text-slate-400 text-xs mt-1">Use an app-specific password if your provider requires 2FA. Never written to disk.</p>
+        <label class="block text-xs font-medium text-ink-muted mb-1.5">Password / app password</label>
+        <input type="password" name="imap_password" required class="pm-input">
+        <p class="text-ink-tertiary text-xs mt-1.5">Use an app-specific password if your provider requires 2FA. Never written to disk.</p>
       </div>
 
       <div class="grid grid-cols-2 gap-4">
         <div>
-          <label class="block text-xs font-medium text-slate-700 mb-1">Folder (optional)</label>
-          <input type="text" name="imap_folder" placeholder="INBOX"
-                 class="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400">
+          <label class="block text-xs font-medium text-ink-muted mb-1.5">Folder (optional)</label>
+          <input type="text" name="imap_folder" placeholder="INBOX" class="pm-input">
         </div>
         <div>
-          <label class="block text-xs font-medium text-slate-700 mb-1">Display name (optional)</label>
-          <input type="text" name="display_name" placeholder="Work email"
-                 class="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-400">
+          <label class="block text-xs font-medium text-ink-muted mb-1.5">Display name (optional)</label>
+          <input type="text" name="display_name" placeholder="Work email" class="pm-input">
         </div>
       </div>
 
-      <button type="submit"
-              class="w-full bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors">
+      <button type="submit" class="pm-btn w-full">
         Connect IMAP account
       </button>
     </form>
@@ -196,84 +204,84 @@
 
   <!-- Step 2: Enable AI (optional) -->
   {% elif step == 2 %}
-  <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
-    <div class="flex items-center gap-3 mb-4">
-      <div class="w-9 h-9 bg-teal-50 rounded-full flex items-center justify-center shrink-0">
-        <svg class="w-5 h-5 text-teal-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+  <div class="pm-card p-6">
+    <div class="flex items-center gap-3 mb-5">
+      <div class="w-9 h-9 bg-accent-subtle border border-accent-border rounded-button flex items-center justify-center shrink-0">
+        <!-- Lucide: zap -->
+        <svg class="w-5 h-5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
           <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
         </svg>
       </div>
       <div>
-        <h2 class="text-sm font-semibold text-slate-900">Step 2: Enable AI <span class="text-slate-400 font-normal">(optional)</span></h2>
-        <p class="text-xs text-slate-500 mt-0.5">Turn on smart triage now or skip and decide later in Settings</p>
+        <h2 class="text-sm font-semibold text-ink">Step 2: Enable AI <span class="text-ink-tertiary font-normal">(optional)</span></h2>
+        <p class="text-xs text-ink-subtle mt-0.5">Turn on smart triage now or skip and decide later in Settings</p>
       </div>
     </div>
 
     <form action="/onboarding/ai-mode" method="POST" class="space-y-3">
-      <label class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors
-                    {% if ai_mode == 'off' %}border-slate-900 bg-slate-50{% else %}border-slate-200 hover:border-slate-300{% endif %}">
+      <label class="flex items-start gap-3 p-3 rounded-button border cursor-pointer transition-colors
+                    {% if ai_mode == 'off' %}border-hairline-strong bg-surface-2{% else %}border-hairline hover:border-hairline-strong{% endif %}">
         <input type="radio" name="mode" value="off" {% if ai_mode == 'off' %}checked{% endif %}
-               class="mt-0.5 text-slate-700" onchange="onbToggleAi()">
+               class="mt-0.5 accent-ink" onchange="onbToggleAi()">
         <div>
-          <p class="text-sm font-medium text-slate-800">Off <span class="text-slate-400 font-normal">(default)</span></p>
-          <p class="text-xs text-slate-500 mt-0.5">No AI features. Nothing sent anywhere. Full privacy.</p>
+          <p class="text-sm font-medium text-ink">Off <span class="text-ink-tertiary font-normal">(default)</span></p>
+          <p class="text-xs text-ink-subtle mt-0.5">No AI features. Nothing sent anywhere. Full privacy.</p>
         </div>
       </label>
 
-      <label class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors
-                    {% if ai_mode == 'local' %}border-teal-500 bg-teal-50{% else %}border-slate-200 hover:border-slate-300{% endif %}">
+      <label class="flex items-start gap-3 p-3 rounded-button border cursor-pointer transition-colors
+                    {% if ai_mode == 'local' %}border-accent bg-accent-subtle{% else %}border-hairline hover:border-hairline-strong{% endif %}">
         <input type="radio" name="mode" value="local" {% if ai_mode == 'local' %}checked{% endif %}
-               class="mt-0.5 text-teal-600" onchange="onbToggleAi()">
+               class="mt-0.5 accent-accent" onchange="onbToggleAi()">
         <div class="flex-1">
-          <p class="text-sm font-medium text-slate-800">Local</p>
-          <p class="text-xs text-slate-500 mt-0.5">Runs AI on your machine via Ollama. Nothing leaves your device.</p>
+          <p class="text-sm font-medium text-ink">Local</p>
+          <p class="text-xs text-ink-subtle mt-0.5">Runs AI on your machine via Ollama. Nothing leaves your device.</p>
           <div id="onb-ollama-config" class="mt-3 space-y-2 {% if ai_mode != 'local' %}hidden{% endif %}">
             <div class="flex items-center gap-2">
-              <label class="text-xs text-slate-500 w-24 shrink-0">Ollama URL</label>
+              <label class="text-xs text-ink-subtle w-24 shrink-0">Ollama URL</label>
               <input type="text" name="ollama_base_url" value="{{ ollama_base_url }}"
                      placeholder="http://localhost:11434"
-                     class="flex-1 text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500/30 text-slate-800 font-mono bg-white">
+                     class="pm-input flex-1 text-xs font-mono py-1.5">
             </div>
             <div class="flex items-center gap-2">
-              <label class="text-xs text-slate-500 w-24 shrink-0">Model</label>
+              <label class="text-xs text-ink-subtle w-24 shrink-0">Model</label>
               <input type="text" name="ollama_model" value="{{ ollama_model }}"
                      placeholder="qwen2.5:32b"
-                     class="flex-1 text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500/30 text-slate-800 font-mono bg-white">
+                     class="pm-input flex-1 text-xs font-mono py-1.5">
             </div>
           </div>
         </div>
       </label>
 
-      <label class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors
-                    {% if ai_mode == 'cloud' %}border-amber-400 bg-amber-50{% else %}border-slate-200 hover:border-slate-300{% endif %}">
+      <label class="flex items-start gap-3 p-3 rounded-button border cursor-pointer transition-colors
+                    {% if ai_mode == 'cloud' %}border-warning-border bg-warning-bg{% else %}border-hairline hover:border-hairline-strong{% endif %}">
         <input type="radio" name="mode" value="cloud" {% if ai_mode == 'cloud' %}checked{% endif %}
-               class="mt-0.5 text-amber-500" onchange="onbToggleAi()">
+               class="mt-0.5 accent-warning" onchange="onbToggleAi()">
         <div class="flex-1">
-          <p class="text-sm font-medium text-slate-800">Cloud</p>
-          <p class="text-xs text-slate-500 mt-0.5">
+          <p class="text-sm font-medium text-ink">Cloud</p>
+          <p class="text-xs text-ink-subtle mt-0.5">
             Uses Anthropic Claude API. Email subjects + snippets (≤300 chars) are sent externally.
           </p>
-          <div id="onb-cloud-config" class="mt-3 space-y-1 {% if ai_mode != 'cloud' %}hidden{% endif %}">
-            <label class="block text-xs text-slate-500">Anthropic API key</label>
+          <div id="onb-cloud-config" class="mt-3 space-y-1.5 {% if ai_mode != 'cloud' %}hidden{% endif %}">
+            <label class="block text-xs text-ink-subtle">Anthropic API key</label>
             <input type="password" name="anthropic_api_key"
                    placeholder="{% if has_api_key %}•••••• (already set — leave blank to keep){% else %}sk-ant-...{% endif %}"
-                   class="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-500/30 text-slate-800 font-mono bg-white">
-            <p class="text-xs text-slate-400">Stored in ~/.postmind/.env on this machine.</p>
+                   class="pm-input text-xs font-mono py-1.5">
+            <p class="text-xs text-ink-tertiary">Stored in ~/.postmind/.env on this machine.</p>
           </div>
         </div>
       </label>
 
       <div class="flex items-center gap-2 pt-1">
-        <button type="submit"
-                class="flex-1 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors">
+        <button type="submit" class="pm-btn flex-1">
           Save &amp; continue
         </button>
         <a href="/onboarding?step=3"
-           class="px-5 py-2.5 text-sm font-medium text-slate-500 hover:text-slate-700">
+           class="px-5 py-2.5 text-sm font-medium text-ink-subtle hover:text-ink transition-colors">
           Skip
         </a>
       </div>
-      <p class="text-slate-400 text-xs text-center">AI is optional — you can change this anytime in Settings.</p>
+      <p class="text-ink-tertiary text-xs text-center">AI is optional — you can change this anytime in Settings.</p>
     </form>
   </div>
 
@@ -288,14 +296,15 @@
 
   <!-- Step 3: Scanning your inbox -->
   {% elif step == 3 %}
-  <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
-    <div class="w-14 h-14 bg-teal-50 rounded-full flex items-center justify-center mx-auto mb-4">
-      <svg class="w-7 h-7 text-teal-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+  <div class="pm-card p-6">
+    <div class="w-14 h-14 bg-accent-subtle border border-accent-border rounded-card flex items-center justify-center mx-auto mb-4">
+      <!-- Lucide: check -->
+      <svg class="w-7 h-7 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M20 6L9 17l-5-5"/>
       </svg>
     </div>
-    <h2 class="text-lg font-semibold text-slate-900 mb-2 text-center">Account connected — scanning your inbox</h2>
-    <p class="text-slate-500 text-sm mb-5 text-center">
+    <h2 class="text-lg font-semibold text-ink mb-2 text-center">Account connected — scanning your inbox</h2>
+    <p class="text-ink-subtle text-sm mb-5 text-center">
       We're pulling in your mail so we can show you what's safe to clean. This can take
       a little while for large inboxes — you can leave this running.
     </p>
@@ -307,19 +316,20 @@
          hx-vals='{"scope":"anywhere","limit":"0","next":"/welcome"}'
          hx-target="this"
          hx-swap="outerHTML">
-      <div class="flex items-center justify-center gap-3 text-slate-500 text-sm py-3">
-        <div class="w-4 h-4 border-2 border-teal-500 border-t-transparent rounded-full animate-spin shrink-0"></div>
+      <div class="flex items-center justify-center gap-3 text-ink-subtle text-sm py-3">
+        <div class="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin shrink-0"></div>
         Starting scan…
       </div>
     </div>
 
-    <div class="mt-5 rounded-lg bg-slate-50 border border-slate-100 p-3 text-xs text-slate-500 text-center">
-      🔒 postmind only ever moves mail to Trash or Archive — never deletes — and everything
-      is undoable for 30 days.
+    <div class="mt-5 rounded-button bg-surface-2 border border-hairline p-3 flex items-start gap-2 text-xs text-ink-subtle">
+      <!-- Lucide: lock -->
+      <svg class="w-4 h-4 text-ink-tertiary shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M5 11h14a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2zM8 11V7a4 4 0 118 0v4"/></svg>
+      <span>postmind only ever moves mail to Trash or Archive — never deletes — and everything is undoable for 30 days.</span>
     </div>
 
     <div class="mt-4 text-center">
-      <a href="/" class="text-slate-400 hover:text-slate-600 text-sm">Skip for now &rarr;</a>
+      <a href="/" class="text-ink-tertiary hover:text-ink text-sm transition-colors">Skip for now &rarr;</a>
     </div>
   </div>
   {% endif %}

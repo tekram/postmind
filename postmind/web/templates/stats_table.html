@@ -2,56 +2,56 @@
 <div id="stats-data">
 
 {% if not senders %}
-<div class="bg-white border border-slate-200 rounded-xl shadow-sm p-10 text-center">
-  <p class="text-slate-500">No senders found. Try changing the scope or filters.</p>
+<div class="pm-card p-10 text-center">
+  <p class="text-ink-subtle">No senders found. Try changing the scope or filters.</p>
 </div>
 {% else %}
 
 <!-- Summary bar -->
-<div class="bg-white border border-slate-200 rounded-xl shadow-sm px-5 py-4 mb-4">
-  <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+<div class="pm-card px-5 py-4 mb-4">
+  <div class="flex flex-wrap items-center gap-x-8 gap-y-2">
     <div>
-      <span class="text-xs text-slate-400 uppercase tracking-wide font-medium">Emails analyzed</span>
-      <p class="text-lg font-bold text-slate-900 leading-tight">{{ "{:,}".format(total_emails) }}</p>
+      <span class="text-[11px] text-ink-tertiary uppercase tracking-[0.06em] font-semibold">Emails analyzed</span>
+      <p class="text-lg font-semibold text-ink leading-tight tabular">{{ "{:,}".format(total_emails) }}</p>
     </div>
     <div>
-      <span class="text-xs text-slate-400 uppercase tracking-wide font-medium">Senders found</span>
-      <p class="text-lg font-bold text-slate-900 leading-tight">{{ senders | length }}</p>
+      <span class="text-[11px] text-ink-tertiary uppercase tracking-[0.06em] font-semibold">Senders found</span>
+      <p class="text-lg font-semibold text-ink leading-tight tabular">{{ senders | length }}</p>
     </div>
     <div>
-      <span class="text-xs text-slate-400 uppercase tracking-wide font-medium">Reclaimable</span>
-      <p class="text-lg font-bold text-teal-600 leading-tight">{{ total_reclaimable }} MB</p>
+      <span class="text-[11px] text-ink-tertiary uppercase tracking-[0.06em] font-semibold">Reclaimable</span>
+      <p class="text-lg font-semibold text-accent leading-tight tabular">{{ total_reclaimable }} MB</p>
     </div>
     {% if date_from and date_to %}
     <div>
-      <span class="text-xs text-slate-400 uppercase tracking-wide font-medium">Date range</span>
-      <p class="text-sm font-medium text-slate-700 leading-tight">{{ date_from }} – {{ date_to }}</p>
+      <span class="text-[11px] text-ink-tertiary uppercase tracking-[0.06em] font-semibold">Date range</span>
+      <p class="text-sm font-medium text-ink-muted leading-tight tabular">{{ date_from }} – {{ date_to }}</p>
     </div>
     {% endif %}
     <div class="ml-auto text-right">
-      <span class="text-xs text-slate-400">{{ data_source }} · scanned {{ scanned_at }}</span>
+      <span class="text-xs text-ink-tertiary tabular">{{ data_source }} · scanned {{ scanned_at }}</span>
     </div>
   </div>
 </div>
 
 <!-- Table with form for purge selection -->
 <form id="purge-form" action="/purge/preview" method="POST">
-<div class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+<div class="pm-card overflow-hidden">
 
   <!-- Table header (click to sort) -->
-  <div class="grid grid-cols-[auto_1fr_auto_auto_auto_auto] items-center gap-4 px-5 py-3 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-500 uppercase tracking-wide">
+  <div class="grid grid-cols-[auto_1fr_auto_auto_auto_auto] items-center gap-4 px-5 py-3 bg-surface-2 border-b border-hairline text-[11px] font-semibold text-ink-subtle uppercase tracking-[0.06em] sticky top-0 z-10">
     <div class="w-4"></div>
-    <button type="button" class="sort-btn flex items-center gap-1 text-left hover:text-slate-700 uppercase tracking-wide" data-sort-key="sender" data-sort-type="text">Sender <span class="sort-caret text-slate-300"></span></button>
-    <button type="button" class="sort-btn flex items-center justify-end gap-1 hover:text-slate-700 uppercase tracking-wide" data-sort-key="count" data-sort-type="num">Emails <span class="sort-caret text-slate-300"></span></button>
-    <button type="button" class="sort-btn flex items-center justify-end gap-1 hover:text-slate-700 uppercase tracking-wide" data-sort-key="size" data-sort-type="num">Size <span class="sort-caret text-slate-300"></span></button>
-    <button type="button" class="sort-btn flex items-center gap-1 text-left hover:text-slate-700 uppercase tracking-wide" data-sort-key="oldest" data-sort-type="num">Oldest <span class="sort-caret text-slate-300"></span></button>
-    <button type="button" class="sort-btn flex items-center gap-1 text-left hover:text-slate-700 uppercase tracking-wide" data-sort-key="safety" data-sort-type="num">Safety <span class="sort-caret text-slate-300"></span></button>
+    <button type="button" class="sort-btn flex items-center gap-1 text-left hover:text-ink uppercase tracking-[0.06em] transition-colors" data-sort-key="sender" data-sort-type="text">Sender <span class="sort-caret text-ink-tertiary"></span></button>
+    <button type="button" class="sort-btn flex items-center justify-end gap-1 hover:text-ink uppercase tracking-[0.06em] transition-colors" data-sort-key="count" data-sort-type="num">Emails <span class="sort-caret text-ink-tertiary"></span></button>
+    <button type="button" class="sort-btn flex items-center justify-end gap-1 hover:text-ink uppercase tracking-[0.06em] transition-colors" data-sort-key="size" data-sort-type="num">Size <span class="sort-caret text-ink-tertiary"></span></button>
+    <button type="button" class="sort-btn flex items-center gap-1 text-left hover:text-ink uppercase tracking-[0.06em] transition-colors" data-sort-key="oldest" data-sort-type="num">Oldest <span class="sort-caret text-ink-tertiary"></span></button>
+    <button type="button" class="sort-btn flex items-center gap-1 text-left hover:text-ink uppercase tracking-[0.06em] transition-colors" data-sort-key="safety" data-sort-type="num">Safety <span class="sort-caret text-ink-tertiary"></span></button>
   </div>
 
   <!-- Table rows -->
   <div id="sender-rows">
   {% for s in senders %}
-  <div class="sender-row grid grid-cols-[auto_1fr_auto_auto_auto_auto] items-center gap-4 px-5 py-3.5 border-b border-slate-100 last:border-0 hover:bg-slate-50/60 transition-colors"
+  <div class="sender-row grid grid-cols-[auto_1fr_auto_auto_auto_auto] items-center gap-4 px-5 py-3.5 border-b border-hairline last:border-0 hover:bg-surface-2 transition-colors"
        data-sender="{{ (s.sender_name or s.sender_email) | lower }}"
        data-count="{{ s.count }}"
        data-size="{{ s.size_mb }}"
@@ -63,47 +63,62 @@
       <input type="checkbox" name="senders" value="{{ s.sender_email }}"
              id="cb-{{ loop.index }}"
              {% if s.risk == 'sensitive' %}disabled title="Protected sender — review manually"{% endif %}
-             class="w-4 h-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500/30 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+             class="w-4 h-4 rounded border-hairline-strong text-accent focus:ring-2 focus:ring-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
     </div>
 
     <!-- Sender info -->
     <label for="cb-{{ loop.index }}" class="min-w-0 cursor-pointer {% if s.risk == 'sensitive' %}cursor-default{% endif %}">
       <div class="flex items-center gap-2 min-w-0">
-        <span class="text-sm font-medium text-slate-800 truncate">
+        <span class="text-sm font-medium text-ink truncate">
           {{ s.sender_name[:40] }}{% if s.sender_name | length > 40 %}…{% endif %}
         </span>
         {% if s.has_unsubscribe %}
-        <span title="Has unsubscribe header" class="text-slate-300 text-xs shrink-0">◎</span>
+        <!-- Lucide: mail-x (has unsubscribe header) -->
+        <svg title="Has unsubscribe header" class="w-3.5 h-3.5 shrink-0 text-ink-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 8.5V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2h7M3 7l9 6 9-6M17 16l4 4M21 16l-4 4"/>
+        </svg>
         {% endif %}
       </div>
-      <span class="text-xs text-slate-400 truncate block">{{ s.sender_email }}</span>
+      <span class="text-xs text-ink-subtle truncate block">{{ s.sender_email }}</span>
       {% if s.sample_subjects %}
-      <span class="text-xs text-slate-300 truncate block">{{ s.sample_subjects[0][:60] }}{% if s.sample_subjects[0]|length > 60 %}…{% endif %}</span>
+      <span class="text-xs text-ink-tertiary truncate block">{{ s.sample_subjects[0][:60] }}{% if s.sample_subjects[0]|length > 60 %}…{% endif %}</span>
       {% endif %}
     </label>
 
     <!-- Email count -->
-    <div class="text-sm text-slate-700 font-medium text-right tabular-nums">{{ s.count }}</div>
+    <div class="text-sm text-ink font-medium text-right tabular">{{ s.count }}</div>
 
     <!-- Size -->
-    <div class="text-sm text-slate-600 text-right tabular-nums whitespace-nowrap">{{ s.size_str }}</div>
+    <div class="text-sm text-ink-muted text-right tabular whitespace-nowrap">{{ s.size_str }}</div>
 
     <!-- Oldest -->
-    <div class="text-sm text-slate-500 whitespace-nowrap">{{ s.oldest }}</div>
+    <div class="text-sm text-ink-subtle whitespace-nowrap tabular">{{ s.oldest }}</div>
 
     <!-- Safety badge -->
     <div>
       {% if s.safety_label == "Safe to clean" %}
-      <span class="inline-flex items-center gap-1 text-xs font-medium bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded-full whitespace-nowrap">
-        🟢 Safe
+      <span class="pm-pill bg-success-bg text-success border border-success-border whitespace-nowrap">
+        <!-- Lucide: shield-check -->
+        <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3zM9.5 12l1.75 1.75L15 10"/>
+        </svg>
+        Safe
       </span>
       {% elif s.safety_label == "Needs review" %}
-      <span class="inline-flex items-center gap-1 text-xs font-medium bg-yellow-50 text-yellow-700 border border-yellow-200 px-2 py-0.5 rounded-full whitespace-nowrap">
-        🟡 Review
+      <span class="pm-pill bg-warning-bg text-warning border border-warning-border whitespace-nowrap">
+        <!-- Lucide: alert-triangle -->
+        <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0zM12 9v4M12 17h.01"/>
+        </svg>
+        Review
       </span>
       {% else %}
-      <span class="inline-flex items-center gap-1 text-xs font-medium bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded-full whitespace-nowrap">
-        🔴 Sensitive
+      <span class="pm-pill bg-danger-bg text-danger border border-danger-border whitespace-nowrap">
+        <!-- Lucide: shield-alert -->
+        <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3zM12 8v4M12 15h.01"/>
+        </svg>
+        Sensitive
       </span>
       {% endif %}
     </div>
@@ -115,25 +130,30 @@
 
 <!-- Purge action bar (sticky bottom) -->
 <div id="action-bar"
-     class="fixed bottom-0 left-52 right-0 bg-white border-t border-slate-200 px-8 py-4 flex items-center justify-between"
+     class="fixed bottom-0 left-52 right-0 bg-surface border-t border-hairline shadow-whisper px-8 py-4 flex items-center justify-between z-30"
      style="display:none !important">
-  <div>
-    <span id="sel-count" class="text-slate-600 text-sm font-medium">0 senders selected</span>
-    <span id="sel-detail" class="text-slate-400 text-sm ml-3"></span>
+  <div class="flex items-baseline gap-3">
+    <span id="sel-count" class="text-ink text-sm font-medium tabular">0 senders selected</span>
+    <span id="sel-detail" class="text-ink-tertiary text-sm tabular"></span>
   </div>
   <div class="flex items-center gap-3">
-    <button type="button" onclick="clearSelection()"
-            class="text-slate-500 hover:text-slate-700 text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">
+    <button type="button" onclick="clearSelection()" class="pm-btn-secondary">
       Clear
     </button>
-    <button type="submit" form="purge-form" name="action" value="archive"
-            class="border border-slate-300 text-slate-700 hover:bg-slate-100 text-sm font-medium px-5 py-2 rounded-lg transition-colors"
+    <button type="submit" form="purge-form" name="action" value="archive" class="pm-btn-secondary"
             title="Remove from inbox, keep in All Mail (reversible)">
+      <!-- Lucide: archive -->
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M21 8v11a2 2 0 01-2 2H5a2 2 0 01-2-2V8M3 4h18v4H3zM10 12h4"/>
+      </svg>
       Archive
     </button>
-    <button type="submit" form="purge-form" name="action" value="trash"
-            class="bg-red-600 hover:bg-red-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">
-      Move to Trash →
+    <button type="submit" form="purge-form" name="action" value="trash" class="pm-btn-danger">
+      <!-- Lucide: trash-2 -->
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3 6h18M19 6l-.867 12.142A2 2 0 0116.138 20H7.862a2 2 0 01-1.995-1.858L5 6m5 0V4a1 1 0 011-1h2a1 1 0 011 1v2M10 11v5M14 11v5"/>
+      </svg>
+      Move to Trash
     </button>
   </div>
 </div>
@@ -197,12 +217,12 @@
         const caret = b.querySelector('.sort-caret');
         if (b === btn) {
           caret.textContent = sortState.dir === 1 ? '▲' : '▼';
-          caret.classList.remove('text-slate-300');
-          caret.classList.add('text-teal-600');
+          caret.classList.remove('text-ink-tertiary');
+          caret.classList.add('text-accent');
         } else {
           caret.textContent = '';
-          caret.classList.add('text-slate-300');
-          caret.classList.remove('text-teal-600');
+          caret.classList.add('text-ink-tertiary');
+          caret.classList.remove('text-accent');
         }
       });
     });

@@ -5,24 +5,30 @@
 <div class="p-8 max-w-xl">
 
   <div class="mb-6">
-    <h1 class="text-2xl font-semibold text-slate-900">Sync Inbox</h1>
-    <p class="text-slate-500 text-sm mt-1">
+    <h1 class="text-2xl font-semibold text-ink tracking-tight">Sync Inbox</h1>
+    <p class="text-ink-subtle text-sm mt-1">
       Cache email metadata locally so Stats and Purge run instantly without re-fetching from Gmail.
     </p>
   </div>
 
   {% if not is_authed %}
-  <div class="bg-amber-50 border border-amber-200 rounded-xl p-5 mb-6">
-    <p class="text-amber-800 font-medium text-sm">Not authenticated</p>
-    <p class="text-amber-700 text-xs mt-1">
-      Run <code class="bg-amber-100 px-1 rounded font-mono">postmind auth</code> in your terminal first.
+  <div class="bg-warning-bg border border-warning-border rounded-card p-5 mb-6">
+    <p class="text-warning font-medium text-sm">Not authenticated</p>
+    <p class="text-warning text-xs mt-1">
+      Run <code class="bg-warning-border/40 px-1 rounded-chip font-mono">postmind auth</code> in your terminal first.
     </p>
   </div>
   {% endif %}
 
-  <div class="bg-white border border-slate-200 rounded-xl shadow-sm">
-    <div class="px-5 py-4 border-b border-slate-100">
-      <h2 class="font-medium text-slate-800">Sync options</h2>
+  <div class="pm-card">
+    <div class="px-5 py-4 border-b border-hairline">
+      <h2 class="font-medium text-ink flex items-center gap-2">
+        <!-- Lucide: refresh-cw -->
+        <svg class="w-4 h-4 text-ink-subtle shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        Sync options
+      </h2>
     </div>
     <div class="p-5">
       <form id="sync-form" action="/sync/start" method="POST"
@@ -34,31 +40,30 @@
         <div class="space-y-4 mb-5">
 
           <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1.5">Scope</label>
+            <label class="block text-sm font-medium text-ink-muted mb-1.5">Scope</label>
             <div class="space-y-2">
               <label class="flex items-center gap-2.5 cursor-pointer">
                 <input type="radio" name="scope" value="inbox" checked
-                       class="text-teal-600 focus:ring-teal-500/30">
+                       class="text-accent focus:ring-accent">
                 <div>
-                  <span class="text-sm font-medium text-slate-800">Inbox only</span>
-                  <span class="text-xs text-slate-400 ml-1.5">Fastest — sync what stats scans by default</span>
+                  <span class="text-sm font-medium text-ink">Inbox only</span>
+                  <span class="text-xs text-ink-tertiary ml-1.5">Fastest — sync what stats scans by default</span>
                 </div>
               </label>
               <label class="flex items-center gap-2.5 cursor-pointer">
                 <input type="radio" name="scope" value="anywhere"
-                       class="text-teal-600 focus:ring-teal-500/30">
+                       class="text-accent focus:ring-accent">
                 <div>
-                  <span class="text-sm font-medium text-slate-800">All mail</span>
-                  <span class="text-xs text-slate-400 ml-1.5">Includes archived and sent — takes longer</span>
+                  <span class="text-sm font-medium text-ink">All mail</span>
+                  <span class="text-xs text-ink-tertiary ml-1.5">Includes archived and sent — takes longer</span>
                 </div>
               </label>
             </div>
           </div>
 
           <div>
-            <label for="limit" class="block text-sm font-medium text-slate-700 mb-1.5">Email limit</label>
-            <select id="limit" name="limit"
-                    class="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30 w-48">
+            <label for="limit" class="block text-sm font-medium text-ink-muted mb-1.5">Email limit</label>
+            <select id="limit" name="limit" class="pm-input w-48 tabular">
               <option value="500">500 emails</option>
               <option value="1000" selected>1,000 emails</option>
               <option value="2000">2,000 emails</option>
@@ -72,11 +77,15 @@
         <div class="flex items-center gap-3">
           <button id="sync-btn" type="submit"
                   {% if not is_authed %}disabled{% endif %}
-                  class="bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">
+                  class="pm-btn">
+            <!-- Lucide: refresh-cw -->
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
             Start Sync
           </button>
-          <a href="/stats" class="text-slate-500 hover:text-slate-700 text-sm transition-colors">
-            Skip → View Stats
+          <a href="/stats" class="text-ink-subtle hover:text-ink-muted text-sm transition-colors">
+            Skip &rarr; View Stats
           </a>
         </div>
 
@@ -89,9 +98,9 @@
   </div>
 
   <!-- Info card -->
-  <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 mt-5">
-    <p class="text-slate-600 text-xs font-medium mb-1.5">Why sync?</p>
-    <ul class="text-slate-500 text-xs space-y-1">
+  <div class="bg-surface-2 border border-hairline rounded-card p-4 mt-5">
+    <p class="text-ink-muted text-xs font-medium mb-1.5">Why sync?</p>
+    <ul class="text-ink-subtle text-xs space-y-1">
       <li>• Stats re-scan takes 10–30s per run against the Gmail API</li>
       <li>• After syncing, future scans read from local SQLite — near-instant</li>
       <li>• Re-sync any time to pick up recent emails</li>

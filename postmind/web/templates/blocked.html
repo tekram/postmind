@@ -5,36 +5,46 @@
 <div class="p-8 max-w-2xl">
 
   <div class="mb-1">
-    <a href="/settings" class="inline-flex items-center gap-1.5 text-slate-500 hover:text-slate-700 text-sm mb-4 transition-colors">
-      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+    <a href="/settings" class="inline-flex items-center gap-1.5 text-ink-subtle hover:text-ink text-sm mb-4 transition-colors">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
         <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
       </svg>
       Settings
     </a>
   </div>
 
-  <h1 class="text-2xl font-semibold text-slate-900 mb-1">Protected Senders</h1>
-  <p class="text-slate-500 text-sm mb-6">
-    Senders on this list are hidden from Purge and will never be auto-suggested for deletion.
-  </p>
+  <div class="mb-6">
+    <div class="flex items-center gap-2.5 mb-1.5">
+      <!-- Lucide: shield -->
+      <svg class="w-5 h-5 shrink-0 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      </svg>
+      <h1 class="text-2xl font-semibold tracking-tight text-ink">Protected Senders</h1>
+    </div>
+    <p class="text-ink-subtle text-sm">
+      Senders on this list are hidden from Purge and will never be auto-suggested for deletion.
+    </p>
+  </div>
 
   {% if request.query_params.get('added') %}
-  <div class="bg-green-50 border border-green-200 rounded-xl p-3 mb-5 text-sm text-green-800 font-medium">
-    ✓ Sender protected.
+  <div class="bg-success-bg border border-success-border rounded-card p-3.5 mb-5 flex items-center gap-2.5 text-sm text-success font-medium">
+    <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+    Sender protected.
   </div>
   {% endif %}
 
   <!-- Add sender -->
-  <div class="bg-white border border-slate-200 rounded-xl shadow-sm mb-5">
-    <div class="px-5 py-4 border-b border-slate-100">
-      <h2 class="font-medium text-slate-800 text-sm">Add protection</h2>
+  <div class="pm-card mb-5">
+    <div class="px-5 py-4 border-b border-hairline">
+      <p class="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-tertiary">Add protection</p>
+      <h2 class="font-semibold text-ink text-sm mt-1.5">Protect a sender by email</h2>
     </div>
     <div class="p-5">
       <form action="/settings/blocked/add" method="POST" class="flex gap-3">
         <input type="email" name="sender_email" required placeholder="sender@example.com"
-               class="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/30 text-slate-800 placeholder-slate-400">
-        <button type="submit"
-                class="bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap">
+               class="pm-input flex-1">
+        <button type="submit" class="pm-btn whitespace-nowrap">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           Protect sender
         </button>
       </form>
@@ -43,28 +53,32 @@
 
   <!-- Protected list -->
   {% if not entries %}
-  <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-8 text-center">
-    <p class="text-slate-400 text-sm">No protected senders yet.</p>
-    <p class="text-slate-400 text-xs mt-1">
+  <div class="pm-card p-8 text-center">
+    <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-surface-2 text-ink-tertiary mb-3">
+      <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+    </div>
+    <p class="text-ink-subtle text-sm">No protected senders yet.</p>
+    <p class="text-ink-tertiary text-xs mt-1">
       Add senders above, or use the "Protect" action in Undo History after restoring emails.
     </p>
   </div>
   {% else %}
-  <div class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-    <div class="px-5 py-3 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-500 uppercase tracking-wide">
+  <div class="pm-card overflow-hidden">
+    <div class="px-5 py-3 bg-surface-2 border-b border-hairline text-[11px] font-semibold text-ink-subtle uppercase tracking-[0.06em] tabular">
       {{ entries | length }} protected sender{{ 's' if entries|length != 1 else '' }}
     </div>
     {% for e in entries %}
-    <div class="px-5 py-3.5 border-b border-slate-100 last:border-0 flex items-center justify-between">
+    <div class="px-5 py-3.5 border-b border-hairline last:border-0 flex items-center justify-between">
       <div>
-        <p class="text-sm font-medium text-slate-800">{{ e.email }}</p>
-        <p class="text-xs text-slate-400">{{ e.domain }}</p>
+        <p class="text-sm font-medium text-ink">{{ e.email }}</p>
+        <p class="text-xs text-ink-tertiary">{{ e.domain }}</p>
       </div>
       <form action="/settings/blocked/remove" method="POST"
             onsubmit="return confirm('Remove protection for {{ e.email }}?')">
         <input type="hidden" name="sender_email" value="{{ e.email }}">
         <button type="submit"
-                class="text-xs text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-lg border border-red-200 hover:border-red-300 transition-colors">
+                class="inline-flex items-center gap-1.5 text-xs font-medium text-danger hover:bg-danger-bg px-3 py-1.5 rounded-button border border-danger-border transition-colors">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
           Remove
         </button>
       </form>

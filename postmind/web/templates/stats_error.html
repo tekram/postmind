@@ -1,13 +1,16 @@
 <!-- HTMX fragment — shown when stats scan fails -->
-<div id="stats-data" class="bg-amber-50 border border-amber-200 rounded-xl p-6">
+<div id="stats-data" class="bg-warning-bg border border-warning-border rounded-card p-6">
   <div class="flex items-start gap-3">
-    <span class="text-amber-500 text-xl shrink-0">⚠</span>
+    <!-- Lucide: alert-triangle -->
+    <svg class="w-5 h-5 shrink-0 text-warning mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0zM12 9v4M12 17h.01"/>
+    </svg>
     <div>
-      <p class="text-amber-800 font-medium">Could not scan inbox</p>
-      <p class="text-amber-700 text-sm mt-1">{{ error }}</p>
-      <p class="text-amber-600 text-xs mt-3">
+      <p class="text-ink font-medium">Could not scan inbox</p>
+      <p class="text-ink-muted text-sm mt-1">{{ error }}</p>
+      <p class="text-ink-subtle text-xs mt-3">
         If you're not authenticated, run
-        <code class="bg-amber-100 px-1.5 py-0.5 rounded font-mono">postmind auth</code>
+        <code class="bg-warning-bg border border-warning-border px-1.5 py-0.5 rounded-chip font-mono">postmind auth</code>
         in your terminal, then reload this page.
       </p>
     </div>
