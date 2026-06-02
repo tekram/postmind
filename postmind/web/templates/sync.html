@@ -68,8 +68,25 @@
               <option value="1000" selected>1,000 emails</option>
               <option value="2000">2,000 emails</option>
               <option value="5000">5,000 emails</option>
-              <option value="0">All emails (deep sync)</option>
+              <option value="0">All emails</option>
             </select>
+          </div>
+
+          <div>
+            <label class="flex items-start gap-3 cursor-pointer">
+              <input type="checkbox" name="deep" value="1" id="deep-sync-cb"
+                     class="mt-0.5 rounded text-accent">
+              <div>
+                <span class="text-sm font-medium text-ink">Deep sync (year-by-year batches)</span>
+                <p class="text-xs text-ink-tertiary mt-0.5">
+                  Splits the sync into yearly date ranges to bypass Gmail's 100k-per-query cap.
+                  Required for mailboxes over 50k emails. Takes longer but gets everything.
+                </p>
+                <p id="deep-scope-hint" class="hidden text-xs text-warning mt-1.5 font-medium">
+                  ⚠ For your full mailbox, also select <strong>All mail</strong> above — old emails are usually archived, not in inbox.
+                </p>
+              </div>
+            </label>
           </div>
 
         </div>
@@ -109,5 +126,19 @@
   </div>
 
 </div>
+
+<script>
+  var deepCb = document.getElementById("deep-sync-cb");
+  var deepHint = document.getElementById("deep-scope-hint");
+  var scopeRadios = document.querySelectorAll('input[name="scope"]');
+
+  function updateHint() {
+    var scope = document.querySelector('input[name="scope"]:checked');
+    deepHint.classList.toggle("hidden", !(deepCb.checked && scope && scope.value === "inbox"));
+  }
+
+  deepCb.addEventListener("change", updateHint);
+  scopeRadios.forEach(function(r) { r.addEventListener("change", updateHint); });
+</script>
 
 {% endblock %}

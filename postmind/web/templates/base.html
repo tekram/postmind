@@ -336,6 +336,12 @@
 
   <!-- Main content -->
   <main class="flex-1 ml-52 min-h-screen">
+    <!-- Persistent sync banner -->
+    <div id="sync-banner" class="hidden items-center gap-3 px-5 py-2.5 bg-accent/10 border-b border-accent/20 text-sm text-accent">
+      <div class="w-3.5 h-3.5 border-2 border-accent border-t-transparent rounded-full animate-spin shrink-0"></div>
+      <span id="sync-banner-msg">Syncing…</span>
+      <a href="/sync" class="ml-auto text-xs font-medium underline underline-offset-2 hover:text-accent-hover shrink-0">View progress →</a>
+    </div>
     {% block content %}{% endblock %}
   </main>
 
@@ -525,5 +531,34 @@
 })();
 </script>
 
+<script>
+(function () {
+  var banner = document.getElementById("sync-banner");
+  var bannerMsg = document.getElementById("sync-banner-msg");
+  var timer = null;
+
+  function poll() {
+    fetch("/sync/active")
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.task_id && d.status === "running") {
+          banner.classList.remove("hidden");
+          banner.classList.add("flex");
+          bannerMsg.textContent = d.message || "Syncing…";
+          timer = setTimeout(poll, 2000);
+        } else {
+          banner.classList.add("hidden");
+          banner.classList.remove("flex");
+        }
+      })
+      .catch(function() {
+        banner.classList.add("hidden");
+        banner.classList.remove("flex");
+      });
+  }
+
+  poll();
+})();
+</script>
 </body>
 </html>

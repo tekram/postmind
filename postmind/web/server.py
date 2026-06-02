@@ -52,6 +52,7 @@ _CACHE_TTL = 300  # 5 minutes
 
 # In-memory sync task state: task_id → state dict
 _sync_tasks: dict[str, dict] = {}
+_active_sync_task_id: str | None = None
 
 _oauth_tasks: dict[str, dict] = {}  # task_id → {status, email, error}
 
@@ -812,12 +813,38 @@ async def settings_page(request: Request):
             "agent_autopilot": False,
         })
 
+    total = sum(f.stat().st_size for f in DATA_DIR.rglob("*") if f.is_file())
     ctx.update({
         "data_dir": str(DATA_DIR),
         "credentials_exist": CREDENTIALS_PATH.exists(),
         "token_exists": _is_authed(),
+        "data_size_mb": round(total / (1024 * 1024), 1),
     })
     return _resp(request, "settings.html", ctx)
+
+
+@app.post("/settings/clear-data")
+async def settings_clear_data(request: Request):
+    import shutil
+
+    form = await request.form()
+    keep_auth = form.get("keep_auth") == "1"
+
+    _auth_names = {"credentials.json", "token.json", "tokens", "accounts", "active_account"}
+
+    for item in list(DATA_DIR.iterdir()):
+        if keep_auth and item.name in _auth_names:
+            continue
+        try:
+            if item.is_dir():
+                shutil.rmtree(item)
+            else:
+                item.unlink()
+        except Exception:
+            pass
+
+    _scan_cache.clear()
+    return RedirectResponse("/settings?success=clear_data", status_code=303)
 
 
 @app.post("/accounts/switch")
@@ -1484,18 +1511,31 @@ async def sync_page(request: Request):
     return _resp(request, "sync.html", ctx)
 
 
+_DEEP_RANGES = [
+    ("older_than:10y", "10y+"),
+    ("older_than:5y newer_than:10y", "5–10y"),
+    ("older_than:3y newer_than:5y", "3–5y"),
+    ("older_than:2y newer_than:3y", "2–3y"),
+    ("older_than:1y newer_than:2y", "1–2y"),
+    ("older_than:6m newer_than:1y", "6–12mo"),
+    ("newer_than:6m", "<6mo"),
+]
+
+
 @app.post("/sync/start", response_class=HTMLResponse)
 async def sync_start(request: Request):
     form = await request.form()
     scope = form.get("scope", "inbox")
     raw_limit = int(form.get("limit", "1000"))
     limit = None if raw_limit == 0 else raw_limit
+    deep = form.get("deep") == "1"
     # Where to send the user when the sync finishes. Only same-site relative paths
     # are allowed, so this can't be turned into an open redirect.
     next_url = form.get("next", "/stats")
     if not next_url.startswith("/") or next_url.startswith("//"):
         next_url = "/stats"
 
+    global _active_sync_task_id
     task_id = uuid.uuid4().hex[:8]
     _sync_tasks[task_id] = {
         "status": "running",
@@ -1507,73 +1547,121 @@ async def sync_start(request: Request):
         "started_at": time.time(),
         "next_url": next_url,
     }
+    _active_sync_task_id = task_id
 
     def _run():
+        import json as _json
+        import time as _time
+
+        from postmind.core.gmail_client import GmailClient
+        from postmind.core.storage import EmailRecord, EmailRepo, UndoLogRepo, get_session
+        from sqlalchemy import select as _select
+        from postmind.core.storage import EmailRecord as _ER
+
         state = _sync_tasks[task_id]
         try:
-            import json as _json
-
-            from postmind.core.gmail_client import GmailClient
-            from postmind.core.storage import EmailRecord, EmailRepo, UndoLogRepo, get_session
-
             client = GmailClient()
             profile = client.get_profile()
             account_email = profile.get("emailAddress", "")
-
             state["message"] = f"Connected to {account_email}"
             state["step"] = 1
 
-            query = "in:anywhere -in:trash -in:spam" if scope == "anywhere" else "in:inbox"
-            ids = client.list_message_ids(query=query, max_results=limit)
-            total = len(ids)
-            state["total"] = total
-            state["message"] = f"Found {total:,} emails — fetching metadata…"
-            state["step"] = 2
-
+            base_query = "in:anywhere -in:trash -in:spam" if scope == "anywhere" else "in:inbox"
             session = get_session()
             repo = EmailRepo(session)
             chunk_size = 50
-            saved = 0
 
-            for i in range(0, total, chunk_size):
-                chunk_ids = ids[i : i + chunk_size]
-                messages = client.get_messages_metadata_batch(chunk_ids)
-                records = [
-                    EmailRecord(
-                        account_email=account_email,
-                        gmail_id=msg.id,
-                        thread_id=msg.thread_id,
-                        subject=msg.headers.subject,
-                        sender_email=msg.sender_email,
-                        sender_name=msg.sender_name,
-                        snippet=msg.snippet or "",
-                        label_ids_json=_json.dumps(msg.label_ids),
-                        internal_date=msg.internal_date,
-                        size_estimate=msg.size_estimate,
-                        is_unread=msg.is_unread,
-                        is_inbox=msg.is_inbox,
-                        list_unsubscribe=msg.headers.list_unsubscribe or "",
+            # Load existing IDs once for dedup across all ranges
+            existing_ids: set[str] = set(
+                session.execute(
+                    _select(_ER.gmail_id).where(_ER.account_email == account_email)
+                ).scalars().all()
+            )
+
+            ranges = _DEEP_RANGES if deep else [("", "")]
+            total_saved = 0
+            total_skipped = 0
+
+            for range_filter, range_label in ranges:
+                if range_filter:
+                    q = f"{base_query} {range_filter}"
+                    state["message"] = f"Fetching IDs [{range_label}]…"
+                else:
+                    q = base_query
+
+                try:
+                    ids = client.list_message_ids(query=q, max_results=limit)
+                except Exception as exc:
+                    state["message"] = f"Warning: could not fetch IDs for {range_label}: {exc}"
+                    continue
+
+                if not ids:
+                    continue
+
+                new_ids = [i for i in ids if i not in existing_ids]
+                skipped = len(ids) - len(new_ids)
+                total_skipped += skipped
+
+                range_note = f" [{range_label}]" if deep else ""
+                state["message"] = (
+                    f"Found {len(ids):,}{range_note} — syncing {len(new_ids):,} new…"
+                )
+                state["step"] = 2
+
+                for i in range(0, len(new_ids), chunk_size):
+                    chunk_ids = new_ids[i : i + chunk_size]
+                    try:
+                        messages = client.get_messages_metadata_batch(chunk_ids)
+                    except Exception:
+                        _time.sleep(2)
+                        try:
+                            messages = client.get_messages_metadata_batch(chunk_ids)
+                        except Exception:
+                            continue
+                    records = [
+                        EmailRecord(
+                            account_email=account_email,
+                            gmail_id=msg.id,
+                            thread_id=msg.thread_id,
+                            subject=msg.headers.subject,
+                            sender_email=msg.sender_email,
+                            sender_name=msg.sender_name,
+                            snippet=msg.snippet or "",
+                            label_ids_json=_json.dumps(msg.label_ids),
+                            internal_date=msg.internal_date,
+                            size_estimate=msg.size_estimate,
+                            is_unread=msg.is_unread,
+                            is_inbox=msg.is_inbox,
+                            list_unsubscribe=msg.headers.list_unsubscribe or "",
+                        )
+                        for msg in messages
+                    ]
+                    repo.upsert_many(records)
+                    existing_ids.update(r.gmail_id for r in records)
+                    total_saved += len(records)
+                    state["count"] = total_saved
+                    state["message"] = (
+                        f"Synced {total_saved:,} emails{range_note}…"
+                        if not deep
+                        else f"Synced {total_saved:,} total — current batch {range_label}…"
                     )
-                    for msg in messages
-                ]
-                repo.upsert_many(records)
-                saved += len(records)
-                state["count"] = saved
-                state["message"] = f"Synced {saved:,} / {total:,} emails…"
-                state["step"] = 3
+                    state["step"] = 3
 
-            # Housekeeping
             UndoLogRepo(session).purge_expired()
 
             elapsed = int(time.time() - state["started_at"])
             state["status"] = "done"
-            state["message"] = f"Synced {saved:,} emails in {elapsed}s"
-            state["count"] = saved
+            skip_note = f", {total_skipped:,} already cached" if total_skipped else ""
+            state["message"] = f"Synced {total_saved:,} emails in {elapsed}s{skip_note}"
+            state["count"] = total_saved
 
         except Exception as exc:
             state["status"] = "error"
             state["error"] = str(exc)
             state["message"] = str(exc)
+        finally:
+            global _active_sync_task_id
+            _active_sync_task_id = None
 
     _executor.submit(_run)
 
@@ -1590,6 +1678,20 @@ async def sync_start(request: Request):
   </div>
 </div>"""
     return HTMLResponse(html)
+
+
+@app.get("/sync/active")
+async def sync_active():
+    from fastapi.responses import JSONResponse
+    if _active_sync_task_id and _active_sync_task_id in _sync_tasks:
+        state = _sync_tasks[_active_sync_task_id]
+        return JSONResponse({
+            "task_id": _active_sync_task_id,
+            "status": state["status"],
+            "message": state["message"],
+            "count": state["count"],
+        })
+    return JSONResponse({"task_id": None})
 
 
 @app.get("/sync/poll/{task_id}", response_class=HTMLResponse)

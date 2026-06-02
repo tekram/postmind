@@ -27,6 +27,12 @@
     <p class="text-success text-sm font-medium">Super Agent settings updated.</p>
   </div>
   {% endif %}
+  {% if success == 'clear_data' %}
+  <div class="bg-success-bg border border-success-border rounded-card p-4 mb-6 flex items-center gap-2.5">
+    <svg class="w-4 h-4 shrink-0 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+    <p class="text-success text-sm font-medium">Local cache cleared. Run sync to rebuild.</p>
+  </div>
+  {% endif %}
 
   <!-- AI mode -->
   <div class="pm-card mb-5">
@@ -285,7 +291,7 @@
   </div>
 
   <!-- Data location -->
-  <div class="pm-card">
+  <div class="pm-card mb-5">
     <div class="px-5 py-4 border-b border-hairline">
       <div class="flex items-center gap-2.5">
         <!-- Lucide: database -->
@@ -303,6 +309,10 @@
         <code class="text-xs font-mono text-ink-muted bg-surface-2 px-2 py-1 rounded-chip">{{ data_dir }}</code>
       </div>
       <div class="flex items-center justify-between">
+        <span class="text-sm text-ink-muted">Total size</span>
+        <span class="text-sm font-medium text-ink tabular">{{ data_size_mb }} MB</span>
+      </div>
+      <div class="flex items-center justify-between">
         <span class="text-sm text-ink-muted">OAuth credentials</span>
         <span class="text-xs text-ink-subtle">{% if credentials_exist %}Found{% else %}Not found{% endif %}</span>
       </div>
@@ -313,6 +323,41 @@
       <p class="text-xs text-ink-tertiary pt-3 border-t border-hairline">
         All data lives locally in the directory above. No telemetry, no external sync.
       </p>
+    </div>
+  </div>
+
+  <!-- Clear local cache -->
+  <div class="pm-card">
+    <div class="px-5 py-4 border-b border-hairline">
+      <div class="flex items-center gap-2.5">
+        <!-- Lucide: trash-2 -->
+        <svg class="w-4 h-4 shrink-0 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/>
+        </svg>
+        <p class="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-tertiary">Maintenance</p>
+      </div>
+      <h2 class="font-semibold text-ink mt-2">Clear Local Cache</h2>
+      <p class="text-ink-subtle text-xs mt-0.5">Delete synced email cache, undo logs, and AI classifications to free disk space</p>
+    </div>
+    <div class="p-5">
+      <form id="clear-data-form" action="/settings/clear-data" method="POST" class="space-y-3">
+        <label class="flex items-start gap-3 cursor-pointer">
+          <input type="checkbox" name="keep_auth_checkbox" id="keep-auth-cb" checked
+                 class="mt-0.5 rounded text-accent">
+          <input type="hidden" name="keep_auth" id="keep-auth-hidden" value="1">
+          <div>
+            <p class="text-sm font-medium text-ink">Keep auth tokens</p>
+            <p class="text-xs text-ink-subtle mt-0.5">Uncheck to also remove credentials — you'll need to re-authenticate afterwards</p>
+          </div>
+        </label>
+        <p class="text-xs text-ink-tertiary">
+          Email cache can be rebuilt by running sync again. Auth credentials and account config are kept by default.
+        </p>
+        <button type="button" onclick="confirmClear()"
+                class="pm-btn bg-danger-bg text-danger border border-danger-border hover:bg-danger hover:text-white transition-colors">
+          Clear cache
+        </button>
+      </form>
     </div>
   </div>
 
@@ -331,6 +376,20 @@
       document.getElementById('chat-cloud-config').classList.toggle('hidden', this.value !== 'cloud');
     });
   });
+
+  document.getElementById('keep-auth-cb').addEventListener('change', function() {
+    document.getElementById('keep-auth-hidden').value = this.checked ? '1' : '0';
+  });
+
+  function confirmClear() {
+    var keepAuth = document.getElementById('keep-auth-cb').checked;
+    var msg = keepAuth
+      ? 'Delete all synced email cache, undo logs, and AI data? Auth tokens will be kept.'
+      : 'Delete ALL local data including auth tokens? You will need to re-authenticate.';
+    if (confirm(msg)) {
+      document.getElementById('clear-data-form').submit();
+    }
+  }
 </script>
 
 {% endblock %}

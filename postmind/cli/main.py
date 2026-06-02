@@ -4130,6 +4130,85 @@ def watch(
         console.print("\n[dim]Stopped.[/dim]")
 
 
+# ── clear-data ────────────────────────────────────────────────────────────────
+
+
+@app.command(name="clear-data")
+def clear_data(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+    keep_auth: bool = typer.Option(
+        True,
+        "--keep-auth/--no-keep-auth",
+        help="Keep credentials.json and token files (default: keep).",
+    ),
+) -> None:
+    """Delete all locally cached data — synced emails, undo logs, AI cache, usage stats.
+
+    Auth credentials are kept by default so you don't need to re-authenticate.
+    Re-running ``postmind sync`` will rebuild the local cache from Gmail.
+    """
+    import shutil
+
+    from postmind.config import CREDENTIALS_PATH, DATA_DIR, DB_PATH, TOKENS_DIR, UNDO_LOG_DIR
+
+    # Calculate current disk usage
+    total = sum(f.stat().st_size for f in DATA_DIR.rglob("*") if f.is_file())
+    total_mb = total / (1024 * 1024)
+
+    console.print(f"\n[bold]Local postmind data[/bold]: {DATA_DIR}")
+    console.print(f"[dim]Current size: {total_mb:.1f} MB[/dim]\n")
+
+    what = "synced email cache, undo logs, AI classification cache, usage stats"
+    if not keep_auth:
+        what += ", auth tokens (you will need to re-authenticate)"
+
+    console.print(f"[yellow]Will delete:[/yellow] {what}")
+
+    if not yes:
+        typer.confirm("\nDelete all local data?", abort=True)
+
+    deleted_mb = 0.0
+
+    # Always delete: DB, undo logs, AI cache, usage stats
+    targets = [DB_PATH]
+    if UNDO_LOG_DIR.exists():
+        targets.append(UNDO_LOG_DIR)
+
+    # Other deletable files/dirs in DATA_DIR (usage.json, classification cache, etc.)
+    for item in DATA_DIR.iterdir():
+        if item in targets:
+            continue
+        if keep_auth and item.name in {
+            "credentials.json",
+            "token.json",
+            "tokens",
+            "accounts",
+            "active_account",
+        }:
+            continue
+        targets.append(item)
+
+    for target in targets:
+        if not target.exists():
+            continue
+        size = (
+            sum(f.stat().st_size for f in target.rglob("*") if f.is_file())
+            if target.is_dir()
+            else target.stat().st_size
+        )
+        deleted_mb += size / (1024 * 1024)
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+
+    console.print(f"\n[green]✓[/green]  Cleared {deleted_mb:.1f} MB of local data.")
+    if keep_auth:
+        console.print("[dim]Auth credentials kept. Run [bold]postmind sync[/bold] to rebuild cache.[/dim]")
+    else:
+        console.print("[dim]Run [bold]postmind auth[/bold] to re-authenticate, then [bold]postmind sync[/bold] to rebuild.[/dim]")
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
