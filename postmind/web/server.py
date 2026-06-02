@@ -484,7 +484,7 @@ def _render_brief_links(brief, account_email: str) -> str:
     )
 
     rows = []
-    for item in items[:8]:
+    for item in items:
         sender = _html.escape(str(item.get("sender") or "")[:80])
         subject = _html.escape(str(item.get("subject") or "(no subject)")[:120])
         gid = str(item.get("gmail_id") or "")
@@ -495,9 +495,15 @@ def _render_brief_links(brief, account_email: str) -> str:
             f'</span>'
         )
         if is_gmail and gid:
-            # Gmail's /u/<account>/ path wants a literal '@' (not %40); the
-            # message id is hex, so nothing there needs escaping either.
-            url = f"https://mail.google.com/mail/u/{_quote(account_email, safe='@')}/#all/{_quote(gid, safe='')}"
+            # Gmail's /u/<n>/ segment is a numeric account *index* (0 = default);
+            # putting an email there yields a full-page "Temporary Error (404)".
+            # We pin /u/0/ and disambiguate the account by email via ?authuser=
+            # (verified to open the right message even with multiple accounts).
+            # The message id is the API's hex id, which Gmail resolves in #all/<id>.
+            url = (
+                "https://mail.google.com/mail/u/0/"
+                f"?authuser={_quote(account_email, safe='@')}#all/{_quote(gid, safe='')}"
+            )
             rows.append(
                 f'<a href="{url}" target="_blank" rel="noopener noreferrer" '
                 f'class="group flex items-start gap-2.5 -mx-2 px-2 py-1.5 rounded-button '
