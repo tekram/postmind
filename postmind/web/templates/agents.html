@@ -246,6 +246,18 @@
                     {% endif %}
                   </span>
                 </label>
+                <label class="flex items-start gap-2 cursor-pointer">
+                  <input type="checkbox" name="run_daily_brief" {% if agent.run_daily_brief %}checked{% endif %}
+                         class="mt-0.5 rounded border-hairline-strong text-accent focus:ring-accent">
+                  <span class="text-xs text-ink-muted">
+                    <strong>Generate daily brief</strong>
+                    {% if ai_mode == "off" %}
+                    <span class="text-ink-tertiary block">Shows plain inbox stats each morning. Enable AI in <a href="/settings" class="underline">Settings</a> for a narrative summary.</span>
+                    {% else %}
+                    <span class="text-ink-tertiary block">Once per morning: unread count, high-priority items, overdue follow-ups — narrated by AI.</span>
+                    {% endif %}
+                  </span>
+                </label>
                 <div class="pt-1">
                   <button type="submit"
                           class="pm-btn-secondary text-xs min-h-0 px-3 py-1.5">

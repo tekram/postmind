@@ -305,6 +305,10 @@ async def dashboard(request: Request):
         bns = best_next_step(recs)
         total_reclaimable = reclaimable_mb(recs)
 
+        from postmind.core.storage import DailyBriefRepo
+        from datetime import datetime as _dt, timezone as _tz
+        _today = _dt.now(_tz.utc).date().isoformat()
+        _db_rec = DailyBriefRepo(get_session()).get_today(account_email, _today)
         ctx.update({
             "has_scan": True,
             "scanned_at": scanned_at,
@@ -315,11 +319,87 @@ async def dashboard(request: Request):
             "sender_count": len(groups),
             "best_next": bns,
             "total_emails": total_emails,
+            "daily_brief_preview": {
+                "exists": _db_rec is not None,
+                "snippet": (_db_rec.content[:200] + "…") if _db_rec else None,
+                "ai_used": _db_rec.ai_used if _db_rec else False,
+                "generated_at": _db_rec.generated_at.strftime("%H:%M") if _db_rec else None,
+            },
         })
     else:
         ctx["has_scan"] = False
+        ctx["daily_brief_preview"] = {"exists": False, "snippet": None, "ai_used": False, "generated_at": None}
 
     return _resp(request, "dashboard.html", ctx)
+
+
+# ── Daily Brief ───────────────────────────────────────────────────────────────
+
+
+@app.get("/brief", response_class=HTMLResponse)
+async def brief_page(request: Request):
+    ctx = _base()
+    ctx["active"] = "brief"
+    account_email = _get_web_account() or ""
+
+    if not account_email:
+        return RedirectResponse("/onboarding", status_code=302)
+
+    from postmind.core.storage import DailyBriefRepo, get_session
+    from datetime import datetime as _dt, timezone as _tz
+
+    session = get_session()
+    today_str = _dt.now(_tz.utc).date().isoformat()
+    brief = DailyBriefRepo(session).get_today(account_email, today_str)
+    recent = DailyBriefRepo(session).list_recent(account_email, limit=7)
+    session.close()
+
+    ctx.update({
+        "brief": brief,
+        "recent": recent,
+        "today_str": today_str,
+        "account_email": account_email,
+        "ai_mode": _ai_mode(),
+    })
+    return _resp(request, "daily_brief.html", ctx)
+
+
+@app.post("/brief/generate", response_class=HTMLResponse)
+async def brief_generate(request: Request):
+    """On-demand generation — called by "Generate Now" button via HTMX POST."""
+    import html as _html
+    account_email = _get_web_account() or ""
+    if not account_email:
+        return HTMLResponse("<p class='text-warning text-sm'>No active account.</p>")
+
+    loop = asyncio.get_event_loop()
+
+    def _gen():
+        from postmind.core.daily_brief import DailyBriefGenerator
+        return DailyBriefGenerator(account_email).get_or_generate(force=True)
+
+    try:
+        brief = await loop.run_in_executor(_executor, _gen)
+    except Exception as exc:
+        return HTMLResponse(
+            f"<div class='text-danger text-sm p-3 bg-danger-bg border border-danger-border rounded-card'>"
+            f"Generation failed: {_html.escape(str(exc))}</div>"
+        )
+
+    ai_badge = (
+        '<span class="pm-badge text-accent border-accent-border bg-accent-subtle">AI generated</span>'
+        if brief.ai_used
+        else '<span class="pm-badge">Stats summary</span>'
+    )
+    gen_time = brief.generated_at.strftime("%H:%M UTC") if brief.generated_at else ""
+    content_html = _html.escape(brief.content).replace("\n", "<br>")
+    return HTMLResponse(
+        f'<div id="brief-content">'
+        f'<div class="flex items-center gap-2 mb-3">{ai_badge}'
+        f'<span class="text-ink-tertiary text-xs">Generated at {gen_time}</span></div>'
+        f'<p class="text-ink text-sm leading-relaxed">{content_html}</p>'
+        f'</div>'
+    )
 
 
 # ── Welcome (smart first-run cleanup summary) ──────────────────────────────────
@@ -1224,6 +1304,7 @@ async def agents_page(request: Request):
             "run_rules": a.run_rules if a.run_rules is not None else True,
             "run_followups": a.run_followups if a.run_followups is not None else True,
             "run_avoidance": a.run_avoidance if a.run_avoidance is not None else False,
+            "run_daily_brief": a.run_daily_brief if a.run_daily_brief is not None else False,
         }
         for a in agents
     ]
@@ -1313,6 +1394,7 @@ async def agents_features(request: Request):
         run_rules=form.get("run_rules") == "on",
         run_followups=form.get("run_followups") == "on",
         run_avoidance=form.get("run_avoidance") == "on",
+        run_daily_brief=form.get("run_daily_brief") == "on",
     )
     return RedirectResponse("/agents", status_code=303)
 
@@ -2016,6 +2098,7 @@ async def triage_classify_stream(request: Request):
 # The name — never the path — is what the assistant shows the user.
 _PAGES = {
     "/": {"name": "Dashboard", "desc": "inbox overview at a glance"},
+    "/brief": {"name": "Daily Brief", "desc": "today's AI-generated morning summary of important emails, follow-ups, and action items"},
     "/agent": {"name": "Super Agent", "desc": "natural-language command center that can clean up, unsubscribe, send, and automate (with confirm-first cards)"},
     "/stats": {"name": "Stats", "desc": "senders ranked by storage impact, with a Purge button"},
     "/triage": {"name": "Triage", "desc": "AI-classified unread inbox (priority, category, action)"},
@@ -2908,6 +2991,7 @@ async def agent_create_agent(request: Request):
         run_rules=form.get("run_rules") == "on",
         run_followups=form.get("run_followups") == "on",
         run_avoidance=form.get("run_avoidance") == "on",
+        run_daily_brief=form.get("run_daily_brief") == "on",
     )
     return RedirectResponse("/agents", status_code=303)
 

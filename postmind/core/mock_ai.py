@@ -128,6 +128,40 @@ class MockAIEngine:
             )
         return "\n".join(lines)
 
+    # ── Daily brief ──────────────────────────────────────────────────────────
+
+    def generate_daily_brief(
+        self,
+        today: str,
+        unread_count: int,
+        new_since_yesterday: int,
+        high_priority_items: list[dict],
+        overdue_follow_ups: list[dict],
+        avoided_count: int,
+    ) -> str:
+        lines = [f"[mock brief — {today}]", ""]
+        if unread_count == 0:
+            lines.append("Your inbox is clear. Nothing unread.")
+        else:
+            lines.append(
+                f"You have {unread_count} unread email{'s' if unread_count != 1 else ''}. "
+                f"{new_since_yesterday} arrived since yesterday."
+            )
+        if high_priority_items:
+            lines.append(f"\nAction items ({len(high_priority_items)}):")
+            for item in high_priority_items[:5]:
+                lines.append(f"  • {item['sender']}: {item['subject'][:70]}")
+        if overdue_follow_ups:
+            lines.append(f"\nOverdue follow-ups ({len(overdue_follow_ups)}):")
+            for fu in overdue_follow_ups[:3]:
+                lines.append(
+                    f"  • {fu['to']}: {fu['subject'][:60]} ({fu['days_overdue']}d overdue)"
+                )
+        if avoided_count:
+            lines.append(f"\nAvoided: {avoided_count} email{'s' if avoided_count != 1 else ''} you keep skipping.")
+        lines.append("\nQuick win: Open your oldest unread email and archive it.")
+        return "\n".join(lines)
+
     # ── Avoidance insight ────────────────────────────────────────────────────
 
     def analyze_avoided_email(self, msg: Message) -> str:

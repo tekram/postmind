@@ -363,6 +363,43 @@ Be honest and helpful, not cheerful or corporate.\
 """
         return self._complete(SYSTEM_PROMPT, prompt, max_tokens=512)
 
+    # ── Daily brief ──────────────────────────────────────────────────────────
+
+    def generate_daily_brief(
+        self,
+        today: str,
+        unread_count: int,
+        new_since_yesterday: int,
+        high_priority_items: list[dict],
+        overdue_follow_ups: list[dict],
+        avoided_count: int,
+    ) -> str:
+        """Generate a plain-text morning brief. Privacy-first: sender+subject only, no bodies."""
+        prompt = f"""\
+Generate a concise morning email brief for {today}. Be direct and useful.
+
+Inbox status:
+- Unread: {unread_count}
+- New since yesterday: {new_since_yesterday}
+- High-priority items: {len(high_priority_items)}
+- Overdue follow-ups: {len(overdue_follow_ups)}
+- Emails being avoided (seen 3+ times, not acted on): {avoided_count}
+
+High-priority items (sender + subject only):
+{json.dumps(high_priority_items[:10], indent=2) if high_priority_items else "None"}
+
+Overdue follow-ups:
+{json.dumps(overdue_follow_ups[:5], indent=2) if overdue_follow_ups else "None"}
+
+Write a morning brief in plain text, 200-250 words. Structure:
+1. One-line status
+2. Action items — only what genuinely needs a decision or reply today
+3. One quick win — specific, doable in under 2 minutes
+
+Be honest and direct. No corporate cheerfulness. No filler.\
+"""
+        return self._complete(SYSTEM_PROMPT, prompt, max_tokens=600)
+
     # ── Avoidance analysis ───────────────────────────────────────────────────
 
     def analyze_avoided_email(self, msg: Message) -> str:

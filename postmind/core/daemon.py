@@ -34,6 +34,7 @@ def _triage_account(email: str) -> None:
     run_rules = getattr(agent, "run_rules", True)
     run_followups = getattr(agent, "run_followups", True)
     run_avoidance = getattr(agent, "run_avoidance", False)
+    run_daily_brief = getattr(agent, "run_daily_brief", False)
 
     found_count = 0
     try:
@@ -127,6 +128,19 @@ def _triage_account(email: str) -> None:
                             )
                     except Exception as exc:
                         logger.warning("Heartbeat %s: avoidance detection failed: %s", email, exc)
+
+
+        # Generate daily brief once per calendar day (local DB only — works for all providers)
+        if run_daily_brief:
+            try:
+                from postmind.core.daily_brief import DailyBriefGenerator
+                from postmind.core.storage import DailyBriefRepo
+                today_str = datetime.now(timezone.utc).date().isoformat()
+                if not DailyBriefRepo(get_session()).get_today(email, today_str):
+                    DailyBriefGenerator(email).get_or_generate(force=False)
+                    logger.info("Heartbeat %s: daily brief generated for %s", email, today_str)
+            except Exception as exc:
+                logger.warning("Heartbeat %s: daily brief generation failed: %s", email, exc)
 
     except Exception as exc:
         logger.error("Heartbeat %s failed: %s", email, exc, exc_info=True)
