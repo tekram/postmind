@@ -37,6 +37,7 @@ def test_local_tool_use_loop_runs_tool_then_returns_text():
     eng._mode = "local"
     eng._ollama_url = "http://x"
     eng._ollama_model = "qwen2.5:32b"
+    eng._ollama_headers = {}
 
     r1 = MagicMock(raise_for_status=lambda: None)
     r1.json = lambda: {"message": {"content": "", "tool_calls": [{"function": {"name": "get_inbox_overview", "arguments": "{}"}}]}}

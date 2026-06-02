@@ -23,7 +23,7 @@ def _use_clean_db(clean_db):
 
 def _insert_records(session, records_data: list[dict]) -> None:
     """Insert EmailRecord rows directly into the session for test setup."""
-    from mailtrim.core.storage import EmailRecord
+    from postmind.core.storage import EmailRecord
 
     for d in records_data:
         rec = EmailRecord(**d)
@@ -66,8 +66,8 @@ def _make_record(
 
 
 def test_returns_empty_when_no_data():
-    from mailtrim.core.sender_stats import fetch_sender_groups_from_db
-    from mailtrim.core.storage import get_session
+    from postmind.core.sender_stats import fetch_sender_groups_from_db
+    from postmind.core.storage import get_session
 
     session = get_session()
     groups = fetch_sender_groups_from_db("nobody@example.com")
@@ -76,8 +76,8 @@ def test_returns_empty_when_no_data():
 
 def test_groups_by_sender_email():
     """Multiple messages from the same sender should be merged into one SenderGroup."""
-    from mailtrim.core.sender_stats import fetch_sender_groups_from_db
-    from mailtrim.core.storage import get_session
+    from postmind.core.sender_stats import fetch_sender_groups_from_db
+    from postmind.core.storage import get_session
 
     session = get_session()
     _insert_records(
@@ -97,8 +97,8 @@ def test_groups_by_sender_email():
 
 def test_separates_different_senders():
     """Messages from distinct senders should appear as separate SenderGroups."""
-    from mailtrim.core.sender_stats import fetch_sender_groups_from_db
-    from mailtrim.core.storage import get_session
+    from postmind.core.sender_stats import fetch_sender_groups_from_db
+    from postmind.core.storage import get_session
 
     session = get_session()
     _insert_records(
@@ -118,8 +118,8 @@ def test_separates_different_senders():
 
 def test_min_count_filter():
     """Senders with fewer messages than min_count must be excluded."""
-    from mailtrim.core.sender_stats import fetch_sender_groups_from_db
-    from mailtrim.core.storage import get_session
+    from postmind.core.sender_stats import fetch_sender_groups_from_db
+    from postmind.core.storage import get_session
 
     session = get_session()
     _insert_records(
@@ -139,8 +139,8 @@ def test_min_count_filter():
 
 def test_scope_inbox_only():
     """scope='inbox' must exclude non-inbox records."""
-    from mailtrim.core.sender_stats import fetch_sender_groups_from_db
-    from mailtrim.core.storage import get_session
+    from postmind.core.sender_stats import fetch_sender_groups_from_db
+    from postmind.core.storage import get_session
 
     session = get_session()
     _insert_records(
@@ -161,8 +161,8 @@ def test_scope_inbox_only():
 
 def test_scope_anywhere_includes_archived():
     """scope='anywhere' (default) should include non-inbox records too."""
-    from mailtrim.core.sender_stats import fetch_sender_groups_from_db
-    from mailtrim.core.storage import get_session
+    from postmind.core.sender_stats import fetch_sender_groups_from_db
+    from postmind.core.storage import get_session
 
     session = get_session()
     _insert_records(
@@ -180,8 +180,8 @@ def test_scope_anywhere_includes_archived():
 
 def test_top_n_limits_results():
     """top_n must cap the number of returned SenderGroups."""
-    from mailtrim.core.sender_stats import fetch_sender_groups_from_db
-    from mailtrim.core.storage import get_session
+    from postmind.core.sender_stats import fetch_sender_groups_from_db
+    from postmind.core.storage import get_session
 
     session = get_session()
     # 10 different senders, 2 messages each
@@ -197,8 +197,8 @@ def test_top_n_limits_results():
 
 def test_has_unsubscribe_propagated():
     """has_unsubscribe flag must be True when any message had a List-Unsubscribe header."""
-    from mailtrim.core.sender_stats import fetch_sender_groups_from_db
-    from mailtrim.core.storage import get_session
+    from postmind.core.sender_stats import fetch_sender_groups_from_db
+    from postmind.core.storage import get_session
 
     session = get_session()
     _insert_records(
@@ -216,8 +216,8 @@ def test_has_unsubscribe_propagated():
 
 def test_size_bytes_summed():
     """Total size_bytes of the SenderGroup must equal the sum of its messages."""
-    from mailtrim.core.sender_stats import fetch_sender_groups_from_db
-    from mailtrim.core.storage import get_session
+    from postmind.core.sender_stats import fetch_sender_groups_from_db
+    from postmind.core.storage import get_session
 
     session = get_session()
     _insert_records(
@@ -236,8 +236,8 @@ def test_size_bytes_summed():
 
 def test_impact_scores_assigned():
     """impact_score must be set (non-negative) after fetch_sender_groups_from_db."""
-    from mailtrim.core.sender_stats import fetch_sender_groups_from_db
-    from mailtrim.core.storage import get_session
+    from postmind.core.sender_stats import fetch_sender_groups_from_db
+    from postmind.core.storage import get_session
 
     session = get_session()
     _insert_records(
@@ -257,8 +257,8 @@ def test_impact_scores_assigned():
 
 def test_sort_by_size():
     """sort_by='size' should put the largest sender first."""
-    from mailtrim.core.sender_stats import fetch_sender_groups_from_db
-    from mailtrim.core.storage import get_session
+    from postmind.core.sender_stats import fetch_sender_groups_from_db
+    from postmind.core.storage import get_session
 
     session = get_session()
     _insert_records(
@@ -277,8 +277,8 @@ def test_sort_by_size():
 
 def test_sort_by_count():
     """sort_by='count' should put the sender with the most messages first."""
-    from mailtrim.core.sender_stats import fetch_sender_groups_from_db
-    from mailtrim.core.storage import get_session
+    from postmind.core.sender_stats import fetch_sender_groups_from_db
+    from postmind.core.storage import get_session
 
     session = get_session()
     records = []
@@ -295,8 +295,8 @@ def test_sort_by_count():
 
 def test_isolates_accounts():
     """Records from a different account_email must not appear in results."""
-    from mailtrim.core.sender_stats import fetch_sender_groups_from_db
-    from mailtrim.core.storage import get_session
+    from postmind.core.sender_stats import fetch_sender_groups_from_db
+    from postmind.core.storage import get_session
 
     session = get_session()
     _insert_records(
@@ -317,8 +317,8 @@ def test_isolates_accounts():
 
 def test_sample_subjects_populated():
     """sample_subjects should be non-empty when the DB has subjects."""
-    from mailtrim.core.sender_stats import fetch_sender_groups_from_db
-    from mailtrim.core.storage import get_session
+    from postmind.core.sender_stats import fetch_sender_groups_from_db
+    from postmind.core.storage import get_session
 
     session = get_session()
     _insert_records(

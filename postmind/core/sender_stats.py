@@ -1473,7 +1473,7 @@ def fetch_sender_groups_from_db(
 ) -> list[SenderGroup]:
     """Build sender groups from locally synced DB — no Gmail API calls.
 
-    Requires prior ``mailtrim sync`` to populate the local database.
+    Requires prior ``postmind sync`` to populate the local database.
     Use ``scope="inbox"`` to restrict to inbox-only records.
     Use ``promo_only=True`` to filter to promotional emails only (no LLM needed).
     Use ``newer_than_days`` / ``older_than_days`` to restrict by message age

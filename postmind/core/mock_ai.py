@@ -138,7 +138,9 @@ class MockAIEngine:
         high_priority_items: list[dict],
         overdue_follow_ups: list[dict],
         avoided_count: int,
+        recent_unread: list[dict] | None = None,
     ) -> str:
+        recent_unread = recent_unread or []
         lines = [f"[mock brief — {today}]", ""]
         if unread_count == 0:
             lines.append("Your inbox is clear. Nothing unread.")
@@ -147,10 +149,12 @@ class MockAIEngine:
                 f"You have {unread_count} unread email{'s' if unread_count != 1 else ''}. "
                 f"{new_since_yesterday} arrived since yesterday."
             )
-        if high_priority_items:
-            lines.append(f"\nAction items ({len(high_priority_items)}):")
-            for item in high_priority_items[:5]:
-                lines.append(f"  • {item['sender']}: {item['subject'][:70]}")
+        items = high_priority_items or recent_unread
+        if items:
+            label = "Action items" if high_priority_items else "Latest unread"
+            lines.append(f"\n**{label}:**")
+            for item in items[:5]:
+                lines.append(f"- {item['sender']}: {item['subject'][:70]}")
         if overdue_follow_ups:
             lines.append(f"\nOverdue follow-ups ({len(overdue_follow_ups)}):")
             for fu in overdue_follow_ups[:3]:

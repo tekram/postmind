@@ -84,9 +84,18 @@ def _cache_get() -> dict | None:
 
 
 def _get_web_account() -> str | None:
-    """Return the email address the web UI is currently scoped to."""
+    """Return the email address the web UI is currently scoped to.
+
+    Falls back to the first registered account if the resolved pointer is
+    dangling (e.g. it referenced an account that has since been removed).
+    """
     from postmind.config import get_active_account
-    return _active_web_account or get_active_account()
+    from postmind.core.account_registry import list_accounts
+    email = _active_web_account or get_active_account()
+    accounts = list_accounts()
+    if accounts and not any(a.email == email for a in accounts):
+        return accounts[0].email
+    return email
 
 
 def _is_authed() -> bool:
@@ -336,6 +345,72 @@ async def dashboard(request: Request):
 # ── Daily Brief ───────────────────────────────────────────────────────────────
 
 
+def _render_brief_html(content: str) -> str:
+    """Convert a brief's Markdown to safe, styled HTML.
+
+    The brief is small and LLM-generated, so we do a tight, allow-listed
+    conversion (escape first, then re-introduce only a handful of tags) rather
+    than pull in a full Markdown dependency. Handles bold, inline code, bullet
+    lists, and paragraph/line breaks — the entire vocabulary the brief prompt
+    asks the model to emit.
+    """
+    import html as _html
+    import re as _re
+
+    if not content:
+        return '<p class="text-ink-tertiary text-sm">No brief content.</p>'
+
+    def _inline(text: str) -> str:
+        text = _html.escape(text)
+        # Bold before italics so the ** in **x** isn't eaten by the single-* rule.
+        text = _re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+        text = _re.sub(r"(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)", r"<em>\1</em>", text)
+        text = _re.sub(
+            r"`(.+?)`",
+            r'<code class="bg-surface-2 rounded-chip px-1 text-[12px] font-mono">\1</code>',
+            text,
+        )
+        return text
+
+    blocks: list[str] = []
+    bullets: list[str] = []
+    para: list[str] = []
+
+    def _flush_bullets() -> None:
+        if bullets:
+            items = "".join(f"<li>{b}</li>" for b in bullets)
+            blocks.append(
+                '<ul class="list-disc pl-5 space-y-1 text-ink text-sm leading-relaxed">'
+                f"{items}</ul>"
+            )
+            bullets.clear()
+
+    def _flush_para() -> None:
+        if para:
+            blocks.append(
+                '<p class="text-ink text-sm leading-relaxed">' + " ".join(para) + "</p>"
+            )
+            para.clear()
+
+    for raw in content.splitlines():
+        line = raw.strip()
+        if not line:
+            _flush_bullets()
+            _flush_para()
+            continue
+        m = _re.match(r"^(?:[-*•]|\d+\.)\s+(.*)", line)
+        if m:
+            _flush_para()
+            bullets.append(_inline(m.group(1)))
+        else:
+            _flush_bullets()
+            para.append(_inline(line))
+
+    _flush_bullets()
+    _flush_para()
+    return '<div class="space-y-3">' + "".join(blocks) + "</div>"
+
+
 @app.get("/brief", response_class=HTMLResponse)
 async def brief_page(request: Request):
     ctx = _base()
@@ -356,6 +431,7 @@ async def brief_page(request: Request):
 
     ctx.update({
         "brief": brief,
+        "brief_html": _render_brief_html(brief.content) if brief else "",
         "recent": recent,
         "today_str": today_str,
         "account_email": account_email,
@@ -392,12 +468,12 @@ async def brief_generate(request: Request):
         else '<span class="pm-badge">Stats summary</span>'
     )
     gen_time = brief.generated_at.strftime("%H:%M UTC") if brief.generated_at else ""
-    content_html = _html.escape(brief.content).replace("\n", "<br>")
+    content_html = _render_brief_html(brief.content)
     return HTMLResponse(
-        f'<div id="brief-content">'
-        f'<div class="flex items-center gap-2 mb-3">{ai_badge}'
+        f'<div id="brief-content" class="px-5 py-5">'
+        f'<div class="flex items-center gap-2 mb-4">{ai_badge}'
         f'<span class="text-ink-tertiary text-xs">Generated at {gen_time}</span></div>'
-        f'<p class="text-ink text-sm leading-relaxed">{content_html}</p>'
+        f'{content_html}'
         f'</div>'
     )
 
@@ -983,7 +1059,8 @@ async def accounts_remove(request: Request):
     if not email:
         raise HTTPException(status_code=400)
     from postmind.core.storage import AccountRepo, get_session
-    from postmind.config import token_path_for
+    from postmind.config import token_path_for, get_active_account, set_active_account, ACTIVE_ACCOUNT_PATH
+    from postmind.core.account_registry import list_accounts
     token = token_path_for(email)
     if token.exists():
         token.unlink()
@@ -991,6 +1068,14 @@ async def accounts_remove(request: Request):
     if _active_web_account == email:
         _active_web_account = None
     _scan_cache.pop(email, None)
+    # Repoint the persisted active-account pointer if it referenced the removed
+    # account, otherwise the top bar keeps showing a dangling/removed account.
+    if get_active_account() == email:
+        remaining = list_accounts()  # already filtered to active accounts
+        if remaining:
+            set_active_account(remaining[0].email)
+        else:
+            ACTIVE_ACCOUNT_PATH.unlink(missing_ok=True)
     return RedirectResponse("/accounts?removed=1", status_code=303)
 
 
@@ -1651,6 +1736,8 @@ async def sync_start(request: Request):
         "error": None,
         "started_at": time.time(),
         "next_url": next_url,
+        "detail": "Local cache is up to date",
+        "complete": True,
     }
     _active_sync_task_id = task_id
 
@@ -1668,6 +1755,7 @@ async def sync_start(request: Request):
             client = GmailClient()
             profile = client.get_profile()
             account_email = profile.get("emailAddress", "")
+            mailbox_total = profile.get("messagesTotal", 0)
             state["message"] = f"Connected to {account_email}"
             state["step"] = 1
 
@@ -1684,8 +1772,16 @@ async def sync_start(request: Request):
             )
 
             ranges = _DEEP_RANGES if deep else [("", "")]
+            # Deep sync means "get everything" — never let the numeric limit
+            # truncate a date range, or large ranges (e.g. 50k+ in 10y+) would
+            # be silently capped to the N most-recent emails. The limit only
+            # caps quick (non-deep) syncs.
+            range_limit = None if deep else limit
             total_saved = 0
             total_skipped = 0
+            total_new = 0
+            total_failed = 0
+            found_ids: set[str] = set()
 
             for range_filter, range_label in ranges:
                 if range_filter:
@@ -1695,7 +1791,7 @@ async def sync_start(request: Request):
                     q = base_query
 
                 try:
-                    ids = client.list_message_ids(query=q, max_results=limit)
+                    ids = client.list_message_ids(query=q, max_results=range_limit)
                 except Exception as exc:
                     state["message"] = f"Warning: could not fetch IDs for {range_label}: {exc}"
                     continue
@@ -1703,9 +1799,13 @@ async def sync_start(request: Request):
                 if not ids:
                     continue
 
+                found_ids.update(ids)
                 new_ids = [i for i in ids if i not in existing_ids]
                 skipped = len(ids) - len(new_ids)
                 total_skipped += skipped
+                total_new += len(new_ids)
+                # Drive the progress bar: how many new emails we intend to fetch.
+                state["total"] = total_new
 
                 range_note = f" [{range_label}]" if deep else ""
                 state["message"] = (
@@ -1722,6 +1822,7 @@ async def sync_start(request: Request):
                         try:
                             messages = client.get_messages_metadata_batch(chunk_ids)
                         except Exception:
+                            total_failed += len(chunk_ids)
                             continue
                     records = [
                         EmailRecord(
@@ -1744,6 +1845,8 @@ async def sync_start(request: Request):
                     repo.upsert_many(records)
                     existing_ids.update(r.gmail_id for r in records)
                     total_saved += len(records)
+                    # Items the batch silently dropped (per-message API errors).
+                    total_failed += len(chunk_ids) - len(records)
                     state["count"] = total_saved
                     state["message"] = (
                         f"Synced {total_saved:,} emails{range_note}…"
@@ -1754,11 +1857,42 @@ async def sync_start(request: Request):
 
             UndoLogRepo(session).purge_expired()
 
+            # Record the sync timestamp so re-syncs and the daemon can reason
+            # about freshness.
+            try:
+                from postmind.core.storage import AccountRepo
+                AccountRepo(session).update_last_synced(account_email)
+            except Exception:
+                pass
+
             elapsed = int(time.time() - state["started_at"])
             state["status"] = "done"
             skip_note = f", {total_skipped:,} already cached" if total_skipped else ""
             state["message"] = f"Synced {total_saved:,} emails in {elapsed}s{skip_note}"
             state["count"] = total_saved
+
+            # Honest completeness check: did we cache everything we listed for
+            # this scope? Surface the gap instead of always claiming "up to date".
+            cached_in_scope = len(found_ids & existing_ids)
+            gap = len(found_ids) - cached_in_scope
+            if total_failed:
+                state["detail"] = (
+                    f"{total_failed:,} emails could not be fetched — run sync again to retry."
+                )
+                state["complete"] = False
+            elif gap > 0:
+                state["detail"] = f"{gap:,} emails still not cached — re-run sync to finish."
+                state["complete"] = False
+            elif not deep and mailbox_total and len(existing_ids) < mailbox_total * 0.9:
+                # Quick sync only covered part of the mailbox.
+                state["detail"] = (
+                    f"{len(existing_ids):,} of ~{mailbox_total:,} cached. "
+                    "For your full mailbox, run a Deep sync of All mail."
+                )
+                state["complete"] = False
+            else:
+                state["detail"] = f"Local cache is up to date — {len(existing_ids):,} emails cached."
+                state["complete"] = True
 
         except Exception as exc:
             state["status"] = "error"
@@ -1821,12 +1955,18 @@ async def sync_poll(task_id: str):
     if status == "done":
         next_url = state.get("next_url", "/stats")
         cta = "See your cleanup plan →" if next_url == "/welcome" else "View Stats →"
+        complete = state.get("complete", True)
+        detail = state.get("detail", "Local cache is up to date")
+        box = "bg-green-50 border-green-200" if complete else "bg-amber-50 border-amber-200"
+        head = "text-green-800" if complete else "text-amber-800"
+        sub = "text-green-600" if complete else "text-amber-700"
+        icon = "✓" if complete else "⚠"
         return HTMLResponse(f"""
-<div id="sync-result" class="bg-green-50 border border-green-200 rounded-xl p-4">
+<div id="sync-result" class="{box} border rounded-xl p-4">
   <div class="flex items-center justify-between">
     <div>
-      <p class="text-green-800 font-medium text-sm">✓ {msg}</p>
-      <p class="text-green-600 text-xs mt-0.5">Local cache is up to date</p>
+      <p class="{head} font-medium text-sm">{icon} {msg}</p>
+      <p class="{sub} text-xs mt-0.5">{detail}</p>
     </div>
     <a href="{next_url}" class="bg-teal-600 hover:bg-teal-700 text-white text-xs font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap">
       {cta}

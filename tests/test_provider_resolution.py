@@ -34,7 +34,7 @@ class TestProviderFallback:
     """Provider defaults to 'gmail' when nothing is explicitly set."""
 
     def test_empty_cli_and_empty_settings_returns_gmail(self, monkeypatch):
-        monkeypatch.setenv("MAILTRIM_PROVIDER", "")
+        monkeypatch.setenv("POSTMIND_PROVIDER", "")
         import postmind.config as config
 
         config._settings = None
@@ -42,7 +42,7 @@ class TestProviderFallback:
         assert p == "gmail"
 
     def test_cli_flag_wins_over_settings(self, monkeypatch):
-        monkeypatch.setenv("MAILTRIM_PROVIDER", "gmail")
+        monkeypatch.setenv("POSTMIND_PROVIDER", "gmail")
         import postmind.config as config
 
         config._settings = None
@@ -50,12 +50,12 @@ class TestProviderFallback:
         assert p == "imap"
 
     def test_persisted_gmail_returns_gmail(self):
-        # conftest already sets MAILTRIM_PROVIDER=gmail
+        # conftest already sets POSTMIND_PROVIDER=gmail
         p, *_ = _resolve()
         assert p == "gmail"
 
     def test_persisted_imap_returns_imap(self, monkeypatch):
-        monkeypatch.setenv("MAILTRIM_PROVIDER", "imap")
+        monkeypatch.setenv("POSTMIND_PROVIDER", "imap")
         import postmind.config as config
 
         config._settings = None
@@ -67,9 +67,9 @@ class TestGmailIsolation:
     """When the resolved provider is Gmail, IMAP settings must be zeroed."""
 
     def test_stale_imap_user_zeroed_for_gmail(self, monkeypatch):
-        monkeypatch.setenv("MAILTRIM_PROVIDER", "gmail")
-        monkeypatch.setenv("MAILTRIM_IMAP_USER", "old@example.com")
-        monkeypatch.setenv("MAILTRIM_IMAP_SERVER", "imap.example.com")
+        monkeypatch.setenv("POSTMIND_PROVIDER", "gmail")
+        monkeypatch.setenv("POSTMIND_IMAP_USER", "old@example.com")
+        monkeypatch.setenv("POSTMIND_IMAP_SERVER", "imap.example.com")
         import postmind.config as config
 
         config._settings = None
@@ -93,8 +93,8 @@ class TestGmailIsolation:
 
     def test_no_imap_password_prompt_possible_when_gmail(self, monkeypatch):
         """The IMAP password prompt guard relies on imap_user being empty in Gmail mode."""
-        monkeypatch.setenv("MAILTRIM_PROVIDER", "gmail")
-        monkeypatch.setenv("MAILTRIM_IMAP_USER", "user@example.com")
+        monkeypatch.setenv("POSTMIND_PROVIDER", "gmail")
+        monkeypatch.setenv("POSTMIND_IMAP_USER", "user@example.com")
         import postmind.config as config
 
         config._settings = None
@@ -108,9 +108,9 @@ class TestImapResolution:
     """When provider is IMAP, settings flow through correctly."""
 
     def test_imap_server_from_settings(self, monkeypatch):
-        monkeypatch.setenv("MAILTRIM_PROVIDER", "imap")
-        monkeypatch.setenv("MAILTRIM_IMAP_SERVER", "imap.example.com")
-        monkeypatch.setenv("MAILTRIM_IMAP_USER", "user@example.com")
+        monkeypatch.setenv("POSTMIND_PROVIDER", "imap")
+        monkeypatch.setenv("POSTMIND_IMAP_SERVER", "imap.example.com")
+        monkeypatch.setenv("POSTMIND_IMAP_USER", "user@example.com")
         import postmind.config as config
 
         config._settings = None
@@ -119,8 +119,8 @@ class TestImapResolution:
         assert user == "user@example.com"
 
     def test_cli_flag_overrides_persisted_server(self, monkeypatch):
-        monkeypatch.setenv("MAILTRIM_PROVIDER", "imap")
-        monkeypatch.setenv("MAILTRIM_IMAP_SERVER", "imap.old.com")
+        monkeypatch.setenv("POSTMIND_PROVIDER", "imap")
+        monkeypatch.setenv("POSTMIND_IMAP_SERVER", "imap.old.com")
         import postmind.config as config
 
         config._settings = None
@@ -128,8 +128,8 @@ class TestImapResolution:
         assert server == "imap.new.com"
 
     def test_custom_port_from_settings(self, monkeypatch):
-        monkeypatch.setenv("MAILTRIM_PROVIDER", "imap")
-        monkeypatch.setenv("MAILTRIM_IMAP_PORT", "1993")
+        monkeypatch.setenv("POSTMIND_PROVIDER", "imap")
+        monkeypatch.setenv("POSTMIND_IMAP_PORT", "1993")
         import postmind.config as config
 
         config._settings = None
@@ -137,8 +137,8 @@ class TestImapResolution:
         assert port == 1993
 
     def test_cli_port_overrides_settings_when_nondefault(self, monkeypatch):
-        monkeypatch.setenv("MAILTRIM_PROVIDER", "imap")
-        monkeypatch.setenv("MAILTRIM_IMAP_PORT", "1993")
+        monkeypatch.setenv("POSTMIND_PROVIDER", "imap")
+        monkeypatch.setenv("POSTMIND_IMAP_PORT", "1993")
         import postmind.config as config
 
         config._settings = None
@@ -146,8 +146,8 @@ class TestImapResolution:
         assert port == 2993
 
     def test_custom_folder_from_settings(self, monkeypatch):
-        monkeypatch.setenv("MAILTRIM_PROVIDER", "imap")
-        monkeypatch.setenv("MAILTRIM_IMAP_FOLDER", "Archive")
+        monkeypatch.setenv("POSTMIND_PROVIDER", "imap")
+        monkeypatch.setenv("POSTMIND_IMAP_FOLDER", "Archive")
         import postmind.config as config
 
         config._settings = None
@@ -160,11 +160,11 @@ class TestProviderSwitching:
 
     def test_switch_imap_to_gmail_clears_imap_user(self, monkeypatch):
         """After switching from IMAP to Gmail, imap_user must be empty."""
-        # Simulate: was IMAP, user ran `setup` and chose Gmail → .env now has MAILTRIM_PROVIDER=gmail
-        # and MAILTRIM_IMAP_* cleared. In tests we just set the env accordingly.
-        monkeypatch.setenv("MAILTRIM_PROVIDER", "gmail")
-        monkeypatch.setenv("MAILTRIM_IMAP_USER", "")
-        monkeypatch.setenv("MAILTRIM_IMAP_SERVER", "")
+        # Simulate: was IMAP, user ran `setup` and chose Gmail → .env now has POSTMIND_PROVIDER=gmail
+        # and POSTMIND_IMAP_* cleared. In tests we just set the env accordingly.
+        monkeypatch.setenv("POSTMIND_PROVIDER", "gmail")
+        monkeypatch.setenv("POSTMIND_IMAP_USER", "")
+        monkeypatch.setenv("POSTMIND_IMAP_SERVER", "")
         import postmind.config as config
 
         config._settings = None
@@ -174,9 +174,9 @@ class TestProviderSwitching:
 
     def test_switch_gmail_to_imap_returns_imap(self, monkeypatch):
         """After switching from Gmail to IMAP, provider must be 'imap'."""
-        monkeypatch.setenv("MAILTRIM_PROVIDER", "imap")
-        monkeypatch.setenv("MAILTRIM_IMAP_SERVER", "imap.example.com")
-        monkeypatch.setenv("MAILTRIM_IMAP_USER", "user@example.com")
+        monkeypatch.setenv("POSTMIND_PROVIDER", "imap")
+        monkeypatch.setenv("POSTMIND_IMAP_SERVER", "imap.example.com")
+        monkeypatch.setenv("POSTMIND_IMAP_USER", "user@example.com")
         import postmind.config as config
 
         config._settings = None
@@ -248,7 +248,7 @@ class TestProviderIndicatorInCommands:
 
         from postmind.cli.main import app
 
-        monkeypatch.setenv("MAILTRIM_PROVIDER", "gmail")
+        monkeypatch.setenv("POSTMIND_PROVIDER", "gmail")
         import postmind.config as config
 
         config._settings = None
@@ -267,10 +267,10 @@ class TestProviderIndicatorInCommands:
 
         from postmind.cli.main import app
 
-        monkeypatch.setenv("MAILTRIM_PROVIDER", "imap")
-        monkeypatch.setenv("MAILTRIM_IMAP_SERVER", "imap.example.com")
-        monkeypatch.setenv("MAILTRIM_IMAP_USER", "user@example.com")
-        monkeypatch.setenv("MAILTRIM_IMAP_PASSWORD", "secret")
+        monkeypatch.setenv("POSTMIND_PROVIDER", "imap")
+        monkeypatch.setenv("POSTMIND_IMAP_SERVER", "imap.example.com")
+        monkeypatch.setenv("POSTMIND_IMAP_USER", "user@example.com")
+        monkeypatch.setenv("POSTMIND_IMAP_PASSWORD", "secret")
         import postmind.config as config
 
         config._settings = None
@@ -290,7 +290,7 @@ class TestProviderIndicatorInCommands:
 
         from postmind.cli.main import app
 
-        monkeypatch.setenv("MAILTRIM_PROVIDER", "gmail")
+        monkeypatch.setenv("POSTMIND_PROVIDER", "gmail")
         import postmind.config as config
 
         config._settings = None
@@ -310,7 +310,7 @@ class TestProviderIndicatorInCommands:
 
         from postmind.cli.main import app
 
-        monkeypatch.setenv("MAILTRIM_PROVIDER", "gmail")
+        monkeypatch.setenv("POSTMIND_PROVIDER", "gmail")
         import postmind.config as config
 
         config._settings = None

@@ -18,12 +18,18 @@ class AccountInfo:
 
 
 def list_accounts() -> list[AccountInfo]:
-    """Return all registered accounts ordered by registration time."""
+    """Return registered (active) accounts ordered by registration time.
+
+    Removed accounts are soft-deleted (is_active=False) and excluded here so
+    they no longer appear in the UI/CLI; re-adding reactivates the same row.
+    """
     from postmind.core.storage import AccountRepo, get_session
     from postmind.config import load_account_config
     rows = AccountRepo(get_session()).list_all()
     result = []
     for row in rows:
+        if not row.is_active:
+            continue
         cfg = load_account_config(row.email)
         result.append(AccountInfo(
             email=row.email,

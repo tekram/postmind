@@ -78,7 +78,7 @@ def _invoke_imap(auth_ok: bool = True, groups: list | None = None):
                 "user@imap.example.com",
             ],
             catch_exceptions=False,
-            env={"MAILTRIM_IMAP_PASSWORD": "testpass"},
+            env={"POSTMIND_IMAP_PASSWORD": "testpass"},
         )
 
 

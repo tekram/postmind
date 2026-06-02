@@ -1162,7 +1162,7 @@ def stats(
         account_email = profile.get("emailAddress", "")
         p.update(t, description="Fetching top senders…")
         if from_cache:
-            from mailtrim.core.sender_stats import fetch_sender_groups_from_db
+            from postmind.core.sender_stats import fetch_sender_groups_from_db
             groups = fetch_sender_groups_from_db(
                 account_email,
                 scope=scope,
@@ -2081,7 +2081,7 @@ def sync(
 
     # Load existing IDs from DB once for fast dedup
     from sqlalchemy import select
-    from mailtrim.core.storage import EmailRecord as _ER
+    from postmind.core.storage import EmailRecord as _ER
 
     existing_ids: set[str] = set()
     if skip_existing:
@@ -2108,7 +2108,10 @@ def sync(
             task = progress.add_task(f"Fetching IDs{range_label}…", total=None)
 
             try:
-                ids = client.list_message_ids(query=q, max_results=limit if limit > 0 else None)
+                # Deep sync means "get everything" — don't let a numeric limit
+                # truncate a date range to its N most-recent emails.
+                range_limit = None if (deep or limit <= 0) else limit
+                ids = client.list_message_ids(query=q, max_results=range_limit)
             except Exception as exc:
                 console.print(f"[yellow]Warning: could not fetch IDs for {q}: {exc}[/yellow]")
                 progress.remove_task(task)
@@ -3264,7 +3267,7 @@ def purge(
             )
             raise typer.Exit(1)
         if from_cache:
-            from mailtrim.core.sender_stats import fetch_sender_groups_from_db
+            from postmind.core.sender_stats import fetch_sender_groups_from_db
             groups = fetch_sender_groups_from_db(
                 account_email,
                 scope=scope,

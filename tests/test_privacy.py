@@ -33,7 +33,7 @@ def _invoke(ai_mode: str = "off"):
     from postmind.cli.main import app
 
     return runner.invoke(
-        app, ["privacy"], env={"MAILTRIM_AI_MODE": ai_mode}, catch_exceptions=False
+        app, ["privacy"], env={"POSTMIND_AI_MODE": ai_mode}, catch_exceptions=False
     )
 
 

@@ -28,6 +28,36 @@ from sqlalchemy.orm import sessionmaker
 
 
 @pytest.fixture(autouse=True)
+def _isolate_data_dir(tmp_path, monkeypatch):
+    """
+    Isolate the on-disk data directory (~/.postmind) for every test.
+
+    The config module computes ``DATA_DIR`` and a family of derived path
+    constants (ACCOUNTS_DIR, ACTIVE_ACCOUNT_PATH, TOKENS_DIR, …) at import
+    time.  Without isolation, ``get_active_account()`` and
+    ``load_account_config()`` read the developer's real ~/.postmind, so a
+    persisted IMAP account leaks into tests (and tests that write config
+    pollute the real directory). Repoint every path constant at a fresh
+    per-test temp dir so tests neither read nor write the real directory.
+    """
+    import postmind.config as config
+
+    data_dir = tmp_path / "postmind_home"
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("POSTMIND_DIR", str(data_dir))
+    monkeypatch.setattr(config, "DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr(config, "DB_PATH", data_dir / "postmind.db", raising=False)
+    monkeypatch.setattr(config, "CREDENTIALS_PATH", data_dir / "credentials.json", raising=False)
+    monkeypatch.setattr(config, "TOKEN_PATH", data_dir / "token.json", raising=False)
+    monkeypatch.setattr(config, "UNDO_LOG_DIR", data_dir / "undo_logs", raising=False)
+    monkeypatch.setattr(config, "TOKENS_DIR", data_dir / "tokens", raising=False)
+    monkeypatch.setattr(config, "ACCOUNTS_DIR", data_dir / "accounts", raising=False)
+    monkeypatch.setattr(config, "ACTIVE_ACCOUNT_PATH", data_dir / "active_account", raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_settings(monkeypatch):
     """
     Prevent tests from reading the real ~/.postmind/.env.

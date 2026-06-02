@@ -86,6 +86,17 @@ class DailyBriefGenerator:
                     "subject": r.subject or "(no subject)",
                 })
 
+        # Most-recent unread, so the brief can name concrete emails even when
+        # nothing has been classified yet (classification cache may be empty).
+        recent_unread = [
+            {
+                "sender": r.sender_name or r.sender_email,
+                "subject": r.subject or "(no subject)",
+            }
+            for r in records
+            if r.is_unread
+        ][:8]
+
         due_fus = FollowUpRepo(session).get_due(self.account_email)
         overdue_follow_ups = [
             {
@@ -104,6 +115,7 @@ class DailyBriefGenerator:
             "unread_count": unread_count,
             "new_since_yesterday": new_since_yesterday,
             "high_priority_items": high_priority_items,
+            "recent_unread": recent_unread,
             "overdue_follow_ups": overdue_follow_ups,
             "avoided_count": len(avoided),
         }
@@ -122,6 +134,7 @@ class DailyBriefGenerator:
                     unread_count=stats["unread_count"],
                     new_since_yesterday=stats["new_since_yesterday"],
                     high_priority_items=stats["high_priority_items"],
+                    recent_unread=stats["recent_unread"],
                     overdue_follow_ups=stats["overdue_follow_ups"],
                     avoided_count=stats["avoided_count"],
                 )
@@ -150,6 +163,12 @@ class DailyBriefGenerator:
         if hp:
             lines.append(f"\nAction items ({hp}):")
             for item in stats["high_priority_items"][:5]:
+                lines.append(f"  • {item['sender']}: {item['subject'][:70]}")
+        elif stats.get("recent_unread"):
+            # Nothing classified yet — show the latest unread so the brief is
+            # never empty and the user has something concrete to act on.
+            lines.append("\nLatest unread:")
+            for item in stats["recent_unread"][:5]:
                 lines.append(f"  • {item['sender']}: {item['subject'][:70]}")
 
         if fu:

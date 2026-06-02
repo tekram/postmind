@@ -178,7 +178,7 @@ class TestUndoIMAP:
                 app,
                 args,
                 catch_exceptions=False,
-                env={"MAILTRIM_IMAP_PASSWORD": "testpass"},
+                env={"POSTMIND_IMAP_PASSWORD": "testpass"},
             )
 
     def test_list_shows_recent_operations(self):
@@ -216,7 +216,7 @@ class TestUndoIMAP:
                     "--yes",
                 ],
                 catch_exceptions=False,
-                env={"MAILTRIM_IMAP_PASSWORD": "testpass"},
+                env={"POSTMIND_IMAP_PASSWORD": "testpass"},
             )
 
         assert result.exit_code == 0
@@ -257,7 +257,7 @@ class TestUndoIMAP:
             app,
             ["undo", "--provider", "imap", "--imap-server", "imap.example.com", "--yes"],
             catch_exceptions=False,
-            env={"MAILTRIM_IMAP_PASSWORD": "testpass"},
+            env={"POSTMIND_IMAP_PASSWORD": "testpass"},
         )
         assert result.exit_code == 1
         assert "imap-user" in result.output.lower()

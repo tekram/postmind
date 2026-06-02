@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import functools
 import logging
+import random
 import time
 from dataclasses import dataclass, field
 from email.mime.text import MIMEText
@@ -35,11 +36,31 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
+# Gmail signals per-user rate limiting with reason strings that can arrive on
+# EITHER a 429 or — critically — a 403. A 403 with one of these reasons is
+# transient and must be retried; a plain 403 (auth / permission) must not be.
+_RATE_LIMIT_REASONS = (
+    "rateLimitExceeded",
+    "userRateLimitExceeded",
+    "quotaExceeded",
+    "Quota exceeded",
+)
 
-def _with_retry(max_attempts: int = 4, base_delay: float = 1.0) -> Callable[[F], F]:
+
+def _is_rate_limit(exc: HttpError) -> bool:
+    """True when an HttpError is a transient rate/quota limit (429 or 403)."""
+    text = str(exc)
+    return any(reason in text for reason in _RATE_LIMIT_REASONS)
+
+
+def _with_retry(max_attempts: int = 7, base_delay: float = 2.0) -> Callable[[F], F]:
     """
-    Decorator: retry on transient Gmail API errors (429, 5xx) with
-    exponential backoff. Raises on non-retryable errors immediately.
+    Decorator: retry on transient Gmail API errors with exponential backoff.
+
+    Retries on 429/5xx and on rate-limit / quota errors (which Gmail returns as
+    403 *or* 429). Per-user "queries per minute" quota needs up to ~60s to reset,
+    so rate-limit errors wait at least 30s before retrying. Non-transient errors
+    (auth, permission, bad request) raise immediately.
     """
 
     def decorator(fn: F) -> F:
@@ -50,17 +71,23 @@ def _with_retry(max_attempts: int = 4, base_delay: float = 1.0) -> Callable[[F],
                 try:
                     return fn(*args, **kwargs)
                 except HttpError as exc:
-                    if exc.status_code not in _RETRYABLE_STATUS or attempt == max_attempts - 1:
+                    rate_limited = _is_rate_limit(exc)
+                    retryable = exc.status_code in _RETRYABLE_STATUS or rate_limited
+                    if not retryable or attempt == max_attempts - 1:
                         raise
+                    # Per-minute quota needs a long cool-off; transient 5xx less so.
+                    wait = max(delay, 30.0) if rate_limited else delay
+                    wait += random.uniform(0, wait * 0.25)  # jitter
                     logger.warning(
-                        "Gmail API %s on attempt %d/%d — retrying in %.1fs",
+                        "Gmail API %s%s on attempt %d/%d — retrying in %.0fs",
                         exc.status_code,
+                        " (rate limit)" if rate_limited else "",
                         attempt + 1,
                         max_attempts,
-                        delay,
+                        wait,
                     )
-                    time.sleep(delay)
-                    delay *= 2
+                    time.sleep(wait)
+                    delay = min(delay * 2, 64.0)
 
         return wrapper  # type: ignore[return-value]
 

@@ -20,16 +20,53 @@
   </div>
   {% endif %}
 
-  <div class="pm-card">
-    <div class="px-5 py-4 border-b border-hairline">
-      <h2 class="font-medium text-ink flex items-center gap-2">
-        <!-- Lucide: refresh-cw -->
-        <svg class="w-4 h-4 text-ink-subtle shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-        </svg>
-        Sync options
-      </h2>
+  <!-- Primary action: foolproof full-mailbox sync -->
+  <div class="pm-card mb-5 border-accent/30">
+    <div class="p-5">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h2 class="font-medium text-ink">Sync your entire mailbox</h2>
+          <p class="text-ink-subtle text-sm mt-1">
+            Caches every email — inbox, archived and sent, all the way back. Recommended
+            for your first sync. Large mailboxes (50k+) can take several minutes and pause
+            briefly when Gmail rate-limits; it resumes automatically and picks up where it
+            left off if you re-run it.
+          </p>
+        </div>
+      </div>
+      <form action="/sync/start" method="POST"
+            hx-post="/sync/start"
+            hx-target="#sync-status"
+            hx-swap="innerHTML"
+            hx-disabled-elt="#full-sync-btn"
+            class="mt-4">
+        <input type="hidden" name="scope" value="anywhere">
+        <input type="hidden" name="limit" value="0">
+        <input type="hidden" name="deep" value="1">
+        <button id="full-sync-btn" type="submit"
+                {% if not is_authed %}disabled{% endif %}
+                class="pm-btn">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+          Sync entire mailbox
+        </button>
+      </form>
     </div>
+  </div>
+
+  <details class="pm-card group">
+    <summary class="px-5 py-4 border-b border-hairline cursor-pointer list-none flex items-center justify-between">
+      <span class="font-medium text-ink flex items-center gap-2">
+        <!-- Lucide: sliders -->
+        <svg class="w-4 h-4 text-ink-subtle shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
+        </svg>
+        Custom sync options
+      </span>
+      <span class="text-ink-tertiary text-xs group-open:hidden">Show</span>
+      <span class="text-ink-tertiary text-xs hidden group-open:inline">Hide</span>
+    </summary>
     <div class="p-5">
       <form id="sync-form" action="/sync/start" method="POST"
             hx-post="/sync/start"
@@ -108,11 +145,11 @@
 
       </form>
 
-      <!-- Progress area (HTMX target) -->
-      <div id="sync-status" class="mt-5"></div>
-
     </div>
-  </div>
+  </details>
+
+  <!-- Progress area (HTMX target) — shared by both sync forms -->
+  <div id="sync-status" class="mt-5"></div>
 
   <!-- Info card -->
   <div class="bg-surface-2 border border-hairline rounded-card p-4 mt-5">

@@ -168,7 +168,7 @@ def test_avoidance_view_tracking():
 
 def test_upsert_many_inserts_all():
     """upsert_many should insert all records in a single pass."""
-    from mailtrim.core.storage import EmailRecord, EmailRepo, get_session
+    from postmind.core.storage import EmailRecord, EmailRepo, get_session
 
     session = get_session()
     repo = EmailRepo(session)
@@ -200,7 +200,7 @@ def test_upsert_many_inserts_all():
 
 def test_upsert_many_updates_on_conflict():
     """upsert_many on an existing gmail_id should UPDATE the row, not insert a duplicate."""
-    from mailtrim.core.storage import EmailRecord, EmailRepo, get_session
+    from postmind.core.storage import EmailRecord, EmailRepo, get_session
 
     session = get_session()
     repo = EmailRepo(session)
@@ -241,14 +241,14 @@ def test_upsert_many_updates_on_conflict():
     assert rec is not None
     assert rec.subject == "Updated Subject"
     # There should be exactly one row with this gmail_id
-    from mailtrim.core.storage import EmailRecord as ER
+    from postmind.core.storage import EmailRecord as ER
     count = session.query(ER).filter_by(gmail_id="conflict_id").count()
     assert count == 1
 
 
 def test_upsert_many_empty_list_no_crash():
     """upsert_many([]) must be a no-op — no exception raised."""
-    from mailtrim.core.storage import EmailRepo, get_session
+    from postmind.core.storage import EmailRepo, get_session
 
     repo = EmailRepo(get_session())
     repo.upsert_many([])  # should not raise
@@ -256,7 +256,7 @@ def test_upsert_many_empty_list_no_crash():
 
 def test_existing_gmail_ids_returns_set():
     """existing_gmail_ids should return the set of gmail_ids for an account."""
-    from mailtrim.core.storage import EmailRecord, EmailRepo, get_session
+    from postmind.core.storage import EmailRecord, EmailRepo, get_session
 
     session = get_session()
     repo = EmailRepo(session)
@@ -286,7 +286,7 @@ def test_existing_gmail_ids_returns_set():
 
 def test_existing_gmail_ids_ignores_other_accounts():
     """existing_gmail_ids must only return IDs for the requested account."""
-    from mailtrim.core.storage import EmailRecord, EmailRepo, get_session
+    from postmind.core.storage import EmailRecord, EmailRepo, get_session
 
     session = get_session()
     repo = EmailRepo(session)

@@ -121,7 +121,7 @@
     </div>
     <div class="px-5 py-4">
       {% if daily_brief_preview and daily_brief_preview.exists %}
-      <p class="text-ink-muted text-sm leading-relaxed">{{ daily_brief_preview.snippet }}</p>
+      <p class="text-ink-muted text-sm leading-relaxed">{{ daily_brief_preview.snippet | replace("**", "") | replace("`", "") | replace("#", "") | replace("- ", "") }}</p>
       <p class="text-ink-tertiary text-xs mt-2">Generated at {{ daily_brief_preview.generated_at }}</p>
       {% else %}
       <div class="flex items-center justify-between">

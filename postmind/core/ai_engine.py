@@ -390,32 +390,62 @@ Be honest and helpful, not cheerful or corporate.\
         high_priority_items: list[dict],
         overdue_follow_ups: list[dict],
         avoided_count: int,
+        recent_unread: list[dict] | None = None,
     ) -> str:
-        """Generate a plain-text morning brief. Privacy-first: sender+subject only, no bodies."""
+        """Generate a morning brief. Privacy-first: sender+subject only, no bodies.
+
+        Output is Markdown (bold section labels + bullet lists), rendered by the UI.
+        """
+        recent_unread = recent_unread or []
+
+        # Deterministic, always-accurate status line. We compute this ourselves
+        # rather than trust the model — small local models routinely contradict
+        # the numbers (e.g. claiming "inbox clear" with 456 unread). The model
+        # only writes the narrative below it.
+        parts = [f"{unread_count} unread"]
+        if new_since_yesterday:
+            parts.append(f"{new_since_yesterday} new since yesterday")
+        if high_priority_items:
+            parts.append(f"{len(high_priority_items)} high-priority")
+        if overdue_follow_ups:
+            parts.append(f"{len(overdue_follow_ups)} overdue follow-up"
+                         f"{'s' if len(overdue_follow_ups) != 1 else ''}")
+        status_line = "**Inbox:** " + ", ".join(parts) + "."
+
+        # The attention list is grounded in real emails (high-priority first,
+        # else most-recent unread) so it never depends on the model inventing
+        # senders or subjects.
+        attention = high_priority_items or recent_unread
+
         prompt = f"""\
-Generate a concise morning email brief for {today}. Be direct and useful.
+Write the body of a morning email brief for {today} in GitHub-flavored Markdown.
 
-Inbox status:
-- Unread: {unread_count}
-- New since yesterday: {new_since_yesterday}
-- High-priority items: {len(high_priority_items)}
-- Overdue follow-ups: {len(overdue_follow_ups)}
-- Emails being avoided (seen 3+ times, not acted on): {avoided_count}
-
-High-priority items (sender + subject only):
-{json.dumps(high_priority_items[:10], indent=2) if high_priority_items else "None"}
+These emails need attention (sender + subject only — use exactly these, do not \
+invent others):
+{json.dumps(attention[:8], indent=2, ensure_ascii=False) if attention else "None — inbox is empty."}
 
 Overdue follow-ups:
-{json.dumps(overdue_follow_ups[:5], indent=2) if overdue_follow_ups else "None"}
+{json.dumps(overdue_follow_ups[:5], indent=2, ensure_ascii=False) if overdue_follow_ups else "None"}
 
-Write a morning brief in plain text, 200-250 words. Structure:
-1. One-line status
-2. Action items — only what genuinely needs a decision or reply today
-3. One quick win — specific, doable in under 2 minutes
+Emails being avoided (seen 3+ times, not acted on): {avoided_count}
 
-Be honest and direct. No corporate cheerfulness. No filler.\
+Write exactly two sections, nothing else (no status line — that is added \
+separately, and no preamble):
+
+**What needs attention**
+- A short bullet per email above (sender — subject), with at most a 6-word note \
+on why it matters. If the list is "None", write one line saying the inbox is \
+clear instead of a list.
+
+**Quick win**
+One specific action doable in under 2 minutes, referencing a real email above \
+when possible.
+
+Use `**bold**` for the two section labels and `- ` for bullets. Be direct. No \
+corporate cheerfulness, no filler.\
 """
-        return self._complete(SYSTEM_PROMPT, prompt, max_tokens=600)
+        body = self._complete(SYSTEM_PROMPT, prompt, max_tokens=600)
+        return f"{status_line}\n\n{body.strip()}"
 
     # ── Avoidance analysis ───────────────────────────────────────────────────
 
