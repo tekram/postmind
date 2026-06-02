@@ -140,31 +140,22 @@ class MockAIEngine:
         avoided_count: int,
         recent_unread: list[dict] | None = None,
     ) -> str:
+        # Mirror the real engine's new contract: just a short "Quick win" — no
+        # status line and no email list (both are rendered deterministically by
+        # the UI from the stored brief row).
         recent_unread = recent_unread or []
-        lines = [f"[mock brief — {today}]", ""]
-        if unread_count == 0:
-            lines.append("Your inbox is clear. Nothing unread.")
-        else:
-            lines.append(
-                f"You have {unread_count} unread email{'s' if unread_count != 1 else ''}. "
-                f"{new_since_yesterday} arrived since yesterday."
-            )
         items = high_priority_items or recent_unread
         if items:
-            label = "Action items" if high_priority_items else "Latest unread"
-            lines.append(f"\n**{label}:**")
-            for item in items[:5]:
-                lines.append(f"- {item['sender']}: {item['subject'][:70]}")
-        if overdue_follow_ups:
-            lines.append(f"\nOverdue follow-ups ({len(overdue_follow_ups)}):")
-            for fu in overdue_follow_ups[:3]:
-                lines.append(
-                    f"  • {fu['to']}: {fu['subject'][:60]} ({fu['days_overdue']}d overdue)"
-                )
-        if avoided_count:
-            lines.append(f"\nAvoided: {avoided_count} email{'s' if avoided_count != 1 else ''} you keep skipping.")
-        lines.append("\nQuick win: Open your oldest unread email and archive it.")
-        return "\n".join(lines)
+            top = items[0]
+            return (
+                "**Quick win**\n"
+                f"[mock] Open \"{top['subject'][:60]}\" from {top['sender']} and "
+                "reply or archive it — under 2 minutes."
+            )
+        return (
+            "**Quick win**\n"
+            "[mock] Inbox is clear — pick your oldest unread email and archive it."
+        )
 
     # ── Avoidance insight ────────────────────────────────────────────────────
 

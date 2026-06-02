@@ -392,36 +392,27 @@ Be honest and helpful, not cheerful or corporate.\
         avoided_count: int,
         recent_unread: list[dict] | None = None,
     ) -> str:
-        """Generate a morning brief. Privacy-first: sender+subject only, no bodies.
+        """Generate the "Quick win" of a morning brief. Privacy-first: sender+subject
+        only, no bodies.
 
-        Output is Markdown (bold section labels + bullet lists), rendered by the UI.
+        The status line and the "what needs attention" email list are now rendered
+        deterministically server-side from the stored brief row — the model only
+        writes a single short "Quick win" action. We still feed the attention emails
+        and overdue follow-ups in as grounding context so the suggested action can
+        reference a real email. Output is Markdown (a bold section label + a short
+        narrative), rendered by the UI.
         """
         recent_unread = recent_unread or []
 
-        # Deterministic, always-accurate status line. We compute this ourselves
-        # rather than trust the model — small local models routinely contradict
-        # the numbers (e.g. claiming "inbox clear" with 456 unread). The model
-        # only writes the narrative below it.
-        parts = [f"{unread_count} unread"]
-        if new_since_yesterday:
-            parts.append(f"{new_since_yesterday} new since yesterday")
-        if high_priority_items:
-            parts.append(f"{len(high_priority_items)} high-priority")
-        if overdue_follow_ups:
-            parts.append(f"{len(overdue_follow_ups)} overdue follow-up"
-                         f"{'s' if len(overdue_follow_ups) != 1 else ''}")
-        status_line = "**Inbox:** " + ", ".join(parts) + "."
-
-        # The attention list is grounded in real emails (high-priority first,
-        # else most-recent unread) so it never depends on the model inventing
-        # senders or subjects.
+        # Grounding context only — the model picks one of these to base the quick
+        # win on; it never re-lists them (that list is rendered separately).
         attention = high_priority_items or recent_unread
 
         prompt = f"""\
-Write the body of a morning email brief for {today} in GitHub-flavored Markdown.
+You are writing the "Quick win" of a morning email brief for {today}.
 
-These emails need attention (sender + subject only — use exactly these, do not \
-invent others):
+For context, these emails need attention (sender + subject only — use exactly \
+these, do not invent others):
 {json.dumps(attention[:8], indent=2, ensure_ascii=False) if attention else "None — inbox is empty."}
 
 Overdue follow-ups:
@@ -429,23 +420,18 @@ Overdue follow-ups:
 
 Emails being avoided (seen 3+ times, not acted on): {avoided_count}
 
-Write exactly two sections, nothing else (no status line — that is added \
-separately, and no preamble):
-
-**What needs attention**
-- A short bullet per email above (sender — subject), with at most a 6-word note \
-on why it matters. If the list is "None", write one line saying the inbox is \
-clear instead of a list.
+Write ONLY a single section, nothing else (no status line, no email list, no \
+preamble):
 
 **Quick win**
 One specific action doable in under 2 minutes, referencing a real email above \
-when possible.
+when possible. 1–3 sentences.
 
-Use `**bold**` for the two section labels and `- ` for bullets. Be direct. No \
-corporate cheerfulness, no filler.\
+Use `**Quick win**` for the section label. Be direct. No corporate \
+cheerfulness, no filler.\
 """
-        body = self._complete(SYSTEM_PROMPT, prompt, max_tokens=600)
-        return f"{status_line}\n\n{body.strip()}"
+        body = self._complete(SYSTEM_PROMPT, prompt, max_tokens=300)
+        return body.strip()
 
     # ── Avoidance analysis ───────────────────────────────────────────────────
 

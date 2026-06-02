@@ -411,6 +411,106 @@ def _render_brief_html(content: str) -> str:
     return '<div class="space-y-3">' + "".join(blocks) + "</div>"
 
 
+def _render_brief_status(brief) -> str:
+    """Render the brief's deterministic status line from its stored count columns.
+
+    Always shows unread; appends the non-zero clauses (new since yesterday,
+    high-priority, overdue follow-ups). Computed here — never trusted to the LLM —
+    so the numbers always match the stat cards above.
+    """
+    unread = getattr(brief, "unread_count", 0) or 0
+    new = getattr(brief, "new_since_yesterday", 0) or 0
+    high = getattr(brief, "high_priority_count", 0) or 0
+    overdue = getattr(brief, "overdue_followups_count", 0) or 0
+
+    parts = [f"{unread} unread"]
+    if new:
+        parts.append(f"{new} new since yesterday")
+    if high:
+        parts.append(f"{high} high-priority")
+    if overdue:
+        parts.append(f"{overdue} overdue follow-up{'s' if overdue != 1 else ''}")
+
+    line = " · ".join(parts)
+    return (
+        '<p class="text-ink text-sm leading-relaxed">'
+        '<span class="font-semibold text-ink">Inbox:</span> '
+        f'<span class="text-ink-subtle">{line}</span></p>'
+    )
+
+
+def _render_brief_links(brief, account_email: str) -> str:
+    """Render the brief's identified emails as the "What needs attention" list.
+
+    Each row deep-links into Gmail's web UI for that message
+    (``…/mail/u/<account>/#all/<id>``). IMAP accounts have no web equivalent,
+    so their rows render as plain (non-link) text. When the brief stored no
+    items, renders a single calm empty-state line instead of an empty list.
+    """
+    import html as _html
+    import json as _json
+    from urllib.parse import quote as _quote
+
+    def _section(inner: str) -> str:
+        return (
+            '<div class="mt-5 pt-4 border-t border-hairline">'
+            '<p class="text-ink-subtle text-[11px] font-semibold uppercase tracking-[0.06em] mb-2">'
+            'What needs attention</p>'
+            f'{inner}'
+            '</div>'
+        )
+
+    items = []
+    raw = getattr(brief, "items_json", None)
+    if raw:
+        try:
+            items = [i for i in _json.loads(raw) if isinstance(i, dict)]
+        except (ValueError, TypeError):
+            items = []
+    if not items:
+        return _section(
+            '<p class="text-ink-tertiary text-sm">Nothing needs your attention right now.</p>'
+        )
+
+    from postmind.config import load_account_config
+    is_gmail = load_account_config(account_email).get("provider", "gmail") == "gmail"
+
+    # External-link glyph, shown only for clickable (Gmail) rows.
+    icon = (
+        '<svg class="w-3.5 h-3.5 shrink-0 mt-0.5 text-ink-tertiary group-hover:text-accent transition-colors" '
+        'fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">'
+        '<path stroke-linecap="round" stroke-linejoin="round" '
+        'd="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>'
+    )
+
+    rows = []
+    for item in items[:8]:
+        sender = _html.escape(str(item.get("sender") or "")[:80])
+        subject = _html.escape(str(item.get("subject") or "(no subject)")[:120])
+        gid = str(item.get("gmail_id") or "")
+        inner = (
+            f'<span class="min-w-0 flex-1">'
+            f'<span class="block text-ink text-sm font-medium truncate">{subject}</span>'
+            f'<span class="block text-ink-tertiary text-xs truncate">{sender}</span>'
+            f'</span>'
+        )
+        if is_gmail and gid:
+            # Gmail's /u/<account>/ path wants a literal '@' (not %40); the
+            # message id is hex, so nothing there needs escaping either.
+            url = f"https://mail.google.com/mail/u/{_quote(account_email, safe='@')}/#all/{_quote(gid, safe='')}"
+            rows.append(
+                f'<a href="{url}" target="_blank" rel="noopener noreferrer" '
+                f'class="group flex items-start gap-2.5 -mx-2 px-2 py-1.5 rounded-button '
+                f'hover:bg-surface-2 transition-colors">{icon}{inner}</a>'
+            )
+        else:
+            rows.append(
+                f'<div class="flex items-start gap-2.5 px-0 py-1.5">{inner}</div>'
+            )
+
+    return _section(f'<div class="space-y-0.5">{"".join(rows)}</div>')
+
+
 @app.get("/brief", response_class=HTMLResponse)
 async def brief_page(request: Request):
     ctx = _base()
@@ -431,6 +531,8 @@ async def brief_page(request: Request):
 
     ctx.update({
         "brief": brief,
+        "brief_status_html": _render_brief_status(brief) if brief else "",
+        "brief_links_html": _render_brief_links(brief, account_email) if brief else "",
         "brief_html": _render_brief_html(brief.content) if brief else "",
         "recent": recent,
         "today_str": today_str,
@@ -468,12 +570,14 @@ async def brief_generate(request: Request):
         else '<span class="pm-badge">Stats summary</span>'
     )
     gen_time = brief.generated_at.strftime("%H:%M UTC") if brief.generated_at else ""
+    status_html = _render_brief_status(brief)
+    links_html = _render_brief_links(brief, account_email)
     content_html = _render_brief_html(brief.content)
     return HTMLResponse(
         f'<div id="brief-content" class="px-5 py-5">'
         f'<div class="flex items-center gap-2 mb-4">{ai_badge}'
         f'<span class="text-ink-tertiary text-xs">Generated at {gen_time}</span></div>'
-        f'{content_html}'
+        f'{status_html}{links_html}{content_html}'
         f'</div>'
     )
 

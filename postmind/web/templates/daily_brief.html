@@ -81,6 +81,8 @@
 
     <div class="px-5 py-5" id="brief-content">
       {% if brief %}
+      {{ brief_status_html | safe }}
+      {{ brief_links_html | safe }}
       {{ brief_html | safe }}
       {% if brief.generated_at %}
       <p class="text-ink-tertiary text-xs mt-4 pt-3 border-t border-hairline">Generated {{ brief.generated_at.strftime("%H:%M UTC") }}</p>

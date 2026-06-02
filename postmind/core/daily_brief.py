@@ -38,6 +38,13 @@ class DailyBriefGenerator:
         stats = self._gather_stats()
         content, ai_used = self._generate_content(stats)
 
+        # Persist the emails the brief is actually about (high-priority first,
+        # else the recent unread it surfaced) so the UI can render deep links
+        # to each one. Mirrors the "attention" set the AI narrative describes.
+        import json
+        identified = stats["high_priority_items"] or stats["recent_unread"]
+        items_json = json.dumps(identified[:8]) if identified else None
+
         brief = DailyBrief(
             account_email=self.account_email,
             brief_date=today_str,
@@ -48,6 +55,7 @@ class DailyBriefGenerator:
             high_priority_count=len(stats["high_priority_items"]),
             overdue_followups_count=len(stats["overdue_follow_ups"]),
             avoided_count=stats["avoided_count"],
+            items_json=items_json,
         )
         return repo.save(brief)
 
@@ -82,7 +90,8 @@ class DailyBriefGenerator:
             cls = cached_cls.get(r.gmail_id, {})
             if cls.get("priority") == "high" or cls.get("category") == "action_required":
                 high_priority_items.append({
-                    "sender": r.sender_email,
+                    "gmail_id": r.gmail_id,
+                    "sender": r.sender_name or r.sender_email,
                     "subject": r.subject or "(no subject)",
                 })
 
@@ -90,6 +99,7 @@ class DailyBriefGenerator:
         # nothing has been classified yet (classification cache may be empty).
         recent_unread = [
             {
+                "gmail_id": r.gmail_id,
                 "sender": r.sender_name or r.sender_email,
                 "subject": r.subject or "(no subject)",
             }

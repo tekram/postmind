@@ -2,6 +2,25 @@
 
 from __future__ import annotations
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_real_gmail_auth(monkeypatch):
+    """Never trigger the interactive OAuth flow during diagnostics tests.
+
+    ``run_all`` invokes ``check_gmail_connection`` / ``check_trash_access`` which
+    call ``authenticate()``. Without a cached token that drops into
+    ``run_local_server()`` and blocks forever waiting on a browser callback.
+    Force it to fail fast so the checks return a normal (failed) CheckResult.
+    """
+
+    def _raise(*_args, **_kwargs):
+        raise FileNotFoundError("Gmail auth disabled in tests")
+
+    monkeypatch.setattr("postmind.core.gmail_client.authenticate", _raise)
+
+
 # ── CheckResult dataclass ────────────────────────────────────────────────────
 
 

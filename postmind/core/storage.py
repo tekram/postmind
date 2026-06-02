@@ -232,6 +232,9 @@ def _run_migrations(engine) -> None:
         "accounts": [
             ("welcomed_at", "DATETIME"),
         ],
+        "daily_briefs": [
+            ("items_json", "TEXT"),
+        ],
     }
     with engine.connect() as conn:
         for table, cols in new_columns.items():
@@ -659,6 +662,9 @@ class DailyBrief(Base):
     high_priority_count = Column(Integer, default=0)
     overdue_followups_count = Column(Integer, default=0)
     avoided_count = Column(Integer, default=0)
+    # JSON list of the emails the brief identified, each {gmail_id, sender,
+    # subject}, so the UI can render clickable "open in Gmail" deep links.
+    items_json = Column(Text, nullable=True)
     generated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -705,6 +711,7 @@ class DailyBriefRepo:
             for col in (
                 "content", "ai_used", "unread_count", "new_since_yesterday",
                 "high_priority_count", "overdue_followups_count", "avoided_count",
+                "items_json",
             ):
                 setattr(existing, col, getattr(brief, col))
             existing.generated_at = datetime.now(timezone.utc)
