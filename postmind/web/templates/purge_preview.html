@@ -93,14 +93,12 @@
     {% endfor %}
     <input type="hidden" name="action" value="{{ action }}">
     <div class="flex items-center gap-3">
-      <button type="submit" class="{{ 'pm-btn' if is_archive else 'pm-btn-danger' }}">
+      <button type="submit" id="confirm-btn" class="{{ 'pm-btn' if is_archive else 'pm-btn-danger' }}">
         {% if is_archive %}
-        <!-- Lucide: archive -->
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
           <path stroke-linecap="round" stroke-linejoin="round" d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/>
         </svg>
         {% else %}
-        <!-- Lucide: trash-2 -->
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
           <path stroke-linecap="round" stroke-linejoin="round" d="M3 6h18M19 6l-.867 12.142A2 2 0 0116.138 20H7.862a2 2 0 01-1.995-1.858L5 6m3 0V4a1 1 0 011-1h6a1 1 0 011 1v2M10 11v6M14 11v6"/>
         </svg>
@@ -112,6 +110,34 @@
       </a>
     </div>
   </form>
+
+  <!-- Progress overlay (shown on submit) -->
+  <div id="purge-overlay" class="hidden fixed inset-0 z-50 bg-canvas/90 backdrop-blur-sm flex flex-col items-center justify-center gap-6">
+    <div class="w-12 h-12 border-4 border-{% if is_archive %}accent{% else %}danger{% endif %} border-t-transparent rounded-full animate-spin"></div>
+    <div class="text-center">
+      <p class="text-lg font-semibold text-ink" id="overlay-title">
+        {{ 'Archiving' if is_archive else 'Moving to Trash' }}…
+      </p>
+      <p class="text-ink-subtle text-sm mt-1" id="overlay-sub">
+        Processing {{ total_count }} emails from {{ selected | length }} sender{{ 's' if selected|length != 1 else '' }}
+      </p>
+      <p class="text-ink-tertiary text-xs mt-3">This may take a minute for large batches — don't close this tab</p>
+    </div>
+    <!-- Animated dots progress bar -->
+    <div class="flex gap-1.5">
+      {% for i in range(selected | length if selected | length < 8 else 8) %}
+      <div class="w-2 h-2 rounded-full bg-{% if is_archive %}accent{% else %}danger{% endif %} opacity-30"
+           style="animation: pulse 1.4s ease-in-out {{ loop.index0 * 0.18 }}s infinite"></div>
+      {% endfor %}
+    </div>
+  </div>
+
+<script>
+  document.getElementById('confirm-form').addEventListener('submit', function() {
+    document.getElementById('confirm-btn').disabled = true;
+    document.getElementById('purge-overlay').classList.remove('hidden');
+  });
+</script>
 
 </div>
 
