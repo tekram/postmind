@@ -262,6 +262,16 @@
         Clean Up
       </a>
 
+      <a href="/cleanup"
+         class="flex items-center gap-2.5 px-2.5 py-1.5 rounded-button text-sm font-medium transition-colors
+                {% if active == 'cleanup' %}text-white bg-sidebar-raised{% else %}text-sidebar-text hover:text-white hover:bg-white/5{% endif %}">
+        <!-- Lucide: zap -->
+        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+        </svg>
+        Quick Clean
+      </a>
+
       <p class="px-2.5 pt-4 pb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-tertiary/70">Automate</p>
 
       <a href="/triage"

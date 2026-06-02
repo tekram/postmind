@@ -26,6 +26,16 @@
     </p>
   </div>
 
+  {% if plan.has_opportunity %}
+  <!-- Primary path: drop straight into the fast, keyboard-driven batch flow -->
+  <a href="/cleanup" class="pm-btn w-full justify-center mb-6 py-3 text-base">
+    <!-- Lucide: zap -->
+    <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+    Clean up fast — review batches in seconds
+  </a>
+  <p class="text-ink-tertiary text-xs text-center -mt-4 mb-6">Approve or skip whole batches with your keyboard · you confirm before anything moves · undoable for {{ undo_days }} days</p>
+  {% endif %}
+
   {% if not plan.has_opportunity %}
   <!-- Nothing obviously cleanable -->
   <div class="pm-card p-8 text-center mb-6">

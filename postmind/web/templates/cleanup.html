@@ -1,0 +1,309 @@
+{% extends "base.html" %}
+{% block title %}Quick Clean — postmind{% endblock %}
+{% block content %}
+
+<div class="p-8 max-w-3xl">
+
+  <!-- Header -->
+  <div class="mb-6">
+    <div class="flex items-center gap-2.5 mb-2">
+      <span class="pm-pill text-accent bg-accent-subtle border border-accent-border">
+        <!-- Lucide: zap -->
+        <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+        </svg>
+        Smart batches
+      </span>
+    </div>
+    <h1 class="text-2xl font-semibold text-ink">Clean up fast</h1>
+    <p class="text-ink-subtle text-sm mt-1">
+      {% if plan.has_opportunity %}
+        <strong class="text-ink-muted tabular">{{ "{:,}".format(plan.cleanable_emails) }}</strong> emails ·
+        <strong class="text-ink-muted tabular">{{ plan.cleanable_mb }}</strong> MB across
+        <strong class="text-ink-muted tabular">{{ "{:,}".format(plan.total_senders) }}</strong> senders.
+        Approve or skip whole batches — one decision at a time.
+      {% else %}
+        We scanned <strong class="text-ink-muted tabular">{{ "{:,}".format(plan.total_emails) }}</strong> emails from
+        <strong class="text-ink-muted tabular">{{ "{:,}".format(plan.total_senders) }}</strong> senders.
+      {% endif %}
+    </p>
+  </div>
+
+  {% if not plan.has_opportunity %}
+  <!-- Nothing obviously cleanable -->
+  <div class="pm-card p-8 text-center mb-6">
+    <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-accent-subtle text-accent mb-3">
+      <!-- Lucide: sparkles -->
+      <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9.94 14.06l-1.06 2.32a1 1 0 01-1.82 0l-1.06-2.32a1 1 0 00-.5-.5L3.18 12.5a1 1 0 010-1.82l2.32-1.06a1 1 0 00.5-.5l1.06-2.32a1 1 0 011.82 0l1.06 2.32a1 1 0 00.5.5l2.32 1.06a1 1 0 010 1.82l-2.32 1.06a1 1 0 00-.5.5z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" d="M18 4v4M20 6h-4M18 16v3M19.5 17.5h-3"/>
+      </svg>
+    </div>
+    <p class="text-ink font-medium">Your inbox looks clean already.</p>
+    <p class="text-ink-subtle text-sm mt-1">
+      Nothing jumped out as obvious bulk clutter. You can still explore senders in detail.
+    </p>
+    <a href="/stats" class="pm-btn mt-4">
+      Explore senders
+      <!-- Lucide: arrow-right -->
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M12 5l7 7-7 7"/></svg>
+    </a>
+  </div>
+  {% else %}
+
+  <!-- Keyboard hint + progress -->
+  <div class="flex items-center justify-between gap-4 mb-4">
+    <p class="text-ink-tertiary text-xs">
+      <kbd class="font-sans">A</kbd> approve ·
+      <kbd class="font-sans">S</kbd> skip ·
+      <kbd class="font-sans">E</kbd> edit senders ·
+      <kbd class="font-sans">Z</kbd> undo ·
+      <kbd class="font-sans">↵</kbd> next
+    </p>
+    <p id="batch-progress" class="text-ink-subtle text-xs tabular"></p>
+  </div>
+
+  <form id="cleanup-form" method="POST" action="/cleanup/confirm">
+    <div id="batch-stack" class="space-y-3 mb-24">
+      {% for b in plan.batches %}
+      <div class="pm-card p-5 batch-card transition-shadow"
+           id="batch-{{ b.key }}"
+           tabindex="0"
+           data-key="{{ b.key }}"
+           data-action="{{ b.action }}"
+           data-count="{{ b.count }}"
+           data-mb="{{ b.size_mb }}"
+           data-auto="{{ '1' if b.auto_select else '0' }}"
+           data-confidence="{{ b.confidence }}">
+
+        <div class="flex items-start justify-between gap-4">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <h3 class="font-medium text-ink">{{ b.title }}</h3>
+              {% if b.action == 'archive' %}
+              <span class="pm-pill text-ink-subtle bg-surface-sunken border border-hairline">ARCHIVE</span>
+              {% else %}
+              <span class="pm-pill text-accent bg-accent-subtle border border-accent-border">TRASH</span>
+              {% endif %}
+              <span class="pm-pill text-ink-tertiary bg-surface-sunken border border-hairline tabular">{{ b.confidence }}% safe</span>
+            </div>
+            <p class="text-ink-subtle text-sm mt-0.5">{{ b.rationale }}</p>
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-ink-subtle">
+              <span><strong class="text-ink-muted tabular">{{ "{:,}".format(b.count) }}</strong> emails</span>
+              <span><strong class="text-ink-muted tabular">{{ b.size_mb }}</strong> MB</span>
+              <span class="tabular">{{ b.sender_count }} sender{{ 's' if b.sender_count != 1 else '' }}</span>
+            </div>
+          </div>
+
+          <!-- Approve toggle (kept in sync with keyboard state) -->
+          <label class="shrink-0 inline-flex items-center gap-2 cursor-pointer select-none">
+            <input type="checkbox" class="batch-approve-toggle h-4 w-4 accent-accent">
+            <span class="batch-state-label text-xs font-medium text-ink-tertiary">Skipped</span>
+          </label>
+        </div>
+
+        <!-- Sample previews -->
+        {% if b.sample %}
+        <div class="mt-3 pt-3 border-t border-hairline space-y-1">
+          {% for s in b.sample %}
+          <p class="text-xs text-ink-subtle truncate">
+            <span class="text-ink-muted">{{ s.sender }}</span>
+            <span class="text-ink-tertiary"> — {{ s.subject }}</span>
+          </p>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Per-sender editor (toggle with E) -->
+        <div class="batch-editor hidden mt-3 pt-3 border-t border-hairline">
+          <p class="text-[11px] font-semibold uppercase tracking-wide text-ink-tertiary mb-2">Drop any sender to keep it</p>
+          <div class="space-y-1.5">
+            {% for e in b.sender_emails %}
+            <label class="flex items-center gap-2 text-xs text-ink-muted cursor-pointer">
+              <input type="checkbox" class="batch-sender-check h-3.5 w-3.5 accent-accent" data-email="{{ e }}" checked>
+              <span class="truncate">{{ e }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- Hidden inputs: enabled+named by JS only for approved batches. -->
+        {% for e in b.sender_emails %}
+        <input class="batch-sender" data-key="{{ b.key }}" data-action="{{ b.action }}" type="hidden" name="" value="{{ e }}" disabled>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- Sticky footer -->
+    <div class="fixed bottom-0 left-0 right-0 md:left-[var(--sidebar-w,16rem)] z-20 border-t border-hairline bg-surface/95 backdrop-blur">
+      <div class="max-w-3xl px-8 py-3 flex items-center justify-between gap-4">
+        <div class="flex items-center gap-4">
+          <span id="queue-tally" class="text-sm text-ink-muted tabular">0 emails · 0 MB queued</span>
+          <a href="/stats" class="hidden sm:inline-flex items-center gap-1 text-accent hover:text-accent-hover text-xs font-medium transition-colors">
+            See all senders
+            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </a>
+        </div>
+        <button type="submit" id="clean-all-btn" class="pm-btn whitespace-nowrap">
+          Clean all approved
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+        </button>
+      </div>
+    </div>
+  </form>
+
+  {% endif %}
+
+  <!-- Protected reassurance -->
+  {% if plan.protected_count %}
+  <div class="flex items-start gap-2.5 text-ink-subtle text-sm mb-6">
+    <!-- Lucide: lock -->
+    <svg class="w-4 h-4 shrink-0 mt-0.5 text-ink-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M5 11h14a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2zM8 11V7a4 4 0 018 0v4"/>
+    </svg>
+    <p>{{ plan.protected_note }}</p>
+  </div>
+  {% endif %}
+
+</div>
+
+{% if plan.has_opportunity %}
+<script>
+(function () {
+  "use strict";
+  var cards = Array.prototype.slice.call(document.querySelectorAll(".batch-card"));
+  if (!cards.length) return;
+
+  var form = document.getElementById("cleanup-form");
+  var tallyEl = document.getElementById("queue-tally");
+  var progressEl = document.getElementById("batch-progress");
+  var focusIdx = 0;
+  var history = [];  // {idx, prev} for Z-undo of state changes
+
+  function setState(card, approved) {
+    card.dataset.approved = approved ? "1" : "0";
+    var toggle = card.querySelector(".batch-approve-toggle");
+    var label = card.querySelector(".batch-state-label");
+    if (toggle) toggle.checked = approved;
+    if (label) {
+      label.textContent = approved ? "Approved" : "Skipped";
+      label.classList.toggle("text-accent", approved);
+      label.classList.toggle("text-ink-tertiary", !approved);
+    }
+    card.classList.toggle("ring-1", approved);
+    card.classList.toggle("ring-accent-border", approved);
+    recompute();
+  }
+
+  function approvedSenders(card) {
+    // Respect the per-sender editor: only checked senders count.
+    var checks = card.querySelectorAll(".batch-sender-check");
+    if (!checks.length) return null;  // editor never opened → whole batch
+    var kept = [];
+    checks.forEach(function (c) { if (c.checked) kept.push(c.dataset.email); });
+    return kept;
+  }
+
+  function recompute() {
+    var emails = 0, mb = 0;
+    cards.forEach(function (card) {
+      if (card.dataset.approved !== "1") return;
+      var kept = approvedSenders(card);
+      var total = parseInt(card.dataset.count, 10) || 0;
+      var totalMb = parseFloat(card.dataset.mb) || 0;
+      var allSenders = card.querySelectorAll(".batch-sender-check").length;
+      if (kept === null || allSenders === 0 || kept.length === allSenders) {
+        emails += total;
+        mb += totalMb;
+      } else if (allSenders > 0) {
+        // Approximate proportionally when the user drops senders.
+        var frac = kept.length / allSenders;
+        emails += Math.round(total * frac);
+        mb += totalMb * frac;
+      }
+    });
+    tallyEl.textContent = emails.toLocaleString() + " emails · " + (Math.round(mb * 10) / 10) + " MB queued";
+  }
+
+  function setFocus(idx) {
+    if (idx < 0) idx = 0;
+    if (idx >= cards.length) idx = cards.length - 1;
+    focusIdx = idx;
+    cards.forEach(function (c, i) {
+      c.classList.toggle("ring-2", i === idx);
+      c.classList.toggle("ring-accent", i === idx);
+    });
+    cards[idx].focus({ preventScroll: false });
+    cards[idx].scrollIntoView({ block: "nearest", behavior: "smooth" });
+    progressEl.textContent = "Batch " + (idx + 1) + " of " + cards.length;
+  }
+
+  function recordHistory(idx) {
+    history.push({ idx: idx, prev: cards[idx].dataset.approved });
+  }
+
+  // Initial state: auto-select batches start approved.
+  cards.forEach(function (card) {
+    setState(card, card.dataset.auto === "1");
+    card.querySelectorAll(".batch-sender-check").forEach(function (c) {
+      c.addEventListener("change", recompute);
+    });
+    card.querySelector(".batch-approve-toggle").addEventListener("change", function (e) {
+      recordHistory(cards.indexOf(card));
+      setState(card, e.target.checked);
+    });
+    card.addEventListener("focus", function () {
+      var i = cards.indexOf(card);
+      if (i !== focusIdx) setFocus(i);
+    });
+  });
+  setFocus(0);
+
+  document.addEventListener("keydown", function (e) {
+    if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) {
+      if (e.target.type !== "checkbox") return;
+    }
+    var card = cards[focusIdx];
+    var key = e.key.toLowerCase();
+    if (key === "a") {
+      recordHistory(focusIdx); setState(card, true); e.preventDefault();
+    } else if (key === "s") {
+      recordHistory(focusIdx); setState(card, false); e.preventDefault();
+    } else if (key === "e") {
+      card.querySelector(".batch-editor").classList.toggle("hidden"); e.preventDefault();
+    } else if (key === "z") {
+      var last = history.pop();
+      if (last) setState(cards[last.idx], last.prev === "1");
+      e.preventDefault();
+    } else if (e.key === "Enter" || e.key === "ArrowDown") {
+      setFocus(focusIdx + 1); e.preventDefault();
+    } else if (e.key === "ArrowUp") {
+      setFocus(focusIdx - 1); e.preventDefault();
+    }
+  });
+
+  form.addEventListener("submit", function () {
+    cards.forEach(function (card) {
+      var approved = card.dataset.approved === "1";
+      var action = card.dataset.action;
+      var fieldName = action === "trash" ? "trash_senders" : "archive_senders";
+      var kept = approvedSenders(card);
+      var keptSet = kept === null ? null : new Set(kept);
+      card.querySelectorAll(".batch-sender").forEach(function (input) {
+        var include = approved && (keptSet === null || keptSet.has(input.value));
+        if (include) {
+          input.disabled = false;
+          input.name = fieldName;
+        } else {
+          input.disabled = true;
+          input.name = "";
+        }
+      });
+    });
+  });
+})();
+</script>
+{% endif %}
+
+{% endblock %}

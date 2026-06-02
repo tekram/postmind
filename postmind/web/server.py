@@ -686,6 +686,146 @@ async def welcome(request: Request):
     return _resp(request, "welcome.html", ctx)
 
 
+# ── Cleanup (Smart Batches) ─────────────────────────────────────────────────────
+
+
+@app.get("/cleanup", response_class=HTMLResponse)
+async def cleanup(request: Request):
+    """Smart Cleanup Batches: group the synced back-catalogue into a handful of
+    high-confidence, semantically-named batches and present them as a fast,
+    keyboard-driven approve/skip card stack. Approvals commit through the existing
+    confirm-first purge/archive + undo machinery via POST /cleanup/confirm.
+    Phase 1 is fully deterministic — no LLM call."""
+    ctx = _base()
+    ctx["active"] = "cleanup"
+    account_email = _get_web_account() or ""
+
+    if not account_email:
+        return RedirectResponse("/onboarding", status_code=302)
+
+    def _build():
+        from postmind.core.sender_stats import (
+            AUTO_SELECT_THRESHOLD,
+            build_cleanup_batches,
+            compute_impact_scores,
+            fetch_sender_groups_from_db,
+        )
+        from postmind.core.storage import ClassificationCacheRepo, get_session
+
+        groups = fetch_sender_groups_from_db(
+            account_email=account_email, scope="anywhere", min_count=1, top_n=1000,
+            sort_by="score",
+        )
+        compute_impact_scores(groups)
+
+        # Overlay cached AI categories (no new LLM call — just a join).
+        all_ids = [mid for g in groups for mid in g.message_ids]
+        categories = ClassificationCacheRepo(get_session()).get_many(all_ids)
+
+        plan = build_cleanup_batches(groups, categories)
+
+        # Cache the groups so /cleanup/confirm can resolve the batch senders.
+        _cache_set(groups, {"emailAddress": account_email}, account_email)
+        return plan, AUTO_SELECT_THRESHOLD
+
+    try:
+        loop = asyncio.get_event_loop()
+        plan, auto_threshold = await loop.run_in_executor(_executor, _build)
+    except Exception as exc:
+        return _resp(request, "error.html", {"error": str(exc)})
+
+    ctx.update({
+        "plan": plan,
+        "account_email": account_email,
+        "undo_days": get_settings().undo_window_days,
+        "auto_threshold": auto_threshold,
+    })
+    return _resp(request, "cleanup.html", ctx)
+
+
+@app.post("/cleanup/confirm", response_class=HTMLResponse)
+async def cleanup_confirm(request: Request):
+    """Commit the approved batches. The form posts two multi-value fields —
+    ``trash_senders`` and ``archive_senders`` — one entry per approved sender.
+    We loop once per distinct action (≤2 undo entries), reusing the exact
+    confirm/undo idioms from /purge/confirm."""
+    form = await request.form()
+    trash_senders = form.getlist("trash_senders")
+    archive_senders = form.getlist("archive_senders")
+
+    if not trash_senders and not archive_senders:
+        return RedirectResponse("/cleanup", status_code=303)
+
+    cached = _cache_get()
+    if not cached:
+        return _resp(request, "error.html", {"error": "Scan data expired. Re-open Clean Up."})
+
+    from postmind.core.storage import BlocklistRepo, get_session as _gs
+    groups = cached["groups"]
+    account_email = cached["account_email"]
+    blocked_set = BlocklistRepo(_gs()).blocked_emails(account_email) if account_email else set()
+
+    plan_actions = [("trash", trash_senders), ("archive", archive_senders)]
+
+    def _do_cleanup():
+        from postmind.core.storage import UndoLogRepo, get_session
+
+        client = _build_provider()
+        total = 0
+        last_undo_id = None
+        actions_done = []
+
+        for action, senders in plan_actions:
+            if not senders:
+                continue
+            sender_set = set(senders)
+            selected_groups = [
+                g for g in groups
+                if g.sender_email in sender_set and g.sender_email not in blocked_set
+            ]
+            if not selected_groups:
+                continue
+            all_ids = [mid for g in selected_groups for mid in g.message_ids]
+            if not all_ids:
+                continue
+
+            verb = "Archived" if action == "archive" else "Purged"
+            entry = UndoLogRepo(get_session()).record(
+                account_email=account_email,
+                operation=action,
+                message_ids=all_ids,
+                description=(
+                    f"{verb} {len(all_ids)} emails from {len(selected_groups)} sender(s): "
+                    + ", ".join(g.sender_email for g in selected_groups[:3])
+                    + ("…" if len(selected_groups) > 3 else "")
+                ),
+                metadata={"senders": [g.sender_email for g in selected_groups]},
+            )
+            if action == "archive":
+                client.batch_archive(all_ids)
+            else:
+                client.batch_trash(all_ids)
+
+            total += len(all_ids)
+            last_undo_id = entry.id
+            actions_done.append(action)
+
+        return last_undo_id, total, actions_done
+
+    try:
+        loop = asyncio.get_event_loop()
+        undo_id, count, actions_done = await loop.run_in_executor(_executor, _do_cleanup)
+        _scan_cache.pop(_get_web_account() or "default", None)
+    except Exception as exc:
+        return _resp(request, "error.html", {"error": str(exc)})
+
+    if not actions_done:
+        return _resp(request, "error.html", {"error": "Nothing to do — selected senders are protected or no longer in the scan."})
+
+    result_action = actions_done[0] if len(set(actions_done)) == 1 else "mixed"
+    return RedirectResponse(f"/undo?purged={count}&undo_id={undo_id}&action={result_action}", status_code=303)
+
+
 # ── Stats ─────────────────────────────────────────────────────────────────────
 
 

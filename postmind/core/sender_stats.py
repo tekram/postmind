@@ -1315,6 +1315,239 @@ def cleanup_plan_digest(plan: CleanupPlan) -> list[dict]:
     ]
 
 
+# ── Smart cleanup batches ──────────────────────────────────────────────────────
+
+
+AUTO_SELECT_THRESHOLD = 85  # batches at/above this are pre-checked "approve"
+
+
+@dataclass
+class CleanupBatch:
+    """A semantically-named group of senders the user approves or skips as one unit.
+
+    Like ``CleanupBucket`` but built for the fast keyboard-driven ``/cleanup`` flow:
+    ``confidence`` drives ordering and auto-selection, ``category`` carries the
+    dominant cached AI category (when available) for warmer naming, and ``sample``
+    holds a few body-free previews for the card. ``sender_emails`` are the exact
+    targets; ``count``/``size_mb`` are the honest sums for only those senders."""
+
+    key: str  # stable: "promos-unopened" | "old-clutter" | "flood" | "review"
+    title: str
+    rationale: str
+    action: str  # "trash" | "archive"  (Phase 1: no mark_read)
+    sender_emails: list[str]
+    count: int
+    size_mb: float
+    confidence: int  # 0–100; representative (min) confidence of the batch
+    category: str  # dominant ai_category among members, or ""
+    sample: list[dict]  # up to 5 {"sender": str, "subject": str}, body-free previews
+
+    @property
+    def sender_count(self) -> int:
+        return len(self.sender_emails)
+
+    @property
+    def auto_select(self) -> bool:
+        """Pre-checked "approve" when the batch is confident enough to only veto."""
+        return self.confidence >= AUTO_SELECT_THRESHOLD
+
+
+@dataclass
+class CleanupBatchPlan:
+    batches: list[CleanupBatch]  # ordered by confidence desc, then size desc
+    protected_note: str
+    protected_count: int  # number of sensitive senders left untouched
+    total_senders: int
+    total_emails: int
+
+    @property
+    def cleanable_emails(self) -> int:
+        return sum(b.count for b in self.batches)
+
+    @property
+    def cleanable_mb(self) -> float:
+        return round(sum(b.size_mb for b in self.batches), 1)
+
+    @property
+    def has_opportunity(self) -> bool:
+        return bool(self.batches)
+
+
+def _dominant_category(g: SenderGroup, categories: dict[str, dict] | None) -> str:
+    """Pick the most common non-empty ``ai_category`` across a sender's messages.
+
+    Joins each ``message_id`` against the cached ``categories`` map. Ties resolve
+    to the most frequent; no signal returns ``""``."""
+    if not categories:
+        return ""
+    counts: dict[str, int] = {}
+    for mid in g.message_ids:
+        cls = categories.get(mid)
+        if not cls:
+            continue
+        cat = (cls.get("category") or "").strip().lower()
+        if cat:
+            counts[cat] = counts.get(cat, 0) + 1
+    if not counts:
+        return ""
+    return max(counts, key=lambda c: counts[c])
+
+
+def _batch_title(default: str, category: str) -> str:
+    """Warm up a batch title using the dominant AI category, when one is known."""
+    overrides = {
+        "newsletter": "Newsletters & promotions you never opened",
+        "newsletters": "Newsletters & promotions you never opened",
+        "promotion": "Newsletters & promotions you never opened",
+        "promotions": "Newsletters & promotions you never opened",
+        "receipt": "Old receipts & order confirmations",
+        "receipts": "Old receipts & order confirmations",
+        "social": "Social notifications",
+        "notification": "App & service notifications",
+        "notifications": "App & service notifications",
+    }
+    return overrides.get(category, default)
+
+
+def build_cleanup_batches(
+    groups: list[SenderGroup],
+    categories: dict[str, dict] | None = None,
+    auto_select_threshold: int = AUTO_SELECT_THRESHOLD,
+) -> CleanupBatchPlan:
+    """Turn scored sender groups into semantically-named cleanup batches for the
+    fast approve/skip ``/cleanup`` flow.
+
+    Deterministic and AI-free (Phase 1): sensitive senders are split out and never
+    batched, and each remaining sender lands in exactly one batch via the same
+    ``_take`` + ``used`` pattern as ``build_cleanup_plan``. When ``categories`` (a
+    ``gmail_id -> classification dict`` map of cached AI tags) is provided, the
+    dominant ``ai_category`` per sender warms up batch titles — it never changes
+    the data or the numbers, which stay server-side.
+
+    Expects ``groups`` to already carry impact scores (call
+    ``compute_impact_scores`` first). ``auto_select_threshold`` lets callers tune
+    which batches are pre-checked "approve" (see ``CleanupBatch.auto_select``)."""
+    if not groups:
+        return CleanupBatchPlan(
+            batches=[], protected_note="", protected_count=0,
+            total_senders=0, total_emails=0,
+        )
+
+    total_senders = len(groups)
+    total_emails = sum(g.count for g in groups)
+
+    sensitive = [g for g in groups if classify_sender_risk(g) == "sensitive"]
+    candidates = [g for g in groups if classify_sender_risk(g) != "sensitive"]
+
+    conf: dict[str, int] = {g.sender_email: compute_confidence_score(g) for g in candidates}
+    cat: dict[str, str] = {g.sender_email: _dominant_category(g, categories) for g in candidates}
+    used: set[str] = set()
+
+    def _take(pred, *, sort_key, reverse=True) -> list[SenderGroup]:
+        picked = sorted(
+            [g for g in candidates if g.sender_email not in used and pred(g)],
+            key=sort_key, reverse=reverse,
+        )
+        for g in picked:
+            used.add(g.sender_email)
+        return picked
+
+    def _dominant(senders: list[SenderGroup]) -> str:
+        """Most common dominant category across a batch's senders, else ""."""
+        counts: dict[str, int] = {}
+        for g in senders:
+            c = cat[g.sender_email]
+            if c:
+                counts[c] = counts.get(c, 0) + 1
+        return max(counts, key=lambda c: counts[c]) if counts else ""
+
+    def _sample(senders: list[SenderGroup]) -> list[dict]:
+        """Up to 5 body-free {sender, subject} previews across the batch."""
+        out: list[dict] = []
+        for g in senders:
+            for s in g.sample_subjects:
+                out.append({"sender": g.display_name, "subject": s})
+                if len(out) >= 5:
+                    return out
+        return out
+
+    def _make(key: str, default_title: str, action: str, rationale: str,
+              senders: list[SenderGroup]) -> CleanupBatch:
+        category = _dominant(senders)
+        return CleanupBatch(
+            key=key,
+            title=_batch_title(default_title, category),
+            rationale=rationale,
+            action=action,
+            sender_emails=[g.sender_email for g in senders],
+            count=sum(g.count for g in senders),
+            size_mb=round(sum(g.total_size_bytes for g in senders) / (1024 * 1024), 1),
+            # Representative confidence: the weakest member, so auto-select stays
+            # conservative (a batch is only pre-checked if every sender is confident).
+            confidence=min(conf[g.sender_email] for g in senders),
+            category=category,
+            sample=_sample(senders),
+        )
+
+    batches: list[CleanupBatch] = []
+
+    # Promos/newsletters: confidently-safe bulk mail, biggest first. Default action
+    # is trash (decision §8.1) — the appeal is reclaiming storage, still undoable.
+    promos = _take(lambda g: conf[g.sender_email] >= 70, sort_key=lambda g: g.total_size_bytes)
+    if promos:
+        batches.append(_make(
+            "promos-unopened", "Newsletters & promotions you never opened", "trash",
+            "High-volume senders with unsubscribe links and old, untouched mail — "
+            "safe to clear.",
+            promos,
+        ))
+
+    # Old clutter: anything left sitting well over a year — archive to clear.
+    old = _take(lambda g: g.inbox_days >= 365, sort_key=lambda g: g.total_size_bytes)
+    if old:
+        batches.append(_make(
+            "old-clutter", "Old mail from years ago", "archive",
+            "Mail older than a year you haven't acted on — archive to clear the inbox.",
+            old,
+        ))
+
+    # Flood: senders with hundreds of emails each — one combined archive batch.
+    flood = _take(lambda g: g.count >= 100, sort_key=lambda g: g.count)
+    if flood:
+        batches.append(_make(
+            "flood", "Senders flooding your inbox", "archive",
+            "Senders with hundreds of emails each — mostly notifications and updates.",
+            flood,
+        ))
+
+    # Worth a quick look: remaining medium-confidence senders, by impact.
+    review = _take(lambda g: conf[g.sender_email] >= 40, sort_key=lambda g: g.impact_score)
+    if review:
+        batches.append(_make(
+            "review", "Worth a quick look", "archive",
+            "Likely cleanable, but skim these before acting.",
+            review,
+        ))
+
+    batches.sort(key=lambda b: (b.confidence, b.size_mb), reverse=True)
+
+    protected_count = len(sensitive)
+    protected_note = ""
+    if protected_count:
+        protected_note = (
+            f"Left {protected_count} sender{'s' if protected_count != 1 else ''} "
+            "alone — banks, health, and personal mail are never in a one-click batch."
+        )
+
+    return CleanupBatchPlan(
+        batches=batches,
+        protected_note=protected_note,
+        protected_count=protected_count,
+        total_senders=total_senders,
+        total_emails=total_emails,
+    )
+
+
 # ── Fetch + pipeline ─────────────────────────────────────────────────────────
 
 
