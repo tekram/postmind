@@ -47,6 +47,14 @@
           </optgroup>
         </select>
       </div>
+      <div class="flex items-center gap-2">
+        <label class="flex items-center gap-2 cursor-pointer select-none" title="Filter to senders with List-Unsubscribe header, known ESP domains, or bulk-sender addresses — no AI needed">
+          <input type="checkbox" id="promo-only-cb" {% if promo_only %}checked{% endif %}
+                 class="rounded text-accent w-3.5 h-3.5">
+          <span class="text-sm font-medium text-ink">Newsletters only</span>
+          <span class="pm-badge text-[10px]">no AI</span>
+        </label>
+      </div>
       <button id="rescan-btn" class="pm-btn ml-auto">
         <!-- Lucide: scan-search -->
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
@@ -59,7 +67,7 @@
 
   <!-- Data area: loaded via HTMX -->
   <div id="stats-data"
-       hx-get="/stats/data?sort={{ sort_by }}&scope={{ scope }}&since={{ since | urlencode }}"
+       hx-get="/stats/data?sort={{ sort_by }}&scope={{ scope }}&since={{ since | urlencode }}&promo_only={{ promo_only }}"
        hx-trigger="load"
        hx-target="this"
        hx-swap="outerHTML">
@@ -88,10 +96,11 @@
 <script>
   // Re-scan when filters change or Scan button clicked
   function triggerScan() {
-    const sort  = document.getElementById('sort-sel').value;
-    const scope = document.getElementById('scope-sel').value;
-    const since = document.getElementById('since-sel').value;
-    const url   = `/stats/data?sort=${sort}&scope=${scope}&since=${encodeURIComponent(since)}`;
+    const sort      = document.getElementById('sort-sel').value;
+    const scope     = document.getElementById('scope-sel').value;
+    const since     = document.getElementById('since-sel').value;
+    const promoOnly = document.getElementById('promo-only-cb').checked ? '1' : '';
+    const url       = `/stats/data?sort=${sort}&scope=${scope}&since=${encodeURIComponent(since)}&promo_only=${promoOnly}`;
 
     const el = document.getElementById('stats-data');
     if (!el) return;
@@ -109,6 +118,7 @@
   }
 
   document.getElementById('rescan-btn').addEventListener('click', triggerScan);
+  document.getElementById('promo-only-cb').addEventListener('change', triggerScan);
 </script>
 
 {% endblock %}

@@ -283,7 +283,7 @@ async def dashboard(request: Request):
                     sort_by="score",
                 )
                 acct_row = AccountRepo(session).get(account_email)
-                scanned_at = acct_row.last_synced_at.strftime("%-d %b %Y") if (acct_row and acct_row.last_synced_at) else "local cache"
+                scanned_at = acct_row.last_synced_at.strftime("%d %b %Y") if (acct_row and acct_row.last_synced_at) else "local cache"
                 total_emails = (
                     session.query(EmailRecord)
                     .filter(EmailRecord.account_email == account_email, EmailRecord.is_inbox.is_(True))
@@ -363,7 +363,7 @@ async def welcome(request: Request):
         try:
             row = AccountRepo(session).get(account_email)
             synced_at = (
-                row.last_synced_at.strftime("%-d %b %Y")
+                row.last_synced_at.strftime("%d %b %Y")
                 if (row and row.last_synced_at) else None
             )
         finally:
@@ -449,6 +449,7 @@ async def stats_page(request: Request):
     ctx["sort_by"] = request.query_params.get("sort", "score")
     ctx["scope"] = request.query_params.get("scope", "inbox")
     ctx["since"] = request.query_params.get("since", "")
+    ctx["promo_only"] = request.query_params.get("promo_only", "")
     return _resp(request, "stats.html", ctx)
 
 
@@ -459,6 +460,7 @@ async def stats_data(
     scope: str = "inbox",
     since: str = "",
     top: int = 100,
+    promo_only: str = "",
 ):
     if not _is_authed():
         return _resp(
@@ -501,6 +503,7 @@ async def stats_data(
                     sort_by=valid_sort,
                     newer_than_days=newer_days,
                     older_than_days=older_days,
+                    promo_only=bool(promo_only),
                 )
                 profile = {"emailAddress": account_email}
                 data_source = "local cache"
@@ -550,9 +553,9 @@ async def stats_data(
 
         # Date range from groups
         all_dates = [g.earliest_date for g in groups if g.earliest_date]
-        date_from = min(all_dates).strftime("%-d %b %Y") if all_dates else ""
+        date_from = min(all_dates).strftime("%d %b %Y") if all_dates else ""
         latest_dates = [g.latest_date for g in groups if g.latest_date]
-        date_to = max(latest_dates).strftime("%-d %b %Y") if latest_dates else ""
+        date_to = max(latest_dates).strftime("%d %b %Y") if latest_dates else ""
 
         return {
             "senders": _enrich_groups(groups),
