@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Daily Brief — postmind{% endblock %}
+{% block content %}
+
+<div class="p-8 max-w-3xl">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-semibold text-ink">Daily Brief</h1>
+      <p class="text-ink-subtle text-sm mt-1">{{ today_str }}</p>
+    </div>
+    <button
+      hx-post="/brief/generate"
+      hx-target="#brief-content"
+      hx-swap="outerHTML"
+      hx-indicator="#brief-spinner"
+      class="pm-btn-secondary flex items-center gap-2">
+      <!-- Lucide: refresh-cw -->
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+      </svg>
+      Generate Now
+      <span id="brief-spinner" class="htmx-indicator text-xs text-ink-tertiary">Generating…</span>
+    </button>
+  </div>
+
+  {% if ai_mode == "off" %}
+  <div class="mb-5 flex items-start gap-2 text-xs text-ink-subtle bg-surface-2 border border-hairline rounded-button px-3 py-2.5">
+    <svg class="w-3.5 h-3.5 shrink-0 mt-0.5 text-ink-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M12 3a9 9 0 100 18A9 9 0 0012 3z"/>
+    </svg>
+    <span>AI is off — brief shows inbox stats only. <a href="/settings" class="text-accent underline">Enable AI in Settings</a> for a narrative summary.</span>
+  </div>
+  {% endif %}
+
+  <!-- Stat mini-cards -->
+  {% if brief %}
+  <div class="grid grid-cols-3 gap-4 mb-6">
+    <div class="pm-card p-4">
+      <p class="text-ink-subtle text-[11px] font-semibold uppercase tracking-[0.06em]">Unread</p>
+      <p class="text-2xl font-semibold text-ink mt-1 tabular">{{ brief.unread_count }}</p>
+      <p class="text-ink-tertiary text-xs mt-1">{{ brief.new_since_yesterday }} new since yesterday</p>
+    </div>
+    <div class="pm-card p-4">
+      <p class="text-ink-subtle text-[11px] font-semibold uppercase tracking-[0.06em]">High priority</p>
+      <p class="text-2xl font-semibold {% if brief.high_priority_count > 0 %}text-warning{% else %}text-ink{% endif %} mt-1 tabular">{{ brief.high_priority_count }}</p>
+      <p class="text-ink-tertiary text-xs mt-1">need attention</p>
+    </div>
+    <div class="pm-card p-4">
+      <p class="text-ink-subtle text-[11px] font-semibold uppercase tracking-[0.06em]">Follow-ups overdue</p>
+      <p class="text-2xl font-semibold {% if brief.overdue_followups_count > 0 %}text-danger{% else %}text-ink{% endif %} mt-1 tabular">{{ brief.overdue_followups_count }}</p>
+      <p class="text-ink-tertiary text-xs mt-1">no reply yet</p>
+    </div>
+  </div>
+  {% else %}
+  <div class="pm-card p-8 text-center mb-6">
+    <p class="text-ink-tertiary text-sm">No brief generated yet today — hit "Generate Now" above.</p>
+    <p class="text-ink-tertiary/60 text-xs mt-1.5">
+      Or enable <strong>Generate daily brief</strong> in
+      <a href="/agents" class="text-accent underline">Agents → Automation</a>
+      to auto-generate on the first heartbeat each morning.
+    </p>
+  </div>
+  {% endif %}
+
+  <!-- Brief content (HTMX swap target) -->
+  <div class="pm-card overflow-hidden">
+    <div class="px-5 py-4 border-b border-hairline flex items-center gap-3">
+      <svg class="w-4 h-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2M12 19v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M3 12h2M19 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+        <circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="1.75"/>
+      </svg>
+      <h2 class="font-semibold text-ink text-[15px]">Today's Brief</h2>
+      {% if brief and brief.ai_used %}
+      <span class="pm-badge text-accent border-accent-border bg-accent-subtle">AI generated</span>
+      {% elif brief %}
+      <span class="pm-badge">Stats summary</span>
+      {% endif %}
+    </div>
+
+    <div class="px-5 py-5" id="brief-content">
+      {% if brief %}
+      <p class="text-ink text-sm leading-relaxed whitespace-pre-wrap">{{ brief.content }}</p>
+      {% if brief.generated_at %}
+      <p class="text-ink-tertiary text-xs mt-4">Generated {{ brief.generated_at.strftime("%H:%M UTC") }}</p>
+      {% endif %}
+      {% else %}
+      <div class="text-center py-8">
+        <p class="text-ink-tertiary text-sm">No brief for today yet.</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Recent briefs (history) -->
+  {% set past = recent | selectattr("brief_date", "ne", today_str) | list %}
+  {% if past %}
+  <div class="pm-card mt-6 overflow-hidden">
+    <div class="px-5 py-4 border-b border-hairline">
+      <h2 class="font-semibold text-ink text-[15px]">Recent briefs</h2>
+    </div>
+    <div class="divide-y divide-hairline">
+      {% for b in past %}
+      <div class="px-5 py-3">
+        <div class="flex items-center justify-between">
+          <p class="text-sm font-medium text-ink">{{ b.brief_date }}</p>
+          <div class="flex items-center gap-3 text-xs text-ink-tertiary tabular">
+            <span>{{ b.unread_count }} unread</span>
+            {% if b.high_priority_count %}<span class="text-warning">{{ b.high_priority_count }} high-priority</span>{% endif %}
+            {% if b.ai_used %}<span class="pm-badge text-accent border-accent-border bg-accent-subtle">AI</span>{% endif %}
+          </div>
+        </div>
+        <p class="text-ink-muted text-xs mt-1 line-clamp-2">{{ b.content[:160] }}…</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+
+{% endblock %}

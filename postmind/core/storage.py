@@ -227,6 +227,7 @@ def _run_migrations(engine) -> None:
             ("run_rules", "INTEGER DEFAULT 1"),
             ("run_followups", "INTEGER DEFAULT 1"),
             ("run_avoidance", "INTEGER DEFAULT 0"),
+            ("run_daily_brief", "INTEGER DEFAULT 0"),
         ],
         "accounts": [
             ("welcomed_at", "DATETIME"),
@@ -643,6 +644,24 @@ class ClassificationCacheRepo:
             self.s.commit()
 
 
+class DailyBrief(Base):
+    """One AI-generated (or stats-only) morning brief per account per calendar date."""
+
+    __tablename__ = "daily_briefs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_email = Column(String, nullable=False)
+    brief_date = Column(String, nullable=False)          # ISO "YYYY-MM-DD"
+    content = Column(Text, nullable=False)               # plain-text output
+    ai_used = Column(Boolean, default=False)             # True if Claude generated it
+    unread_count = Column(Integer, default=0)
+    new_since_yesterday = Column(Integer, default=0)
+    high_priority_count = Column(Integer, default=0)
+    overdue_followups_count = Column(Integer, default=0)
+    avoided_count = Column(Integer, default=0)
+    generated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class Agent(Base):
     __tablename__ = "agents"
 
@@ -666,6 +685,43 @@ class Agent(Base):
     run_rules = Column(Boolean, default=True)      # execute active automation rules
     run_followups = Column(Boolean, default=True)  # sync follow-up reply detection
     run_avoidance = Column(Boolean, default=False) # detect avoided emails (requires AI)
+    run_daily_brief = Column(Boolean, default=False) # generate AI morning brief once per day
+
+
+class DailyBriefRepo:
+    def __init__(self, session: Session):
+        self.s = session
+
+    def get_today(self, account_email: str, today_str: str) -> DailyBrief | None:
+        return (
+            self.s.query(DailyBrief)
+            .filter_by(account_email=account_email, brief_date=today_str)
+            .first()
+        )
+
+    def save(self, brief: DailyBrief) -> DailyBrief:
+        existing = self.get_today(brief.account_email, brief.brief_date)
+        if existing:
+            for col in (
+                "content", "ai_used", "unread_count", "new_since_yesterday",
+                "high_priority_count", "overdue_followups_count", "avoided_count",
+            ):
+                setattr(existing, col, getattr(brief, col))
+            existing.generated_at = datetime.now(timezone.utc)
+            self.s.commit()
+            return existing
+        self.s.add(brief)
+        self.s.commit()
+        return brief
+
+    def list_recent(self, account_email: str, limit: int = 7) -> list[DailyBrief]:
+        return (
+            self.s.query(DailyBrief)
+            .filter_by(account_email=account_email)
+            .order_by(DailyBrief.brief_date.desc())
+            .limit(limit)
+            .all()
+        )
 
 
 class AgentRepo:
@@ -740,12 +796,14 @@ class AgentRepo:
         run_rules: bool,
         run_followups: bool,
         run_avoidance: bool,
+        run_daily_brief: bool = False,
     ) -> None:
         agent = self.get_by_email(account_email)
         if agent:
             agent.run_rules = run_rules
             agent.run_followups = run_followups
             agent.run_avoidance = run_avoidance
+            agent.run_daily_brief = run_daily_brief
             self.s.commit()
 
     def delete(self, account_email: str) -> None:
