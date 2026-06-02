@@ -114,6 +114,21 @@ def test_high_confidence_promos_batch_auto_selects():
     assert promos.auto_select is True
 
 
+def test_batch_confidence_is_email_count_weighted_not_min():
+    # A big, maxed-out sender (conf 100, lots of mail) plus a borderline one
+    # (conf ~70, little mail). min() would pin the batch at 70 and block
+    # auto-select; the count-weighted average should stay well above the bar so
+    # a batch that's overwhelmingly safe by volume is still pre-checked.
+    big = _g("deals@promo.com", "Promo Co", 400, 800, 400, True)      # conf 100
+    borderline = _g("edge@promo.com", "Edge", 50, 1, 181, True)        # conf ~70
+    plan = _plan([big, borderline])
+    promos = next(b for b in plan.batches if b.key == "promos-unopened")
+    assert {"deals@promo.com", "edge@promo.com"} <= set(promos.sender_emails)
+    assert promos.confidence > 70, "weighted average should exceed the weakest member"
+    assert promos.confidence >= AUTO_SELECT_THRESHOLD
+    assert promos.auto_select is True
+
+
 # ── Category overlay ───────────────────────────────────────────────────────────
 
 

@@ -235,7 +235,7 @@ class CleanupBatch:
     sender_emails: list[str]
     count: int
     size_mb: float
-    confidence: int        # 0–100 (min/representative confidence of the batch)
+    confidence: int        # 0–100, email-count-weighted average across members
     category: str          # dominant ai_category among members, or ""
     sample: list[dict]     # 3–5 {"sender": str, "subject": str}, redacted previews
     @property

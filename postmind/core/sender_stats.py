@@ -1482,9 +1482,16 @@ def build_cleanup_batches(
             sender_emails=[g.sender_email for g in senders],
             count=sum(g.count for g in senders),
             size_mb=round(sum(g.total_size_bytes for g in senders) / (1024 * 1024), 1),
-            # Representative confidence: the weakest member, so auto-select stays
-            # conservative (a batch is only pre-checked if every sender is confident).
-            confidence=min(conf[g.sender_email] for g in senders),
+            # Representative confidence: email-count-weighted average across members.
+            # A few borderline senders shouldn't veto a batch whose mail is, by
+            # volume, overwhelmingly safe — using the weakest member (min) left even
+            # all-green promos batches stuck below the auto-select bar. The weighting
+            # means a batch is pre-checked only when most of its *mail* is confident,
+            # not merely most of its senders.
+            confidence=round(
+                sum(conf[g.sender_email] * g.count for g in senders)
+                / (sum(g.count for g in senders) or 1)
+            ),
             category=category,
             sample=_sample(senders),
         )
