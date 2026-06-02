@@ -63,7 +63,11 @@
     <p id="batch-progress" class="text-ink-subtle text-xs tabular"></p>
   </div>
 
+  {% set rule_offer_keys = rule_offer_keys | default([]) %}
   <form id="cleanup-form" method="POST" action="/cleanup/confirm">
+    <!-- Learning-loop hidden payloads (populated by JS at submit). -->
+    <input type="hidden" name="feedback_json" id="feedback-json-field" value="">
+    <input type="hidden" name="create_rule" id="create-rule-field" value="">
     <div id="batch-stack" class="space-y-3 mb-24">
       {% for b in plan.batches %}
       <div class="pm-card p-5 batch-card transition-shadow"
@@ -111,6 +115,25 @@
             <span class="text-ink-tertiary"> — {{ s.subject }}</span>
           </p>
           {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Rule offer: surfaced when this batch has been cleaned a few sessions. -->
+        {% if b.key in rule_offer_keys %}
+        <div class="mt-3 pt-3 border-t border-hairline">
+          <label class="flex items-start gap-2.5 cursor-pointer select-none rounded-lg bg-accent-subtle border border-accent-border p-2.5">
+            <input type="checkbox" class="batch-rule-toggle h-4 w-4 mt-0.5 accent-accent" data-key="{{ b.key }}">
+            <span class="text-xs text-ink-muted">
+              <span class="inline-flex items-center gap-1 font-medium text-accent">
+                <!-- Lucide: sparkles -->
+                <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9.94 14.06l-1.06 2.32a1 1 0 01-1.82 0l-1.06-2.32a1 1 0 00-.5-.5L3.18 12.5a1 1 0 010-1.82l2.32-1.06a1 1 0 00.5-.5l1.06-2.32a1 1 0 011.82 0l1.06 2.32a1 1 0 00.5.5l2.32 1.06a1 1 0 010 1.82l-2.32 1.06a1 1 0 00-.5.5z"/>
+                </svg>
+                You've cleaned this a few times — automate it?
+              </span>
+              <span class="block text-ink-subtle mt-0.5">We'll create a rule that does this for you going forward.</span>
+            </span>
+          </label>
         </div>
         {% endif %}
 
@@ -283,15 +306,48 @@
     }
   });
 
+  var feedbackField = document.getElementById("feedback-json-field");
+  var createRuleField = document.getElementById("create-rule-field");
+
+  // Keep only one rule offer armed at a time (last checked wins).
+  var ruleToggles = Array.prototype.slice.call(document.querySelectorAll(".batch-rule-toggle"));
+  ruleToggles.forEach(function (toggle) {
+    toggle.addEventListener("change", function () {
+      if (toggle.checked) {
+        ruleToggles.forEach(function (t) { if (t !== toggle) t.checked = false; });
+      }
+    });
+  });
+
   form.addEventListener("submit", function () {
+    var feedback = [];
     cards.forEach(function (card) {
       var approved = card.dataset.approved === "1";
       var action = card.dataset.action;
+      var batchKey = card.dataset.key;
       var fieldName = action === "trash" ? "trash_senders" : "archive_senders";
       var kept = approvedSenders(card);
       var keptSet = kept === null ? null : new Set(kept);
+
+      // Build learning-loop feedback: one row per sender in the batch.
       card.querySelectorAll(".batch-sender").forEach(function (input) {
-        var include = approved && (keptSet === null || keptSet.has(input.value));
+        var includedInPurge = keptSet === null || keptSet.has(input.value);
+        var decision;
+        if (!approved) {
+          decision = "skipped";
+        } else if (includedInPurge) {
+          decision = "approved";
+        } else {
+          decision = "dropped";
+        }
+        feedback.push({
+          sender_email: input.value,
+          batch_key: batchKey,
+          action: action,
+          decision: decision
+        });
+
+        var include = approved && includedInPurge;
         if (include) {
           input.disabled = false;
           input.name = fieldName;
@@ -301,6 +357,11 @@
         }
       });
     });
+    feedbackField.value = JSON.stringify(feedback);
+
+    // Arm a rule if the user opted to automate an offered batch.
+    var armed = ruleToggles.filter(function (t) { return t.checked; });
+    createRuleField.value = armed.length ? armed[armed.length - 1].dataset.key : "";
   });
 })();
 </script>

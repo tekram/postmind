@@ -309,3 +309,65 @@ overlay changes naming, empty input.
 
 Safety guarantees from §7 hold unchanged: body-free, sensitive excluded,
 confirm-first, 30-day undo, AI-off works (Phase 1 has no LLM call at all).
+
+---
+
+## 10. Phase 3 implementation contract (learning loop — build now)
+
+Phase 3 closes the feedback loop: record what the user approves/skips/edits, feed
+a per-sender prior back into confidence so the page gets faster every week, and
+offer to automate the batches the user keeps clearing. Still LLM-free.
+
+### 10a. Storage — `postmind/core/storage.py`
+
+New table (auto-created by `create_all`; no migration needed) + repo, mirroring
+`UndoLogEntry`/`UndoLogRepo`:
+
+```python
+class CleanupFeedbackRecord(Base):
+    __tablename__ = "cleanup_feedback"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_email = Column(String, nullable=False, index=True)
+    sender_email  = Column(String, nullable=False)
+    batch_key     = Column(String, nullable=False)   # "promos-unopened" | ...
+    action        = Column(String, nullable=False)   # "trash" | "archive"
+    decision      = Column(String, nullable=False)   # "approved" | "skipped" | "dropped"
+    created_at    = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+class CleanupFeedbackRepo:
+    def record_many(self, account_email, items: list[dict]) -> None: ...
+    # rate = approved / (approved+skipped+dropped) per sender; adjustment =
+    # round((rate-0.5)*2*max_adjust) clamped to ±max_adjust; only non-zero returned.
+    def sender_priors(self, account_email, max_adjust: int = 15) -> dict[str, int]: ...
+    # distinct calendar days on which a batch_key had an "approved" decision.
+    def batch_session_counts(self, account_email) -> dict[str, int]: ...
+```
+
+### 10b. Confidence prior — `postmind/core/sender_stats.py`
+
+`build_cleanup_batches(..., sender_priors: dict[str,int] | None = None)`: after
+`conf[email] = compute_confidence_score(g)`, apply
+`conf[email] = max(0, min(100, conf[email] + sender_priors.get(email, 0)))`.
+The prior shifts both bucketing *and* the weighted-average auto-select — approved
+senders rise, skipped senders fall (often out of auto-select, sometimes into
+`review`). No model training; just a stored ±15 nudge.
+
+### 10c. Web — `postmind/web/server.py` + `cleanup.html`
+
+- **GET /cleanup**: load `sender_priors` and pass to `build_cleanup_batches`. Also
+  load `batch_session_counts`; compute `rule_offer_keys = {b.key for b in
+  plan.batches if b.key in {"promos-unopened","old-clutter"} and
+  count>=RULE_OFFER_THRESHOLD(3)}`; pass to the template.
+- **POST /cleanup/confirm**: read a hidden `feedback_json` (list of
+  `{sender_email,batch_key,action,decision}`) and `record_many` it (best-effort,
+  never blocks the purge). If `create_rule=<batch_key>` is posted and the key is in
+  a small `_BATCH_RULE_TEMPLATES` map (promos-unopened → `category:promotions
+  older_than:90d` / trash; old-clutter → `older_than:365d` / archive), create a
+  `RuleDefinition` via `RuleRepo`. Existing purge/undo logic unchanged.
+- **cleanup.html**: JS assembles `feedback_json` at submit (approved senders →
+  "approved"; dropped-in-edit → "dropped"; skipped batches → "skipped"). For batches
+  in `rule_offer_keys`, show an "You've cleaned this a few times — automate it?"
+  toggle that sets a hidden `create_rule` field.
+
+Tests: `sender_priors` math (approve/skip/clamp), `batch_session_counts`,
+prior shifts a sender below auto-select, confirm records feedback + creates a rule.

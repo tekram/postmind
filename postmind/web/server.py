@@ -710,7 +710,11 @@ async def cleanup(request: Request):
             compute_impact_scores,
             fetch_sender_groups_from_db,
         )
-        from postmind.core.storage import ClassificationCacheRepo, get_session
+        from postmind.core.storage import (
+            ClassificationCacheRepo,
+            CleanupFeedbackRepo,
+            get_session,
+        )
 
         groups = fetch_sender_groups_from_db(
             account_email=account_email, scope="anywhere", min_count=1, top_n=1000,
@@ -722,15 +726,34 @@ async def cleanup(request: Request):
         all_ids = [mid for g in groups for mid in g.message_ids]
         categories = ClassificationCacheRepo(get_session()).get_many(all_ids)
 
-        plan = build_cleanup_batches(groups, categories)
+        # Learning loop: per-sender confidence nudge from past decisions
+        # (best-effort — a feedback failure must never break the page).
+        try:
+            priors = CleanupFeedbackRepo(get_session()).sender_priors(account_email)
+        except Exception:
+            priors = {}
+
+        plan = build_cleanup_batches(groups, categories, sender_priors=priors)
+
+        # Offer to automate batches the user has cleaned across >=3 sessions.
+        try:
+            session_counts = CleanupFeedbackRepo(get_session()).batch_session_counts(account_email)
+        except Exception:
+            session_counts = {}
+        RULE_OFFER_THRESHOLD = 3
+        rule_offer_keys = {
+            b.key for b in plan.batches
+            if b.key in ("promos-unopened", "old-clutter")
+            and session_counts.get(b.key, 0) >= RULE_OFFER_THRESHOLD
+        }
 
         # Cache the groups so /cleanup/confirm can resolve the batch senders.
         _cache_set(groups, {"emailAddress": account_email}, account_email)
-        return plan, AUTO_SELECT_THRESHOLD
+        return plan, AUTO_SELECT_THRESHOLD, rule_offer_keys
 
     try:
         loop = asyncio.get_event_loop()
-        plan, auto_threshold = await loop.run_in_executor(_executor, _build)
+        plan, auto_threshold, rule_offer_keys = await loop.run_in_executor(_executor, _build)
     except Exception as exc:
         return _resp(request, "error.html", {"error": str(exc)})
 
@@ -739,8 +762,17 @@ async def cleanup(request: Request):
         "account_email": account_email,
         "undo_days": get_settings().undo_window_days,
         "auto_threshold": auto_threshold,
+        "rule_offer_keys": rule_offer_keys,
     })
     return _resp(request, "cleanup.html", ctx)
+
+
+# Batch keys the user can promote into a recurring rule (learning loop). Each
+# maps to (rule name, gmail query, action) consumed by RuleRepo.create below.
+_BATCH_RULE_TEMPLATES = {
+    "promos-unopened": ("Auto-clear old promotions", "category:promotions older_than:90d", "trash"),
+    "old-clutter": ("Auto-archive year-old mail", "older_than:365d", "archive"),
+}
 
 
 @app.post("/cleanup/confirm", response_class=HTMLResponse)
@@ -752,8 +784,26 @@ async def cleanup_confirm(request: Request):
     form = await request.form()
     trash_senders = form.getlist("trash_senders")
     archive_senders = form.getlist("archive_senders")
+    feedback_raw = form.get("feedback_json", "")
+    create_rule_key = form.get("create_rule", "")
 
-    if not trash_senders and not archive_senders:
+    # Parse the learning-loop feedback payload (best-effort — bad JSON or shape
+    # must never block the purge). Expect a list of dicts with sender_email /
+    # batch_key / action / decision.
+    feedback_items: list[dict] = []
+    try:
+        import json as _json
+        parsed = _json.loads(feedback_raw) if feedback_raw else []
+        if isinstance(parsed, list):
+            feedback_items = [i for i in parsed if isinstance(i, dict)]
+    except Exception:
+        feedback_items = []
+
+    create_rule_key = create_rule_key if create_rule_key in _BATCH_RULE_TEMPLATES else ""
+
+    # Only short-circuit when there is genuinely nothing to do: no senders to
+    # purge, no feedback to record, and no rule to create.
+    if not trash_senders and not archive_senders and not feedback_items and not create_rule_key:
         return RedirectResponse("/cleanup", status_code=303)
 
     cached = _cache_get()
@@ -768,7 +818,36 @@ async def cleanup_confirm(request: Request):
     plan_actions = [("trash", trash_senders), ("archive", archive_senders)]
 
     def _do_cleanup():
-        from postmind.core.storage import UndoLogRepo, get_session
+        from postmind.core.storage import (
+            CleanupFeedbackRepo,
+            RuleDefinition,
+            RuleRepo,
+            UndoLogRepo,
+            get_session,
+        )
+
+        # Record feedback first (best-effort — never blocks the purge/rule).
+        if feedback_items:
+            try:
+                CleanupFeedbackRepo(get_session()).record_many(account_email, feedback_items)
+            except Exception:
+                pass
+
+        # Promote a repeatedly-cleaned batch into a recurring rule (best-effort).
+        if create_rule_key:
+            try:
+                name, query, rule_action = _BATCH_RULE_TEMPLATES[create_rule_key]
+                rule = RuleDefinition(
+                    account_email=account_email,
+                    name=name,
+                    natural_language="Created from the Clean Up page",
+                    gmail_query=query,
+                    action=rule_action,
+                    ai_explanation=f"Auto-created after repeatedly clearing the '{create_rule_key}' batch.",
+                )
+                RuleRepo(get_session()).create(rule)
+            except Exception:
+                pass
 
         client = _build_provider()
         total = 0
@@ -820,6 +899,11 @@ async def cleanup_confirm(request: Request):
         return _resp(request, "error.html", {"error": str(exc)})
 
     if not actions_done:
+        # No purge happened. If we still recorded feedback or created a rule,
+        # that's a successful no-op submit — just return to the page rather than
+        # surfacing an error.
+        if feedback_items or create_rule_key:
+            return RedirectResponse("/cleanup", status_code=303)
         return _resp(request, "error.html", {"error": "Nothing to do — selected senders are protected or no longer in the scan."})
 
     result_action = actions_done[0] if len(set(actions_done)) == 1 else "mixed"

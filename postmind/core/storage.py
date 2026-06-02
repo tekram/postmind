@@ -210,6 +210,22 @@ class SenderBlocklist(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class CleanupFeedbackRecord(Base):
+    """Per-decision record of what the user did with each batch member on the
+    /cleanup page — drives the learning loop (per-sender confidence priors and
+    'automate this' rule offers)."""
+
+    __tablename__ = "cleanup_feedback"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_email = Column(String, nullable=False, index=True)
+    sender_email = Column(String, nullable=False)
+    batch_key = Column(String, nullable=False)
+    action = Column(String, nullable=False)  # "trash" | "archive"
+    decision = Column(String, nullable=False)  # "approved" | "skipped" | "dropped"
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 # ── Engine / session factory ─────────────────────────────────────────────────
 
 
@@ -522,6 +538,81 @@ class RuleRepo:
             r.last_run_at = datetime.now(timezone.utc)
             r.run_count += 1
             self.s.commit()
+
+
+class CleanupFeedbackRepo:
+    """Records and aggregates /cleanup decisions for the learning loop."""
+
+    def __init__(self, session: Session):
+        self.s = session
+
+    def record_many(self, account_email: str, items: list[dict]) -> None:
+        """Bulk-insert feedback rows. Each item: {sender_email, batch_key, action, decision}.
+
+        Best-effort: rolls back on error and never raises to the caller.
+        """
+        if not items:
+            return
+        try:
+            rows = [
+                CleanupFeedbackRecord(
+                    account_email=account_email,
+                    sender_email=item["sender_email"],
+                    batch_key=item["batch_key"],
+                    action=item["action"],
+                    decision=item["decision"],
+                )
+                for item in items
+            ]
+            self.s.add_all(rows)
+            self.s.commit()
+        except Exception:
+            self.s.rollback()
+
+    def sender_priors(self, account_email: str, max_adjust: int = 15) -> dict[str, int]:
+        """Per-sender confidence adjustment learned from past decisions.
+
+        For each sender with >=1 feedback row: ``rate = approved / total`` over
+        all decisions (approved+skipped+dropped). ``adjustment =
+        round((rate - 0.5) * 2 * max_adjust)``, clamped to
+        ``[-max_adjust, +max_adjust]``. Only senders with a non-zero adjustment
+        are returned; senders never seen are absent (caller treats missing as 0).
+        """
+        rows = (
+            self.s.query(CleanupFeedbackRecord.sender_email, CleanupFeedbackRecord.decision)
+            .filter_by(account_email=account_email)
+            .all()
+        )
+        totals: dict[str, int] = {}
+        approved: dict[str, int] = {}
+        for sender_email, decision in rows:
+            totals[sender_email] = totals.get(sender_email, 0) + 1
+            if decision == "approved":
+                approved[sender_email] = approved.get(sender_email, 0) + 1
+        priors: dict[str, int] = {}
+        for sender_email, total in totals.items():
+            rate = approved.get(sender_email, 0) / total
+            adjustment = round((rate - 0.5) * 2 * max_adjust)
+            adjustment = max(-max_adjust, min(max_adjust, adjustment))
+            if adjustment != 0:
+                priors[sender_email] = adjustment
+        return priors
+
+    def batch_session_counts(self, account_email: str) -> dict[str, int]:
+        """For each batch_key, the number of DISTINCT calendar days on which that
+        batch_key had at least one 'approved' decision. Used to decide when to
+        offer an 'automate this' rule (>=3 sessions).
+        """
+        rows = (
+            self.s.query(CleanupFeedbackRecord.batch_key, CleanupFeedbackRecord.created_at)
+            .filter_by(account_email=account_email, decision="approved")
+            .all()
+        )
+        days_by_batch: dict[str, set] = {}
+        for batch_key, created_at in rows:
+            day = created_at.date() if created_at is not None else None
+            days_by_batch.setdefault(batch_key, set()).add(day)
+        return {batch_key: len(days) for batch_key, days in days_by_batch.items()}
 
 
 class BlocklistRepo:

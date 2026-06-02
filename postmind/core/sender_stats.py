@@ -1319,6 +1319,7 @@ def cleanup_plan_digest(plan: CleanupPlan) -> list[dict]:
 
 
 AUTO_SELECT_THRESHOLD = 85  # batches at/above this are pre-checked "approve"
+CONFIDENCE_PRIOR_MAX = 15  # max ± per-sender confidence nudge from learned feedback
 
 
 @dataclass
@@ -1413,6 +1414,7 @@ def build_cleanup_batches(
     groups: list[SenderGroup],
     categories: dict[str, dict] | None = None,
     auto_select_threshold: int = AUTO_SELECT_THRESHOLD,
+    sender_priors: dict[str, int] | None = None,
 ) -> CleanupBatchPlan:
     """Turn scored sender groups into semantically-named cleanup batches for the
     fast approve/skip ``/cleanup`` flow.
@@ -1426,7 +1428,14 @@ def build_cleanup_batches(
 
     Expects ``groups`` to already carry impact scores (call
     ``compute_impact_scores`` first). ``auto_select_threshold`` lets callers tune
-    which batches are pre-checked "approve" (see ``CleanupBatch.auto_select``)."""
+    which batches are pre-checked "approve" (see ``CleanupBatch.auto_select``).
+
+    ``sender_priors`` (a ``sender_email -> ±adjustment`` map from
+    ``CleanupFeedbackRepo.sender_priors``) is the learning-loop nudge: it is added
+    to each sender's confidence (clamped to ``[0, 100]``) before bucketing, so
+    approved senders rise and skipped senders fall — shifting both which batch a
+    sender lands in and the count-weighted batch confidence that drives
+    auto-select."""
     if not groups:
         return CleanupBatchPlan(
             batches=[], protected_note="", protected_count=0,
@@ -1440,6 +1449,9 @@ def build_cleanup_batches(
     candidates = [g for g in groups if classify_sender_risk(g) != "sensitive"]
 
     conf: dict[str, int] = {g.sender_email: compute_confidence_score(g) for g in candidates}
+    if sender_priors:
+        for email in conf:
+            conf[email] = max(0, min(100, conf[email] + sender_priors.get(email, 0)))
     cat: dict[str, str] = {g.sender_email: _dominant_category(g, categories) for g in candidates}
     used: set[str] = set()
 
