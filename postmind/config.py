@@ -107,9 +107,10 @@ class Settings(BaseSettings):
     # "cloud" → external API calls allowed (Anthropic); sends email data externally
     ai_mode: str = "off"
 
-    # Ollama (local AI backend)
+    # Ollama (local or cloud AI backend)
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:32b"
+    ollama_api_key: str = ""  # Bearer token for cloud Ollama (e.g. ollama.com)
 
     # Chat assistant — lets the floating assistant use a different backend/model
     # than the global ai_mode (e.g. cloud triage but a local, private chat).

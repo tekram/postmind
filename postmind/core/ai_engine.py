@@ -94,6 +94,11 @@ class AIEngine:
         elif self._mode == "local":
             self._ollama_url = settings.ollama_base_url.rstrip("/")
             self._ollama_model = ollama_model or settings.ollama_model
+            self._ollama_headers = (
+                {"Authorization": f"Bearer {settings.ollama_api_key}"}
+                if settings.ollama_api_key
+                else {}
+            )
 
         else:
             raise ValueError(
@@ -118,6 +123,7 @@ class AIEngine:
 
         resp = httpx.post(
             f"{self._ollama_url}/api/chat",
+            headers=self._ollama_headers,
             json={
                 "model": self._ollama_model,
                 "messages": [
@@ -541,6 +547,7 @@ then the body. No preamble, no sign-off commentary.
         for _ in range(max_tool_iterations):
             resp = httpx.post(
                 f"{self._ollama_url}/api/chat",
+                headers=self._ollama_headers,
                 json={"model": self._ollama_model, "messages": convo, "tools": ollama_tools, "stream": False},
                 timeout=180.0,
             )

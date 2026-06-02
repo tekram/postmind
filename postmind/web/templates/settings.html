@@ -83,9 +83,17 @@
                        placeholder="llama3.2"
                        class="pm-input flex-1 text-xs py-1.5 font-mono">
               </div>
+              <div class="flex items-center gap-2">
+                <label class="text-xs text-ink-subtle w-24 shrink-0">API Key</label>
+                <input type="password" name="ollama_api_key"
+                       value=""
+                       placeholder="{% if has_ollama_key %}already set{% else %}optional — for cloud Ollama{% endif %}"
+                       autocomplete="off"
+                       class="pm-input flex-1 text-xs py-1.5 font-mono">
+              </div>
               <p class="text-xs text-ink-tertiary">
-                Run <code class="bg-surface-2 px-1 rounded-chip font-mono">ollama pull llama3.2</code> to download the model.
-                Any model listed by <code class="bg-surface-2 px-1 rounded-chip font-mono">ollama list</code> works.
+                Local: run <code class="bg-surface-2 px-1 rounded-chip font-mono">ollama pull llama3.2</code>. Leave API key blank.<br>
+                Cloud: set URL to <code class="bg-surface-2 px-1 rounded-chip font-mono">https://ollama.com</code> and enter your <a href="https://ollama.com/settings/keys" target="_blank" class="underline">ollama.com API key</a>.
               </p>
             </div>
           </div>
@@ -94,19 +102,30 @@
         <label class="flex items-start gap-3 p-3 rounded-input border cursor-pointer transition-colors
                       {% if ai_mode == 'cloud' %}border-warning bg-warning-bg{% else %}border-hairline hover:border-hairline-strong{% endif %}">
           <input type="radio" name="mode" value="cloud" {% if ai_mode == 'cloud' %}checked{% endif %}
-                 class="mt-0.5 text-warning">
-          <div>
+                 class="mt-0.5 text-warning" id="mode-cloud">
+          <div class="flex-1">
             <p class="text-sm font-medium text-ink">Cloud</p>
             <p class="text-xs text-ink-subtle mt-0.5">
               Uses Anthropic Claude API. Email subjects + snippets (≤300 chars) are sent externally.
-              Requires <code class="font-mono bg-surface-2 px-1 rounded-chip">ANTHROPIC_API_KEY</code>.
             </p>
-            {% if not has_api_key %}
-            <p class="text-xs text-warning mt-1.5 font-medium flex items-center gap-1.5">
-              <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
-              No API key set — set ANTHROPIC_API_KEY in your environment.
-            </p>
-            {% endif %}
+            <div id="cloud-config" class="mt-3 space-y-2 {% if ai_mode != 'cloud' %}hidden{% endif %}">
+              <div class="flex items-center gap-2">
+                <label class="text-xs text-ink-subtle w-24 shrink-0">API Key</label>
+                <input type="password" name="anthropic_api_key"
+                       value=""
+                       placeholder="{% if has_api_key %}sk-ant-… (already set){% else %}sk-ant-…{% endif %}"
+                       autocomplete="off"
+                       class="pm-input flex-1 text-xs py-1.5 font-mono">
+              </div>
+              {% if not has_api_key %}
+              <p class="text-xs text-warning font-medium flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+                No API key set — enter one above.
+              </p>
+              {% else %}
+              <p class="text-xs text-ink-tertiary">API key is set. Enter a new value above only to replace it.</p>
+              {% endif %}
+            </div>
           </div>
         </label>
 
@@ -367,6 +386,7 @@
   document.querySelectorAll('input[name="mode"]').forEach(function(radio) {
     radio.addEventListener('change', function() {
       document.getElementById('ollama-config').classList.toggle('hidden', this.value !== 'local');
+      document.getElementById('cloud-config').classList.toggle('hidden', this.value !== 'cloud');
     });
   });
 

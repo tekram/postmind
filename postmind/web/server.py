@@ -879,6 +879,7 @@ async def settings_page(request: Request):
             "has_api_key": bool(s.anthropic_api_key),
             "ollama_base_url": s.ollama_base_url,
             "ollama_model": s.ollama_model,
+            "has_ollama_key": bool(s.ollama_api_key),
             "chat_ai_mode": s.chat_ai_mode,  # "" = inherit
             "chat_cloud_model": s.chat_cloud_model or s.ai_model,
             "chat_ollama_model": s.chat_ollama_model or s.ollama_model,
@@ -888,7 +889,7 @@ async def settings_page(request: Request):
         ctx.update({
             "ai_mode": "off", "provider": "gmail",
             "imap_server": "", "imap_user": "",
-            "undo_days": 30, "has_api_key": False,
+            "undo_days": 30, "has_api_key": False, "has_ollama_key": False,
             "ollama_base_url": "http://localhost:11434",
             "ollama_model": "llama3.2",
             "chat_ai_mode": "", "chat_cloud_model": "claude-sonnet-4-6",
@@ -1474,8 +1475,11 @@ def _persist_ai_mode(form) -> str:
     if mode == "local":
         url = (form.get("ollama_base_url") or "http://localhost:11434").strip()
         model = (form.get("ollama_model") or "qwen2.5:32b").strip()
-        updates["MAILTRIM_OLLAMA_BASE_URL"] = url
-        updates["MAILTRIM_OLLAMA_MODEL"] = model
+        updates["POSTMIND_OLLAMA_BASE_URL"] = url
+        updates["POSTMIND_OLLAMA_MODEL"] = model
+        ollama_key = (form.get("ollama_api_key") or "").strip()
+        if ollama_key:
+            updates["POSTMIND_OLLAMA_API_KEY"] = ollama_key
     elif mode == "cloud":
         api_key = (form.get("anthropic_api_key") or "").strip()
         if api_key:
