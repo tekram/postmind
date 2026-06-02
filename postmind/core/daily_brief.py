@@ -38,12 +38,13 @@ class DailyBriefGenerator:
         stats = self._gather_stats()
         content, ai_used = self._generate_content(stats)
 
-        # Persist the emails the brief is actually about (high-priority first,
-        # else the recent unread it surfaced) so the UI can render deep links
-        # to each one. Mirrors the "attention" set the AI narrative describes.
+        # Persist the emails the brief is actually about so the UI can render
+        # deep links to each one. We surface *only* high-priority/action-required
+        # emails — and all of them — never padding the list with merely-recent
+        # unread, so the "What needs attention" list stays genuinely actionable.
         import json
-        identified = stats["high_priority_items"] or stats["recent_unread"]
-        items_json = json.dumps(identified[:8]) if identified else None
+        identified = stats["high_priority_items"]
+        items_json = json.dumps(identified) if identified else None
 
         brief = DailyBrief(
             account_email=self.account_email,
