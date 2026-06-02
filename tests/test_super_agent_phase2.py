@@ -158,6 +158,41 @@ def test_stage_label_requires_label_name(seeded, monkeypatch):
     assert "label name" in result.lower()
 
 
+def test_executor_read_tools_reference_agent_tools(seeded, monkeypatch):
+    """Regression: the executor closure imports ``agent_tools`` at its top scope.
+
+    A stray ``from postmind.core import agent_tools`` inside one branch made
+    ``agent_tools`` a function-local of ``_executor_tool``, so the earlier
+    ``analyze_storage`` / ``find_largest_messages`` branches raised
+    UnboundLocalError ("cannot access local variable 'agent_tools'") and the
+    Super Agent reported 'technical difficulties accessing tools'. These two
+    branches must run cleanly through the real executor.
+    """
+    server, account, _ = seeded
+    from postmind.core.gmail_client import Message, MessageHeader
+
+    prov = MagicMock()
+    prov.supports.return_value = True
+    prov.list_message_ids.return_value = ["m1"]
+    prov.get_messages_metadata.return_value = [
+        Message(
+            id="m1", thread_id="t1", label_ids=[], snippet="",
+            headers=MessageHeader(from_="a@b.com", subject="Big file"),
+            size_estimate=2_500_000,
+        )
+    ]
+    monkeypatch.setattr(server, "_build_provider", lambda: prov)
+
+    executor = server._build_agent_tool_executor(account, MagicMock(), [], [])
+
+    largest = executor("find_largest_messages", {"query": "has:attachment", "limit": 1})
+    assert "agent_tools" not in largest  # no UnboundLocalError leaked into result
+    assert "MB" in largest
+
+    storage = executor("analyze_storage", {"group_by": "sender", "top_n": 5})
+    assert "agent_tools" not in storage
+
+
 def test_action_confirm_records_undo_and_calls_provider(seeded, monkeypatch):
     server, account, _ = seeded
     prov = MagicMock()

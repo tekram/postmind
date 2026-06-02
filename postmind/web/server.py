@@ -2997,7 +2997,6 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
             except Exception as exc:
                 return f"Couldn't fetch message sizes: {exc}"
         if name == "find_unopened_subscriptions":
-            from postmind.core import agent_tools
             from postmind.core.storage import get_session
             if not account_email:
                 return "No active account."
