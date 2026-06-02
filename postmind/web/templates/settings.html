@@ -92,8 +92,8 @@
                        class="pm-input flex-1 text-xs py-1.5 font-mono">
               </div>
               <p class="text-xs text-ink-tertiary">
-                Local: run <code class="bg-surface-2 px-1 rounded-chip font-mono">ollama pull llama3.2</code>. Leave API key blank.<br>
-                Cloud: set URL to <code class="bg-surface-2 px-1 rounded-chip font-mono">https://ollama.com</code> and enter your <a href="https://ollama.com/settings/keys" target="_blank" class="underline">ollama.com API key</a>.
+                Run <code class="bg-surface-2 px-1 rounded-chip font-mono">ollama pull llama3.2</code> to download a model.
+                Any model from <code class="bg-surface-2 px-1 rounded-chip font-mono">ollama list</code> works. Leave API key blank for local.
               </p>
             </div>
           </div>
@@ -105,26 +105,67 @@
                  class="mt-0.5 text-warning" id="mode-cloud">
           <div class="flex-1">
             <p class="text-sm font-medium text-ink">Cloud</p>
-            <p class="text-xs text-ink-subtle mt-0.5">
-              Uses Anthropic Claude API. Email subjects + snippets (≤300 chars) are sent externally.
-            </p>
-            <div id="cloud-config" class="mt-3 space-y-2 {% if ai_mode != 'cloud' %}hidden{% endif %}">
-              <div class="flex items-center gap-2">
-                <label class="text-xs text-ink-subtle w-24 shrink-0">API Key</label>
-                <input type="password" name="anthropic_api_key"
-                       value=""
-                       placeholder="{% if has_api_key %}sk-ant-… (already set){% else %}sk-ant-…{% endif %}"
-                       autocomplete="off"
-                       class="pm-input flex-1 text-xs py-1.5 font-mono">
+            <p class="text-xs text-ink-subtle mt-0.5">AI runs on an external provider. Email subjects + snippets (≤300 chars) are sent externally.</p>
+            <div id="cloud-config" class="mt-3 space-y-3 {% if ai_mode != 'cloud' %}hidden{% endif %}">
+              <!-- Provider selector -->
+              <div class="flex gap-3">
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="cloud_provider" value="anthropic"
+                         {% if cloud_provider != 'ollama' %}checked{% endif %}
+                         class="text-warning cloud-provider-radio">
+                  <span class="text-xs font-medium text-ink">Anthropic</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="cloud_provider" value="ollama"
+                         {% if cloud_provider == 'ollama' %}checked{% endif %}
+                         class="text-warning cloud-provider-radio">
+                  <span class="text-xs font-medium text-ink">Ollama</span>
+                </label>
               </div>
-              {% if not has_api_key %}
-              <p class="text-xs text-warning font-medium flex items-center gap-1.5">
-                <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
-                No API key set — enter one above.
-              </p>
-              {% else %}
-              <p class="text-xs text-ink-tertiary">API key is set. Enter a new value above only to replace it.</p>
-              {% endif %}
+              <!-- Anthropic fields -->
+              <div id="cloud-anthropic-config" class="space-y-2 {% if cloud_provider == 'ollama' %}hidden{% endif %}">
+                <div class="flex items-center gap-2">
+                  <label class="text-xs text-ink-subtle w-24 shrink-0">API Key</label>
+                  <input type="password" name="anthropic_api_key"
+                         value=""
+                         placeholder="{% if has_api_key %}sk-ant-… (already set){% else %}sk-ant-…{% endif %}"
+                         autocomplete="off"
+                         class="pm-input flex-1 text-xs py-1.5 font-mono">
+                </div>
+                {% if not has_api_key %}
+                <p class="text-xs text-warning font-medium flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+                  No API key set — enter one above.
+                </p>
+                {% else %}
+                <p class="text-xs text-ink-tertiary">API key is set. Enter a new value above only to replace it.</p>
+                {% endif %}
+              </div>
+              <!-- Ollama cloud fields -->
+              <div id="cloud-ollama-config" class="space-y-2 {% if cloud_provider != 'ollama' %}hidden{% endif %}">
+                <div class="flex items-center gap-2">
+                  <label class="text-xs text-ink-subtle w-24 shrink-0">Ollama URL</label>
+                  <input type="text" name="ollama_base_url"
+                         value="{{ ollama_base_url }}"
+                         placeholder="https://ollama.com"
+                         class="pm-input flex-1 text-xs py-1.5 font-mono">
+                </div>
+                <div class="flex items-center gap-2">
+                  <label class="text-xs text-ink-subtle w-24 shrink-0">Model</label>
+                  <input type="text" name="ollama_model"
+                         value="{{ ollama_model }}"
+                         placeholder="llama3.2"
+                         class="pm-input flex-1 text-xs py-1.5 font-mono">
+                </div>
+                <div class="flex items-center gap-2">
+                  <label class="text-xs text-ink-subtle w-24 shrink-0">API Key</label>
+                  <input type="password" name="ollama_api_key"
+                         value=""
+                         placeholder="{% if has_ollama_key %}already set{% else %}from ollama.com/settings/keys{% endif %}"
+                         autocomplete="off"
+                         class="pm-input flex-1 text-xs py-1.5 font-mono">
+                </div>
+              </div>
             </div>
           </div>
         </label>
@@ -389,6 +430,13 @@
     radio.addEventListener('change', function() {
       document.getElementById('ollama-config').classList.toggle('hidden', this.value !== 'local');
       document.getElementById('cloud-config').classList.toggle('hidden', this.value !== 'cloud');
+    });
+  });
+
+  document.querySelectorAll('.cloud-provider-radio').forEach(function(radio) {
+    radio.addEventListener('change', function() {
+      document.getElementById('cloud-anthropic-config').classList.toggle('hidden', this.value !== 'anthropic');
+      document.getElementById('cloud-ollama-config').classList.toggle('hidden', this.value !== 'ollama');
     });
   });
 

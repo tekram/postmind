@@ -106,6 +106,7 @@ class Settings(BaseSettings):
     # "local" → only local backends (Ollama, llama.cpp) — nothing leaves the machine
     # "cloud" → external API calls allowed (Anthropic); sends email data externally
     ai_mode: str = "off"
+    cloud_provider: str = "anthropic"  # "anthropic" | "ollama"
 
     # Ollama (local or cloud AI backend)
     ollama_base_url: str = "http://localhost:11434"

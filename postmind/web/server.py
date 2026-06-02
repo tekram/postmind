@@ -877,6 +877,7 @@ async def settings_page(request: Request):
             "imap_user": acct_cfg.get("imap_user", s.imap_user),
             "undo_days": s.undo_window_days,
             "has_api_key": bool(s.anthropic_api_key),
+            "cloud_provider": s.cloud_provider,
             "ollama_base_url": s.ollama_base_url,
             "ollama_model": s.ollama_model,
             "has_ollama_key": bool(s.ollama_api_key),
@@ -890,6 +891,7 @@ async def settings_page(request: Request):
             "ai_mode": "off", "provider": "gmail",
             "imap_server": "", "imap_user": "",
             "undo_days": 30, "has_api_key": False, "has_ollama_key": False,
+            "cloud_provider": "anthropic",
             "ollama_base_url": "http://localhost:11434",
             "ollama_model": "llama3.2",
             "chat_ai_mode": "", "chat_cloud_model": "claude-sonnet-4-6",
@@ -1481,9 +1483,23 @@ def _persist_ai_mode(form) -> str:
         if ollama_key:
             updates["POSTMIND_OLLAMA_API_KEY"] = ollama_key
     elif mode == "cloud":
-        api_key = (form.get("anthropic_api_key") or "").strip()
-        if api_key:
-            updates["ANTHROPIC_API_KEY"] = api_key
+        cloud_provider = (form.get("cloud_provider") or "anthropic").strip()
+        if cloud_provider not in ("anthropic", "ollama"):
+            cloud_provider = "anthropic"
+        updates["POSTMIND_CLOUD_PROVIDER"] = cloud_provider
+        if cloud_provider == "anthropic":
+            api_key = (form.get("anthropic_api_key") or "").strip()
+            if api_key:
+                updates["ANTHROPIC_API_KEY"] = api_key
+        else:
+            url = (form.get("ollama_base_url") or "https://ollama.com").strip()
+            model = (form.get("ollama_model") or "").strip()
+            updates["POSTMIND_OLLAMA_BASE_URL"] = url
+            if model:
+                updates["POSTMIND_OLLAMA_MODEL"] = model
+            ollama_key = (form.get("ollama_api_key") or "").strip()
+            if ollama_key:
+                updates["POSTMIND_OLLAMA_API_KEY"] = ollama_key
 
     _write_env(updates)
     return mode

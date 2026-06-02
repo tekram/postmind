@@ -79,7 +79,18 @@ class AIEngine:
         settings = get_settings()
         self._mode = mode or settings.ai_mode
 
-        if self._mode == "cloud":
+        if self._mode == "cloud" and settings.cloud_provider == "ollama":
+            # Cloud Ollama — same transport as local but user explicitly opted in to external calls
+            self._mode = "local"
+            self._ollama_url = settings.ollama_base_url.rstrip("/")
+            self._ollama_model = ollama_model or settings.ollama_model
+            self._ollama_headers = (
+                {"Authorization": f"Bearer {settings.ollama_api_key}"}
+                if settings.ollama_api_key
+                else {}
+            )
+
+        elif self._mode == "cloud":
             import anthropic
 
             key = api_key or settings.anthropic_api_key
