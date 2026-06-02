@@ -313,8 +313,19 @@ class EmailRepo:
             col_names = [
                 c.name for c in EmailRecord.__table__.columns if c.name != "id"
             ]
+            # Python-side column defaults (e.g. synced_at) only fire on ORM
+            # flush; the core insert below bypasses that, so stamp them here
+            # or every bulk-synced row lands with synced_at = NULL.
+            now = datetime.now(timezone.utc)
             rows = [
-                {col: getattr(r, col) for col in col_names}
+                {
+                    col: (
+                        getattr(r, col)
+                        if getattr(r, col) is not None
+                        else (now if col == "synced_at" else getattr(r, col))
+                    )
+                    for col in col_names
+                }
                 for r in records
             ]
             stmt = sqlite_insert(EmailRecord.__table__).values(rows)
@@ -864,6 +875,38 @@ class AccountRepo:
         if acct:
             acct.last_synced_at = datetime.now(timezone.utc)
             self.s.commit()
+
+    def backfill_last_synced(self, email: str) -> None:
+        """Repair a missing last_synced_at for accounts that already have
+        cached emails.
+
+        Big or interrupted syncs commit emails chunk-by-chunk but historically
+        only stamped last_synced_at after the *entire* run finished, so a
+        mailbox could hold tens of thousands of cached emails yet still report
+        "Never" synced. If the account has cached emails but no timestamp, use
+        the freshest available row time (falling back to now) so the UI reports
+        the truth: this mailbox has been synced.
+        """
+        acct = self.get(email)
+        if not acct or acct.last_synced_at is not None:
+            return
+        from datetime import datetime, timezone
+        from sqlalchemy import func
+
+        newest = (
+            self.s.query(func.max(EmailRecord.synced_at))
+            .filter(EmailRecord.account_email == email)
+            .scalar()
+        )
+        cached_any = (
+            self.s.query(EmailRecord.id)
+            .filter(EmailRecord.account_email == email)
+            .first()
+        )
+        if not cached_any:
+            return
+        acct.last_synced_at = newest or datetime.now(timezone.utc)
+        self.s.commit()
 
     def mark_welcomed(self, email: str) -> None:
         from datetime import datetime, timezone

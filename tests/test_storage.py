@@ -326,3 +326,98 @@ def test_existing_gmail_ids_ignores_other_accounts():
 
     assert repo.existing_gmail_ids("account_a@test.com") == {"id_a"}
     assert repo.existing_gmail_ids("account_b@test.com") == {"id_b"}
+
+
+# ── synced_at population & last-sync backfill ─────────────────────────────────
+
+
+def test_upsert_many_populates_synced_at():
+    """Bulk upsert must stamp synced_at — the bulk path used to insert NULL,
+    leaving the cache with no record of when rows were fetched."""
+    from postmind.core.storage import EmailRecord, EmailRepo, get_session
+
+    session = get_session()
+    repo = EmailRepo(session)
+
+    repo.upsert_many([
+        EmailRecord(
+            account_email="stamp@test.com",
+            gmail_id="stamp_1",
+            thread_id="t1",
+            subject="",
+            sender_email="x@y.com",
+            sender_name="",
+            snippet="",
+            label_ids_json="[]",
+            internal_date=0,
+            size_estimate=0,
+            is_unread=False,
+            is_inbox=True,
+        )
+    ])
+
+    rec = repo.get("stamp_1")
+    assert rec.synced_at is not None, "upsert_many left synced_at NULL"
+
+
+def test_backfill_last_synced_when_null_but_cached():
+    """If an account has cached emails but no last_synced_at (e.g. an
+    interrupted big sync), backfill should set a timestamp so the UI stops
+    claiming the mailbox was 'Never' synced."""
+    from postmind.core.storage import (
+        AccountRepo,
+        EmailRecord,
+        EmailRepo,
+        get_session,
+    )
+
+    session = get_session()
+    AccountRepo(session).register("back@test.com")
+    EmailRepo(session).upsert_many([
+        EmailRecord(
+            account_email="back@test.com",
+            gmail_id="b1",
+            thread_id="t1",
+            subject="",
+            sender_email="x@y.com",
+            sender_name="",
+            snippet="",
+            label_ids_json="[]",
+            internal_date=0,
+            size_estimate=0,
+            is_unread=False,
+            is_inbox=True,
+        )
+    ])
+
+    acct = AccountRepo(session).get("back@test.com")
+    assert acct.last_synced_at is None  # precondition
+
+    AccountRepo(session).backfill_last_synced("back@test.com")
+
+    acct = AccountRepo(session).get("back@test.com")
+    assert acct.last_synced_at is not None
+
+
+def test_backfill_last_synced_preserves_existing():
+    """Backfill must not clobber a real last_synced_at timestamp."""
+    from postmind.core.storage import AccountRepo, get_session
+
+    session = get_session()
+    AccountRepo(session).register("keep@test.com")
+    AccountRepo(session).update_last_synced("keep@test.com")
+    before = AccountRepo(session).get("keep@test.com").last_synced_at
+
+    AccountRepo(session).backfill_last_synced("keep@test.com")
+    after = AccountRepo(session).get("keep@test.com").last_synced_at
+    assert after == before
+
+
+def test_backfill_last_synced_noop_without_cache():
+    """No cached emails → nothing to backfill, stays None/'Never'."""
+    from postmind.core.storage import AccountRepo, get_session
+
+    session = get_session()
+    AccountRepo(session).register("empty@test.com")
+    AccountRepo(session).backfill_last_synced("empty@test.com")
+    assert AccountRepo(session).get("empty@test.com").last_synced_at is None

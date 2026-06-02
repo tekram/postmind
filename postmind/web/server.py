@@ -1130,7 +1130,16 @@ async def accounts_page(request: Request):
     from postmind.core.account_registry import list_accounts
     from postmind.config import token_path_for
     from postmind.core.storage import AccountRepo, get_session
-    all_db = {r.email: r for r in AccountRepo(get_session()).list_all()}
+    _acct_session = get_session()
+    _acct_repo = AccountRepo(_acct_session)
+    # Repair any account whose timestamp was lost to an interrupted big sync,
+    # so the page reports the truth instead of "Never".
+    for a in list_accounts():
+        try:
+            _acct_repo.backfill_last_synced(a.email)
+        except Exception:
+            pass
+    all_db = {r.email: r for r in _acct_repo.list_all()}
     accounts_detail = []
     for a in list_accounts():
         db_row = all_db.get(a.email)
@@ -1798,10 +1807,127 @@ async def blocked_remove(request: Request):
 # ── Sync ─────────────────────────────────────────────────────────────────────
 
 
+def _humanize_bytes(n: int) -> str:
+    """Compact human-readable byte size, e.g. 4.2 MB."""
+    step = 1024.0
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < step or unit == "TB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= step
+    return f"{n:.1f} TB"
+
+
+def _humanize_ago(dt) -> str:
+    """Relative 'time ago' string from a UTC datetime."""
+    from datetime import datetime, timezone
+
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    secs = (datetime.now(timezone.utc) - dt).total_seconds()
+    if secs < 60:
+        return "just now"
+    mins = secs / 60
+    if mins < 60:
+        return f"{int(mins)} min ago"
+    hours = mins / 60
+    if hours < 24:
+        return f"{int(hours)} hr ago"
+    days = hours / 24
+    if days < 30:
+        return f"{int(days)} day{'s' if int(days) != 1 else ''} ago"
+    months = days / 30
+    if months < 12:
+        return f"{int(months)} mo ago"
+    return f"{int(months / 12)} yr ago"
+
+
+def _sync_overview(account_email: str) -> dict:
+    """Cache freshness + size stats for the Sync page.
+
+    Reads everything from local SQLite (instant) except the mailbox total,
+    which needs one best-effort Gmail profile call to compute coverage.
+    """
+    from datetime import datetime, timezone
+
+    import postmind.config as _cfg
+    from postmind.core.storage import AccountRepo, EmailRecord, get_session
+
+    overview: dict = {"has_cache": False}
+    if not account_email:
+        return overview
+
+    session = get_session()
+    try:
+        # Repair a missing timestamp from a big/interrupted sync so the page
+        # tells the truth instead of "Never".
+        AccountRepo(session).backfill_last_synced(account_email)
+        acct = AccountRepo(session).get(account_email)
+
+        base = session.query(EmailRecord).filter(
+            EmailRecord.account_email == account_email
+        )
+        total = base.count()
+        if total == 0:
+            return overview
+
+        inbox = base.filter(EmailRecord.is_inbox.is_(True)).count()
+        sent = base.filter(EmailRecord.label_ids_json.like('%"SENT"%')).count()
+        archived = max(total - inbox - sent, 0)
+
+        last_dt = acct.last_synced_at if acct else None
+
+        # Best-effort live mailbox total for a coverage %. Network call, Gmail
+        # only — keep it cheap and never let a failure break the page.
+        mailbox_total = 0
+        try:
+            from postmind.config import load_account_config
+
+            if load_account_config(account_email).get("provider", "gmail") == "gmail":
+                from postmind.core.gmail_client import GmailClient
+
+                mailbox_total = GmailClient().get_profile().get(
+                    "messagesTotal", 0
+                ) or 0
+        except Exception:
+            mailbox_total = 0
+
+        coverage_pct = (
+            min(round(total / mailbox_total * 100), 100)
+            if mailbox_total else 0
+        )
+
+        db_path = _cfg.DB_PATH
+        try:
+            db_size = db_path.stat().st_size
+        except Exception:
+            db_size = 0
+
+        return {
+            "has_cache": True,
+            "last_synced_ago": _humanize_ago(last_dt) if last_dt else None,
+            "last_synced_abs": (
+                last_dt.astimezone(timezone.utc).strftime("%b %d, %Y · %H:%M UTC")
+                if last_dt else None
+            ),
+            "total_cached": total,
+            "inbox_cached": inbox,
+            "sent_cached": sent,
+            "archived_cached": archived,
+            "mailbox_total": mailbox_total,
+            "coverage_pct": coverage_pct,
+            "db_size": _humanize_bytes(db_size),
+        }
+    finally:
+        session.close()
+
+
 @app.get("/sync", response_class=HTMLResponse)
 async def sync_page(request: Request):
     ctx = _base()
     ctx["active"] = "sync"
+    ctx["overview"] = _sync_overview(_get_web_account() or "")
     return _resp(request, "sync.html", ctx)
 
 
@@ -1850,7 +1976,7 @@ async def sync_start(request: Request):
         import time as _time
 
         from postmind.core.gmail_client import GmailClient
-        from postmind.core.storage import EmailRecord, EmailRepo, UndoLogRepo, get_session
+        from postmind.core.storage import AccountRepo, EmailRecord, EmailRepo, UndoLogRepo, get_session
         from sqlalchemy import select as _select
         from postmind.core.storage import EmailRecord as _ER
 
@@ -1867,6 +1993,15 @@ async def sync_start(request: Request):
             session = get_session()
             repo = EmailRepo(session)
             chunk_size = 50
+
+            # Ensure the account exists in the DB so update_last_synced (called
+            # per chunk below) actually records the timestamp instead of
+            # silently no-opping on a missing row.
+            if account_email:
+                try:
+                    AccountRepo(session).register(account_email)
+                except Exception:
+                    pass
 
             # Load existing IDs once for dedup across all ranges
             existing_ids: set[str] = set(
@@ -1947,6 +2082,13 @@ async def sync_start(request: Request):
                         for msg in messages
                     ]
                     repo.upsert_many(records)
+                    # Stamp freshness as we go, not just at the end — a large
+                    # mailbox sync gets rate-limited / interrupted, and we want
+                    # the cache to still report when it was last touched.
+                    try:
+                        AccountRepo(session).update_last_synced(account_email)
+                    except Exception:
+                        pass
                     existing_ids.update(r.gmail_id for r in records)
                     total_saved += len(records)
                     # Items the batch silently dropped (per-message API errors).

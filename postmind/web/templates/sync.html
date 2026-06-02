@@ -11,6 +11,70 @@
     </p>
   </div>
 
+  {% if overview and overview.has_cache %}
+  <div class="pm-card mb-5">
+    <div class="px-5 py-4 border-b border-hairline flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <!-- Lucide: database -->
+        <svg class="w-4 h-4 text-ink-subtle shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+          <ellipse cx="12" cy="5" rx="8" ry="3"/>
+          <path stroke-linecap="round" d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/>
+        </svg>
+        <span class="font-medium text-ink">Local cache</span>
+      </div>
+      {% if overview.last_synced_ago %}
+      <span class="text-xs text-ink-tertiary" title="{{ overview.last_synced_abs }}">
+        Last sync: <span class="text-ink-muted font-medium">{{ overview.last_synced_ago }}</span>
+      </span>
+      {% else %}
+      <span class="text-xs text-ink-tertiary">Sync time unrecorded</span>
+      {% endif %}
+    </div>
+
+    <div class="p-5 grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div>
+        <p class="text-xl font-semibold text-ink tabular">{{ "{:,}".format(overview.total_cached) }}</p>
+        <p class="text-xs text-ink-tertiary mt-0.5">Emails cached</p>
+      </div>
+      <div>
+        <p class="text-xl font-semibold text-ink tabular">{{ "{:,}".format(overview.inbox_cached) }}</p>
+        <p class="text-xs text-ink-tertiary mt-0.5">Inbox</p>
+      </div>
+      <div>
+        <p class="text-xl font-semibold text-ink tabular">{{ "{:,}".format(overview.sent_cached) }}</p>
+        <p class="text-xs text-ink-tertiary mt-0.5">Sent</p>
+      </div>
+      <div>
+        <p class="text-xl font-semibold text-ink tabular">{{ "{:,}".format(overview.archived_cached) }}</p>
+        <p class="text-xs text-ink-tertiary mt-0.5">Archived</p>
+      </div>
+    </div>
+
+    {% if overview.mailbox_total %}
+    <div class="px-5 pb-5">
+      <div class="flex items-center justify-between text-xs mb-1.5">
+        <span class="text-ink-tertiary">Mailbox coverage</span>
+        <span class="text-ink-muted font-medium tabular">
+          {{ "{:,}".format(overview.total_cached) }} of ~{{ "{:,}".format(overview.mailbox_total) }} ({{ overview.coverage_pct }}%)
+        </span>
+      </div>
+      <div class="h-1.5 rounded-full bg-surface-2 overflow-hidden">
+        <div class="h-full bg-accent rounded-full" style="width: {{ overview.coverage_pct }}%"></div>
+      </div>
+      {% if overview.coverage_pct < 100 %}
+      <p class="text-xs text-ink-tertiary mt-2">
+        Not everything is cached yet — run a full mailbox sync below to close the gap.
+      </p>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="px-5 py-2.5 border-t border-hairline">
+      <span class="text-xs text-ink-tertiary">Cache size on disk: <span class="text-ink-muted tabular">{{ overview.db_size }}</span></span>
+    </div>
+  </div>
+  {% endif %}
+
   {% if not is_authed %}
   <div class="bg-warning-bg border border-warning-border rounded-card p-5 mb-6">
     <p class="text-warning font-medium text-sm">Not authenticated</p>
