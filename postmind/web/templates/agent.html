@@ -33,7 +33,8 @@
         "What's eating my storage?",
         "Find my largest emails",
         "Delete everything from no-reply senders",
-        "Create an agent that archives newsletters weekly"
+        "Create an agent that archives newsletters weekly",
+        "Find newsletters older than 2 years and let me review them"
       ] %}
       <button class="agent-example pm-pill text-ink-muted bg-surface-2 hover:bg-surface border border-hairline hover:border-hairline-strong transition-colors">{{ ex }}</button>
       {% endfor %}
@@ -49,6 +50,27 @@
     </form>
   </div>
 </div>
+
+  <!-- Action Panel drawer -->
+  <div id="review-scrim" class="fixed inset-0 bg-black/30 z-40 hidden"></div>
+  <aside id="review-drawer" class="fixed top-0 right-0 h-full w-full max-w-md bg-surface border-l border-hairline shadow-xl z-50 translate-x-full transition-transform duration-200 flex flex-col">
+    <div class="px-5 py-4 border-b border-hairline flex items-center justify-between">
+      <div>
+        <h2 class="text-sm font-semibold text-ink">Review &amp; trash</h2>
+        <p id="review-desc" class="text-xs text-ink-subtle"></p>
+      </div>
+      <div class="flex items-center gap-1 text-xs">
+        <button type="button" class="review-view pm-pill border border-hairline" data-view="grouped">Grouped</button>
+        <button type="button" class="review-view pm-pill border border-hairline" data-view="individual">Individual</button>
+        <button id="review-close" type="button" class="ml-2 text-ink-subtle hover:text-ink p-1" aria-label="Close">&times;</button>
+      </div>
+    </div>
+    <div id="review-body" class="flex-1 overflow-y-auto px-5 py-3 text-sm"></div>
+    <div class="px-5 py-3 border-t border-hairline flex items-center justify-between gap-3">
+      <span id="review-summary" class="text-xs text-ink-subtle tabular"></span>
+      <button id="review-confirm" type="button" class="pm-btn px-4 py-1.5" disabled>Move to Trash</button>
+    </div>
+  </aside>
 
 <script>
 (function () {
@@ -168,6 +190,14 @@
         '<input type="hidden" name="natural_language" value="' + esc(f.natural_language) + '">' +
         '<button type="submit" class="pm-btn mt-3 px-4 py-1.5">Create rule</button>' +
       '</form>';
+    }
+    if (card.type === "trash_review") {
+      const f = card.fields || {};
+      return '<div class="mt-2 border border-accent-border bg-surface rounded-card p-4 shadow-whisper max-w-md">' +
+        '<p class="flex items-center gap-1.5 text-sm font-semibold text-ink mb-1">' + CARD_SPARK + esc(card.title || "Review emails") + '</p>' +
+        '<p class="text-xs text-ink-subtle mb-3">' + esc(f.total_count) + ' emails · ' + esc(f.sender_count) + ' sender(s) · reversible, undoable for 30 days.</p>' +
+        '<button type="button" class="pm-btn px-4 py-1.5 open-review" data-token="' + esc(f.token) + '" data-desc="' + esc(f.description || "") + '">Open review &rarr;</button>' +
+      '</div>';
     }
     return "";
   }
@@ -402,6 +432,117 @@
     if (!text) return;
     input.value = ""; input.style.height = "auto";
     send(text);
+  });
+
+  // ── Action Panel (review drawer) ──────────────────────────────────────────
+  const drawer = document.getElementById("review-drawer");
+  const scrim = document.getElementById("review-scrim");
+  const reviewBody = document.getElementById("review-body");
+  const reviewDesc = document.getElementById("review-desc");
+  const reviewSummary = document.getElementById("review-summary");
+  const reviewConfirm = document.getElementById("review-confirm");
+  let reviewState = { token: null, groups: [], view: "grouped" };
+
+  function openDrawer() { drawer.classList.remove("translate-x-full"); scrim.classList.remove("hidden"); }
+  function closeDrawer() { drawer.classList.add("translate-x-full"); scrim.classList.add("hidden"); }
+  document.getElementById("review-close").addEventListener("click", closeDrawer);
+  scrim.addEventListener("click", closeDrawer);
+
+  function selectedIds() {
+    return Array.from(reviewBody.querySelectorAll('input.review-email:checked')).map(c => c.value);
+  }
+  function refreshSummary() {
+    const n = selectedIds().length;
+    reviewSummary.textContent = n + " selected";
+    reviewConfirm.disabled = n === 0;
+  }
+
+  function renderReview() {
+    const g = reviewState.groups;
+    let h = "";
+    if (reviewState.view === "grouped") {
+      for (const grp of g) {
+        const badge = grp.sensitive ? ' <span class="text-[10px] text-warning bg-warning-bg border border-warning-border rounded px-1">sensitive</span>' : "";
+        h += '<details class="border-b border-hairline py-2" ' + (grp.sensitive ? "" : "open") + '>' +
+          '<summary class="flex items-center justify-between gap-2 cursor-pointer list-none">' +
+            '<span class="flex items-center gap-2 min-w-0"><input type="checkbox" class="review-master rounded text-accent" ' + (grp.sensitive ? "" : "checked") + '>' +
+              '<span class="text-xs text-ink-muted truncate">' + esc(grp.sender_email) + badge + '</span></span>' +
+            '<span class="text-[11px] text-ink-tertiary shrink-0 tabular">' + esc(grp.count) + ' · ' + esc(grp.size_str) + '</span>' +
+          '</summary><div class="pl-6 pt-1">';
+        for (const e of grp.emails) {
+          h += '<label class="flex items-center justify-between gap-2 py-1 cursor-pointer">' +
+            '<span class="flex items-center gap-2 min-w-0"><input type="checkbox" class="review-email rounded text-accent" value="' + esc(e.id) + '" ' + (grp.sensitive ? "" : "checked") + '>' +
+            '<span class="text-xs text-ink-muted truncate">' + esc(e.subject) + '</span></span>' +
+            '<span class="text-[11px] text-ink-tertiary shrink-0 tabular">' + esc(e.date) + ' · ' + esc(e.size_str) + '</span></label>';
+        }
+        h += '</div></details>';
+      }
+    } else {
+      for (const grp of g) {
+        for (const e of grp.emails) {
+          h += '<label class="flex items-center justify-between gap-2 py-1.5 border-b border-hairline cursor-pointer">' +
+            '<span class="flex items-center gap-2 min-w-0"><input type="checkbox" class="review-email rounded text-accent" value="' + esc(e.id) + '" ' + (grp.sensitive ? "" : "checked") + '>' +
+            '<span class="min-w-0"><span class="text-xs text-ink-muted truncate block">' + esc(e.subject) + '</span><span class="text-[10px] text-ink-tertiary">' + esc(grp.sender_email) + '</span></span></span>' +
+            '<span class="text-[11px] text-ink-tertiary shrink-0 tabular">' + esc(e.date) + ' · ' + esc(e.size_str) + '</span></label>';
+        }
+      }
+    }
+    reviewBody.innerHTML = h || '<p class="text-ink-subtle text-sm py-6 text-center">No emails to review.</p>';
+    reviewBody.querySelectorAll(".review-master").forEach(m => m.addEventListener("change", () => {
+      m.closest("details").querySelectorAll(".review-email").forEach(c => { c.checked = m.checked; });
+      refreshSummary();
+    }));
+    reviewBody.querySelectorAll(".review-email").forEach(c => c.addEventListener("change", refreshSummary));
+    refreshSummary();
+  }
+
+  document.querySelectorAll(".review-view").forEach(b => b.addEventListener("click", () => {
+    reviewState.view = b.dataset.view; renderReview();
+  }));
+
+  async function loadReview(token, desc) {
+    reviewState = { token, groups: [], view: "grouped" };
+    reviewDesc.textContent = desc || "";
+    reviewBody.innerHTML = '<p class="text-ink-subtle text-sm py-6 text-center">Loading…</p>';
+    openDrawer();
+    try {
+      const res = await fetch("/agent/review/" + encodeURIComponent(token));
+      if (!res.ok) throw new Error("not found");
+      const data = await res.json();
+      reviewState.groups = data.groups || [];
+      reviewDesc.textContent = (data.description || desc || "") + " · " + (data.total_count || 0) + " emails";
+      renderReview();
+    } catch (e) {
+      reviewBody.innerHTML = '<p class="text-warning text-sm py-6 text-center">This review expired. Ask the agent again.</p>';
+    }
+  }
+
+  reviewConfirm.addEventListener("click", async () => {
+    const ids = selectedIds();
+    if (!ids.length) return;
+    reviewConfirm.disabled = true;
+    const body = new URLSearchParams();
+    ids.forEach(i => body.append("ids", i));
+    try {
+      const res = await fetch("/agent/review/" + encodeURIComponent(reviewState.token) + "/confirm", {
+        method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body,
+      });
+      const data = await res.json();
+      closeDrawer();
+      const msg = "Moved " + (data.trashed || 0) + " email(s) to Trash — undoable for 30 days.";
+      bubble("assistant", msg, [{ label: "Undo", href: data.undo_href || "/undo" }]);
+      history.push({ role: "assistant", content: msg, actions: [{ label: "Undo", href: data.undo_href || "/undo" }], cards: [] });
+      save();
+    } catch (e) {
+      reviewConfirm.disabled = false;
+      bubble("assistant", "Couldn't move those to Trash — please try again.");
+    }
+  });
+
+  // Delegate the "Open review" button (cards are injected dynamically).
+  msgs.addEventListener("click", (e) => {
+    const btn = e.target.closest(".open-review");
+    if (btn) loadReview(btn.dataset.token, btn.dataset.desc);
   });
 })();
 </script>
