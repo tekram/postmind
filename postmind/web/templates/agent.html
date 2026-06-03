@@ -192,7 +192,6 @@
       '</form>';
     }
     if (card.type === "trash_review") {
-      const f = card.fields || {};
       return '<div class="mt-2 border border-accent-border bg-surface rounded-card p-4 shadow-whisper max-w-md">' +
         '<p class="flex items-center gap-1.5 text-sm font-semibold text-ink mb-1">' + CARD_SPARK + esc(card.title || "Review emails") + '</p>' +
         '<p class="text-xs text-ink-subtle mb-3">' + esc(f.total_count) + ' emails · ' + esc(f.sender_count) + ' sender(s) · reversible, undoable for 30 days.</p>' +
@@ -496,14 +495,24 @@
     refreshSummary();
   }
 
+  function syncViewTabs() {
+    document.querySelectorAll(".review-view").forEach(b => {
+      const on = b.dataset.view === reviewState.view;
+      b.classList.toggle("bg-accent-subtle", on);
+      b.classList.toggle("text-accent", on);
+      b.classList.toggle("border-accent-border", on);
+      b.classList.toggle("text-ink-muted", !on);
+    });
+  }
   document.querySelectorAll(".review-view").forEach(b => b.addEventListener("click", () => {
-    reviewState.view = b.dataset.view; renderReview();
+    reviewState.view = b.dataset.view; syncViewTabs(); renderReview();
   }));
 
   async function loadReview(token, desc) {
     reviewState = { token, groups: [], view: "grouped" };
     reviewDesc.textContent = desc || "";
     reviewBody.innerHTML = '<p class="text-ink-subtle text-sm py-6 text-center">Loading…</p>';
+    syncViewTabs();
     openDrawer();
     try {
       const res = await fetch("/agent/review/" + encodeURIComponent(token));
