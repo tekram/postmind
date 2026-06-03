@@ -48,12 +48,20 @@ READ_TOOLS: list[dict] = [
     },
     {
         "name": "find_largest_messages",
-        "description": "Find the single largest individual emails (by attachment/message size). Use for 'find my largest email sizes' / 'biggest emails'.",
+        "description": (
+            "Find the single largest individual emails (by attachment/message size). "
+            "Use for 'find my largest email sizes' / 'biggest emails' / 'large non-personal or marketing emails'. "
+            "For non-personal/marketing emails use 'has:list-unsubscribe' (catches newsletters, "
+            "promos, updates regardless of Gmail's category tab). "
+            "For promotional-only use 'category:promotions'. "
+            "For attachments use 'has:attachment larger:1M'. "
+            "Do NOT include date filters unless the user asked — omitting them finds more results."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "limit": {"type": "integer", "description": "How many messages to return (default 10, max 25)."},
-                "query": {"type": "string", "description": "Optional Gmail-style scope, e.g. 'has:attachment'. Default the inbox."},
+                "query": {"type": "string", "description": "Optional Gmail-style scope. Default searches the full inbox."},
             },
         },
     },
@@ -292,15 +300,38 @@ def find_largest_messages(provider, query: str = "", limit: int = 10) -> str:
 
     Uses real ``size_estimate`` per message (not the sampled extrapolation that
     BulkPreview uses), so it answers 'largest emails' accurately.
+
+    Auto-fallback: if the requested scope returns nothing and looks like a
+    category/promotional filter, broaden to 'has:list-unsubscribe' (captures
+    newsletters, updates, and promotions regardless of Gmail tab assignment)
+    before giving up.
     """
     limit = max(1, min(int(limit or 10), 25))
     scope = query.strip() or "in:inbox"
     ids = provider.list_message_ids(query=scope, max_results=400)
+
+    fallback_scope = None
     if not ids:
-        return f"No messages found for scope '{scope}'."
+        _PROMO_TERMS = ("category:promotions", "category:updates", "category:forums")
+        if any(t in scope.lower() for t in _PROMO_TERMS):
+            fallback_scope = "has:list-unsubscribe"
+            ids = provider.list_message_ids(query=fallback_scope, max_results=400)
+
+    if not ids:
+        tried = f"'{scope}'" + (f" and fallback '{fallback_scope}'" if fallback_scope else "")
+        return (
+            f"No messages found for {tried}. "
+            "Try a broader query such as 'has:list-unsubscribe' to find marketing "
+            "and newsletter emails, or 'has:attachment larger:1M' for large attachments."
+        )
+
+    effective_scope = fallback_scope or scope
     messages = provider.get_messages_metadata(ids)
     messages.sort(key=lambda m: (m.size_estimate or 0), reverse=True)
-    lines = [f"Largest {min(limit, len(messages))} emails in '{scope}':"]
+    header = f"Largest {min(limit, len(messages))} emails in '{effective_scope}'"
+    if fallback_scope:
+        header += f" (broadened from '{scope}' — no results there)"
+    lines = [header + ":"]
     for m in messages[:limit]:
         mb = (m.size_estimate or 0) / (1024 * 1024)
         subj = (m.headers.subject or "(no subject)")[:60]
