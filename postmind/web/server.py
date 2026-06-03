@@ -81,6 +81,13 @@ def _review_get(token: str) -> dict | None:
     return None
 
 
+def _fmt_size(num_bytes: int) -> str:
+    mb = (num_bytes or 0) / (1024 * 1024)
+    if mb >= 0.1:
+        return f"{mb:.1f} MB"
+    return f"{(num_bytes or 0) // 1024} KB"
+
+
 # In-memory sync task state: task_id → state dict
 _sync_tasks: dict[str, dict] = {}
 _active_sync_task_id: str | None = None
@@ -4292,6 +4299,53 @@ async def agent_action_confirm(request: Request):
 
     return RedirectResponse(
         f"/undo?acted={count}&action={action}&undo_id={undo_id}", status_code=303
+    )
+
+
+@app.get("/agent/review/{token}")
+async def agent_review_get(token: str):
+    from fastapi import HTTPException
+    from fastapi.responses import JSONResponse
+
+    from postmind.core.sender_stats import _is_sensitive_domain
+
+    entry = _review_get(token)
+    if not entry:
+        raise HTTPException(status_code=404, detail="This review expired or was not found.")
+
+    by_sender: dict[str, dict] = {}
+    for e in entry["emails"]:
+        sender = e["sender_email"]
+        g = by_sender.get(sender)
+        if g is None:
+            domain = sender.split("@")[-1] if "@" in sender else sender
+            g = by_sender[sender] = {
+                "sender_email": sender,
+                "sender_name": e.get("sender_name") or sender,
+                "count": 0,
+                "size_bytes": 0,
+                "sensitive": _is_sensitive_domain(domain),
+                "emails": [],
+            }
+        g["count"] += 1
+        g["size_bytes"] += int(e.get("size_estimate") or 0)
+        g["emails"].append(
+            {
+                "id": e["id"],
+                "subject": e["subject"],
+                "date": e.get("date", ""),
+                "size_str": _fmt_size(e.get("size_estimate") or 0),
+            }
+        )
+    groups = sorted(by_sender.values(), key=lambda g: g["size_bytes"], reverse=True)
+    for g in groups:
+        g["size_str"] = _fmt_size(g["size_bytes"])
+    return JSONResponse(
+        {
+            "description": entry["description"],
+            "total_count": len(entry["emails"]),
+            "groups": groups,
+        }
     )
 
 

@@ -116,3 +116,78 @@ def test_stage_trash_query_empty_match_stages_nothing(monkeypatch):
     summary = executor("stage_trash_query", {"gmail_query": "older_than:99y", "description": "x"})
     assert cards == []
     assert "nothing" in summary.lower()
+
+
+@pytest.fixture()
+def shared_db(monkeypatch):
+    import postmind.core.storage as storage
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        echo=False,
+    )
+    storage.Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    monkeypatch.setattr(storage, "_engine", engine)
+    monkeypatch.setattr(storage, "_SessionLocal", factory)
+    yield engine
+    engine.dispose()
+
+
+def test_get_review_groups_and_flags_sensitive(monkeypatch, shared_db):
+    from postmind.web import server
+
+    account = "me@example.com"
+    monkeypatch.setattr(server, "_get_web_account", lambda: account)
+    emails = [
+        {
+            "id": "m1",
+            "subject": "A",
+            "sender_email": "news@promo.com",
+            "sender_name": "Promo",
+            "size_estimate": 2_000_000,
+            "internal_date": 1,
+            "date": "2022-01-01",
+        },
+        {
+            "id": "m2",
+            "subject": "B",
+            "sender_email": "news@promo.com",
+            "sender_name": "Promo",
+            "size_estimate": 1_000_000,
+            "internal_date": 1,
+            "date": "2022-01-02",
+        },
+        {
+            "id": "m3",
+            "subject": "C",
+            "sender_email": "alerts@bank.com",
+            "sender_name": "Bank",
+            "size_estimate": 500_000,
+            "internal_date": 1,
+            "date": "2022-01-03",
+        },
+    ]
+    token = server._review_put(account, "old stuff", emails)
+
+    client = TestClient(server.app)
+    resp = client.get(f"/agent/review/{token}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total_count"] == 3
+    assert data["description"] == "old stuff"
+    groups = {g["sender_email"]: g for g in data["groups"]}
+    assert groups["news@promo.com"]["count"] == 2
+    assert len(groups["news@promo.com"]["emails"]) == 2
+    assert groups["news@promo.com"]["sensitive"] is False
+    assert groups["alerts@bank.com"]["sensitive"] is True  # bank domain
+
+
+def test_get_review_unknown_token_404(monkeypatch, shared_db):
+    from postmind.web import server
+
+    monkeypatch.setattr(server, "_get_web_account", lambda: "me@example.com")
+    client = TestClient(server.app)
+    assert client.get("/agent/review/nope").status_code == 404
