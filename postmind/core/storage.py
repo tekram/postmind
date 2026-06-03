@@ -122,6 +122,7 @@ class DraftRecord(Base):
     confidence = Column(Integer, default=0)  # 0–100
     model = Column(String, default="")  # which AI backend produced it
     status = Column(String, default="ready")  # ready | edited | sent | dismissed | stale
+    draft_type = Column(String, default="gmail")  # "gmail" | "local"
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     reviewed_at = Column(DateTime, nullable=True)
 
@@ -278,6 +279,9 @@ def _run_migrations(engine) -> None:
         ],
         "daily_briefs": [
             ("items_json", "TEXT"),
+        ],
+        "draft_records": [
+            ("draft_type", "TEXT DEFAULT 'gmail'"),
         ],
     }
     with engine.connect() as conn:
@@ -511,6 +515,7 @@ class DraftRepo:
                 "trigger",
                 "confidence",
                 "model",
+                "draft_type",
             ):
                 setattr(existing, col, getattr(draft, col))
             existing.status = "ready"

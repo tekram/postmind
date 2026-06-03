@@ -116,13 +116,18 @@
         </div>
         <span class="pm-pill bg-accent-subtle text-accent border border-accent-border shrink-0">
           <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.94 14.06l-1.06 2.32a1 1 0 01-1.82 0l-1.06-2.32a1 1 0 00-.5-.5L3.18 12.5a1 1 0 010-1.82l2.32-1.06a1 1 0 00.5-.5l1.06-2.32a1 1 0 011.82 0l1.06 2.32a1 1 0 00.5.5l2.32 1.06a1 1 0 010 1.82l-2.32 1.06a1 1 0 00-.5.5z"/></svg>
-          drafted by postmind
+          {% if d.draft_type == 'local' %}
+          💾 local draft
+          {% else %}
+          ☁️ Gmail draft
+          {% endif %}
         </span>
       </div>
 
       <!-- Editable form: default submit = Save; Send overrides via formaction -->
       <form method="POST" action="/drafts/{{ d.id }}/save" class="px-5 py-4 space-y-3"
-            onsubmit="return window.__pmDraftSubmit(this, event);">
+            onsubmit="return window.__pmDraftSubmit(this, event);"
+            data-draft-body="{{ d.body | escape }}">
         <div>
           <label class="block text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-tertiary mb-1">Subject</label>
           <input type="text" name="subject" value="{{ d.subject }}" class="pm-input font-medium">
@@ -132,6 +137,8 @@
           <textarea name="body" rows="7" class="pm-input font-sans leading-relaxed resize-y">{{ d.body }}</textarea>
         </div>
 
+        <!-- Gmail Draft Actions -->
+        {% if d.draft_type == 'gmail' %}
         <div class="flex items-center gap-2 pt-1 flex-wrap">
           <button type="submit" formaction="/drafts/{{ d.id }}/send" data-send="1" class="pm-btn">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
@@ -140,12 +147,32 @@
           <button type="submit" class="pm-btn-secondary">Save changes</button>
           <span class="flex-1"></span>
         </div>
+
+        <!-- Local Draft Actions -->
+        {% else %}
+        <div class="flex items-center gap-2 pt-1 flex-wrap">
+          <a href="/drafts/{{ d.id }}/mailto"
+             onclick="window.location.href = this.href; return false;"
+             class="pm-btn inline-flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+            Open in mail client
+          </a>
+          <button type="button"
+                  onclick="window.__pmCopyDraft(this)"
+                  class="pm-btn-secondary inline-flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+            Copy to clipboard
+          </button>
+          <button type="submit" class="pm-btn-secondary">Save changes</button>
+          <span class="flex-1"></span>
+        </div>
+        {% endif %}
       </form>
 
       <!-- Dismiss (separate form so it never carries edits) -->
       <div class="px-5 pb-4 -mt-1">
         <form method="POST" action="/drafts/{{ d.id }}/dismiss"
-              onsubmit="return confirm('Discard this draft? It will be removed from your Gmail drafts too.');">
+              onsubmit="return confirm('{% if d.draft_type == 'local' %}Discard this draft? It will be removed from postmind.{% else %}Discard this draft? It will be removed from your Gmail drafts too.{% endif %}');">
           <button type="submit" class="text-xs font-medium text-ink-tertiary hover:text-danger transition-colors inline-flex items-center gap-1.5">
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
             Dismiss draft
@@ -157,8 +184,8 @@
   </div>
 
   <p class="text-ink-tertiary text-xs mt-6 border-t border-hairline pt-4">
-    Drafts are real Gmail drafts — you can also finish them from the Gmail app.
-    Sending uses your connected account and threads the reply into the original conversation.
+    <strong class="text-ink-muted">Gmail drafts</strong> are real Gmail drafts — you can also finish them from the Gmail app. Sending uses your connected account and threads the reply into the original conversation.
+    <br><strong class="text-ink-muted">Local drafts</strong> stay in postmind until you send them — open in your mail client or copy to send from anywhere.
   </p>
 
   {% endif %}
@@ -178,6 +205,34 @@
       btn.classList.add("opacity-60");
     }
     return true;
+  };
+
+  // Copy local draft to clipboard
+  window.__pmCopyDraft = function (btn) {
+    var form = btn.closest("form");
+    var subject = form.querySelector("input[name='subject']").value;
+    var body = form.querySelector("textarea[name='body']").value;
+    var toEmail = form.querySelector("input[name='subject']")
+      .closest(".space-y-3")
+      .parentElement
+      .parentElement
+      .querySelector(".truncate").textContent;
+
+    // Build the formatted text
+    var text = "To: " + toEmail + "\nSubject: " + subject + "\n\n" + body;
+
+    // Copy to clipboard
+    navigator.clipboard.writeText(text).then(function () {
+      var originalText = btn.innerText;
+      btn.innerText = "✓ Copied";
+      btn.classList.add("opacity-60");
+      setTimeout(function () {
+        btn.innerText = originalText;
+        btn.classList.remove("opacity-60");
+      }, 2000);
+    }).catch(function (err) {
+      alert("Failed to copy to clipboard: " + err);
+    });
   };
 </script>
 

@@ -4737,3 +4737,34 @@ async def drafts_dismiss(draft_id: int, request: Request):
     except Exception as exc:
         return _resp(request, "error.html", {"error": f"Couldn't dismiss the draft: {exc}"})
     return RedirectResponse("/drafts?dismissed=1", status_code=303)
+
+
+@app.get("/drafts/{draft_id}/mailto")
+def draft_mailto(draft_id: int):
+    """Return a mailto: link for a local draft."""
+    from postmind.core.autodraft import _build_mailto_url
+    from postmind.core.storage import DraftRepo, get_session
+
+    draft = DraftRepo(get_session()).get(draft_id)
+    if not draft or draft.draft_type != "local":
+        raise HTTPException(status_code=404, detail="Not a local draft")
+
+    mailto_url = _build_mailto_url(
+        to=draft.to_email,
+        subject=draft.subject,
+        body=draft.body,
+    )
+    return {"mailto_url": mailto_url}
+
+
+@app.get("/drafts/{draft_id}/copy")
+def draft_copy(draft_id: int):
+    """Return draft text formatted for copy-to-clipboard."""
+    from postmind.core.storage import DraftRepo, get_session
+
+    draft = DraftRepo(get_session()).get(draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="Draft not found")
+
+    text = f"To: {draft.to_email}\nSubject: {draft.subject}\n\n{draft.body}"
+    return {"text": text}

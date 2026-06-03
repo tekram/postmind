@@ -10,13 +10,14 @@ Design notes:
   - Sensitive senders (bank/health/legal/gov/school) are never autodrafted.
   - Composition requires cloud AI mode (AIEngine.compose_email gates on it); the
     MockAIEngine stub lets the full pipeline run in tests without a key.
-  - Drafts only work on providers that support the 'drafts' capability (Gmail).
+  - Gmail drafts are stored server-side; IMAP drafts are stored locally in postmind.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from urllib.parse import quote
 
 from postmind.core.gmail_client import Message
 from postmind.core.sender_stats import _is_sensitive_domain
@@ -87,6 +88,22 @@ def _re_subject(subject: str) -> str:
 
 def _domain(email: str) -> str:
     return email.rsplit("@", 1)[-1].lower() if "@" in email else ""
+
+
+def _build_mailto_url(to: str, subject: str, body: str) -> str:
+    """Build a mailto: URL with subject and body pre-filled.
+
+    Args:
+        to: recipient email address
+        subject: email subject
+        body: email body
+
+    Returns:
+        A mailto: URL with URL-encoded subject and body parameters.
+    """
+    subject_enc = quote(subject)
+    body_enc = quote(body)
+    return f"mailto:{to}?subject={subject_enc}&body={body_enc}"
 
 
 class AutodraftService:
@@ -172,20 +189,33 @@ class AutodraftService:
         confidence: int,
         model: str = "",
     ) -> DraftRecord:
-        """Create the Gmail draft (in-thread) and record it for review."""
-        gc = getattr(self.provider, "gmail_client", None)
-        if gc is None:
-            raise ValueError("Drafting requires a Gmail account.")
-        draft_id = gc.create_draft(
-            to=context["to_email"],
-            subject=draft.subject,
-            body=draft.body,
-            thread_id=context["thread_id"] or None,
-            in_reply_to=context["in_reply_to_rfc_id"] or None,
-        )
+        """Create a draft and record it for review.
+
+        For Gmail providers: creates a server-side draft (draft_type='gmail').
+        For IMAP/other providers: stores the draft locally (draft_type='local').
+        """
+        if self.supports_drafts():
+            # Gmail: create server-side draft
+            gc = getattr(self.provider, "gmail_client", None)
+            if gc is None:
+                raise ValueError("Gmail provider missing gmail_client.")
+            draft_id = gc.create_draft(
+                to=context["to_email"],
+                subject=draft.subject,
+                body=draft.body,
+                thread_id=context["thread_id"] or None,
+                in_reply_to=context["in_reply_to_rfc_id"] or None,
+            )
+            draft_type = "gmail"
+        else:
+            # IMAP/local: store only in postmind database
+            draft_id = ""
+            draft_type = "local"
+
         rec = DraftRecord(
             account_email=self.account_email,
             gmail_draft_id=draft_id,
+            draft_type=draft_type,
             thread_id=context["thread_id"],
             in_reply_to_gmail_id=context["in_reply_to_gmail_id"],
             in_reply_to_rfc_id=context["in_reply_to_rfc_id"],

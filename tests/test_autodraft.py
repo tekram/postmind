@@ -322,3 +322,81 @@ def test_draft_repo_status_transitions():
     repo.set_status(rec.id, "sent")
     assert repo.count_open("me@example.com") == 0
     assert repo.get(rec.id).status == "sent"
+
+
+def test_build_mailto_url():
+    """Test _build_mailto_url properly encodes subject and body."""
+    url = autodraft._build_mailto_url(
+        to="alice@example.com",
+        subject="Re: Hello World",
+        body="This is a test\nWith newlines",
+    )
+    assert url.startswith("mailto:alice@example.com?")
+    assert "subject=Re%3A%20Hello%20World" in url
+    assert "body=This%20is%20a%20test%0AWith%20newlines" in url
+
+
+def test_build_mailto_url_special_chars():
+    """Test _build_mailto_url handles special characters correctly."""
+    url = autodraft._build_mailto_url(
+        to="bob@example.com",
+        subject="Meeting @ 3pm & Discuss Fees ($100)",
+        body="Looking forward to our call! Questions?",
+    )
+    assert "mailto:bob@example.com?" in url
+    assert "%40" in url  # @ encoded
+    assert "%26" in url  # & encoded
+    assert "%28" in url  # ( encoded
+    assert "%29" in url  # ) encoded
+
+
+def test_persist_creates_gmail_draft_when_supports_drafts():
+    """Test persist() creates a Gmail draft when provider supports drafts."""
+    provider = FakeProvider([], supports_drafts=True)
+    svc = AutodraftService(provider, MockAIEngine(), "me@example.com")
+
+    context = {
+        "to_email": "alice@example.com",
+        "thread_id": "t123",
+        "in_reply_to_gmail_id": "m456",
+        "in_reply_to_rfc_id": "<msg@example.com>",
+        "subject": "Re: Hello",
+        "recipient_context": "Replying to Alice.",
+        "thread_snippet": "Hi there",
+    }
+    draft = autodraft.Draft(subject="Re: Hello", body="Thanks for reaching out!")
+
+    rec = svc.persist(context, draft, "manual", 75, model="test-model")
+
+    assert rec.draft_type == "gmail"
+    assert rec.gmail_draft_id == "draft1"
+    assert rec.to_email == "alice@example.com"
+    assert rec.subject == "Re: Hello"
+    assert rec.body == "Thanks for reaching out!"
+    assert rec.account_email == "me@example.com"
+
+
+def test_persist_creates_local_draft_when_no_draft_support():
+    """Test persist() creates a local draft for IMAP providers."""
+    provider = FakeProvider([], supports_drafts=False)
+    svc = AutodraftService(provider, MockAIEngine(), "me@example.com")
+
+    context = {
+        "to_email": "bob@example.com",
+        "thread_id": "t789",
+        "in_reply_to_gmail_id": "m999",
+        "in_reply_to_rfc_id": "<msg2@example.com>",
+        "subject": "Re: Meeting Notes",
+        "recipient_context": "Replying to Bob.",
+        "thread_snippet": "Let's sync tomorrow",
+    }
+    draft = autodraft.Draft(subject="Re: Meeting Notes", body="Sounds good!")
+
+    rec = svc.persist(context, draft, "manual", 80, model="test-model")
+
+    assert rec.draft_type == "local"
+    assert rec.gmail_draft_id == ""  # No server draft ID
+    assert rec.to_email == "bob@example.com"
+    assert rec.subject == "Re: Meeting Notes"
+    assert rec.body == "Sounds good!"
+    assert rec.account_email == "me@example.com"
