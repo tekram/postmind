@@ -25,3 +25,4 @@ token.json
 .env.*
 !.env.example
 .gstack/
+.playwright-mcp/
