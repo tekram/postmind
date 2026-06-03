@@ -108,6 +108,7 @@
   (function () {
     const rows = JSON.parse(document.getElementById("triage-data").textContent);
     const pendingToken = {{ (pending_token | tojson) if pending_token else 'null' }};
+    const DRAFT_ENABLED = {{ (ai_mode == 'cloud' and provider == 'gmail') | tojson }};
     const list = document.getElementById("triage-list");
     const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 };
     const byId = {};
@@ -181,9 +182,25 @@
       main.appendChild(el("p", "text-xs text-ink-subtle mt-1.5 italic", cls ? cls.explanation : ""));
       flex.appendChild(main);
 
-      // Action badge
-      const act = el("div", "shrink-0");
+      // Action badge + (optional) draft-reply button
+      const act = el("div", "shrink-0 flex flex-col items-end gap-2");
       if (cls) act.appendChild(actionBadge(cls.suggested_action));
+      const wantsReply = cls && (cls.requires_reply || cls.suggested_action === "reply");
+      if (DRAFT_ENABLED && wantsReply) {
+        const form = el("form");
+        form.method = "POST";
+        form.action = "/drafts/create";
+        const hid = el("input");
+        hid.type = "hidden"; hid.name = "gmail_id"; hid.value = r.id;
+        form.appendChild(hid);
+        const btn = el("button");
+        btn.type = "submit";
+        btn.className = "pm-btn-secondary text-xs py-1 px-2.5";
+        btn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>Draft reply';
+        btn.addEventListener("click", () => { btn.disabled = true; btn.textContent = "Drafting…"; });
+        form.appendChild(btn);
+        act.appendChild(form);
+      }
       flex.appendChild(act);
 
       card.appendChild(flex);

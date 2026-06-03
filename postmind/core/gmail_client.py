@@ -26,7 +26,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from postmind.config import CREDENTIALS_PATH, TOKEN_PATH, get_settings
+from postmind.config import CREDENTIALS_PATH, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +172,8 @@ def authenticate(
     The token file is written with mode 0o600 (owner read/write only).
     """
     if token_path is None:
-        from postmind.config import get_active_account, token_path_for, TOKEN_PATH
+        from postmind.config import TOKEN_PATH, get_active_account, token_path_for
+
         active = get_active_account()
         token_path = token_path_for(active) if active else TOKEN_PATH
     settings = get_settings()
@@ -457,12 +458,21 @@ class GmailClient:
     # ── Send / reply ─────────────────────────────────────────────────────────
 
     @_with_retry()
-    def send(self, to: str, subject: str, body: str, thread_id: str | None = None) -> str:
-        """Send a plain-text email. Returns the sent message ID."""
-        msg = MIMEText(body)
-        msg["to"] = to
-        msg["subject"] = subject
-        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+    def send(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        thread_id: str | None = None,
+        in_reply_to: str | None = None,
+    ) -> str:
+        """Send a plain-text email. Returns the sent message ID.
+
+        Supplying ``thread_id`` + ``in_reply_to`` (the original Message-ID) keeps
+        the sent reply nested in its conversation — same RFC-2822 threading rules
+        as :meth:`create_draft`.
+        """
+        raw = _build_raw_message(to, subject, body, in_reply_to=in_reply_to)
         payload: dict = {"raw": raw}
         if thread_id:
             payload["threadId"] = thread_id
@@ -509,11 +519,22 @@ class GmailClient:
     # ── Drafts ───────────────────────────────────────────────────────────────
 
     @_with_retry()
-    def create_draft(self, to: str, subject: str, body: str, thread_id: str | None = None) -> str:
-        msg = MIMEText(body)
-        msg["to"] = to
-        msg["subject"] = subject
-        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+    def create_draft(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        thread_id: str | None = None,
+        in_reply_to: str | None = None,
+    ) -> str:
+        """Create a Gmail draft. Returns the draft ID.
+
+        When ``thread_id`` and ``in_reply_to`` (the original message's RFC-2822
+        Message-ID) are supplied, the draft nests inside the conversation: Gmail
+        requires the matching ``threadId`` *and* RFC-2822 ``In-Reply-To`` /
+        ``References`` headers, otherwise the draft appears as a detached message.
+        """
+        raw = _build_raw_message(to, subject, body, in_reply_to=in_reply_to)
         message_payload: dict = {"raw": raw}
         if thread_id:
             message_payload["threadId"] = thread_id
@@ -524,6 +545,34 @@ class GmailClient:
             .execute()
         )
         return result["id"]
+
+    @_with_retry()
+    def update_draft(
+        self,
+        draft_id: str,
+        to: str,
+        subject: str,
+        body: str,
+        thread_id: str | None = None,
+        in_reply_to: str | None = None,
+    ) -> str:
+        """Replace the contents of an existing draft. Returns the draft ID."""
+        raw = _build_raw_message(to, subject, body, in_reply_to=in_reply_to)
+        message_payload: dict = {"raw": raw}
+        if thread_id:
+            message_payload["threadId"] = thread_id
+        result = (
+            self._service.users()
+            .drafts()
+            .update(userId=self._user, id=draft_id, body={"message": message_payload})
+            .execute()
+        )
+        return result["id"]
+
+    @_with_retry()
+    def delete_draft(self, draft_id: str) -> None:
+        """Delete a draft (the parked draft, not a sent message)."""
+        self._service.users().drafts().delete(userId=self._user, id=draft_id).execute()
 
     # ── Parsing ──────────────────────────────────────────────────────────────
 
@@ -545,6 +594,44 @@ class GmailClient:
 
 
 # ── Module-level helpers ─────────────────────────────────────────────────────
+
+
+def _normalize_message_id(message_id: str) -> str:
+    """Return an RFC-2822 Message-ID wrapped in angle brackets.
+
+    Gmail's stored Message-ID header may or may not already carry the ``<…>``
+    delimiters; In-Reply-To / References must use the bracketed form.
+    """
+    mid = (message_id or "").strip()
+    if not mid:
+        return ""
+    if not mid.startswith("<"):
+        mid = "<" + mid
+    if not mid.endswith(">"):
+        mid = mid + ">"
+    return mid
+
+
+def _build_raw_message(
+    to: str,
+    subject: str,
+    body: str,
+    in_reply_to: str | None = None,
+) -> str:
+    """Build a base64url-encoded RFC-2822 message for send/draft.
+
+    When ``in_reply_to`` is given (the original message's Message-ID), the
+    ``In-Reply-To`` and ``References`` headers are set so the message threads
+    correctly in Gmail and in the recipient's client.
+    """
+    msg = MIMEText(body)
+    msg["to"] = to
+    msg["subject"] = subject
+    ref = _normalize_message_id(in_reply_to or "")
+    if ref:
+        msg["In-Reply-To"] = ref
+        msg["References"] = ref
+    return base64.urlsafe_b64encode(msg.as_bytes()).decode()
 
 
 def _parse_headers(header_list: list[dict]) -> MessageHeader:

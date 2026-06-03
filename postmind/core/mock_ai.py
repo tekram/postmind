@@ -149,12 +149,11 @@ class MockAIEngine:
             top = items[0]
             return (
                 "**Quick win**\n"
-                f"[mock] Open \"{top['subject'][:60]}\" from {top['sender']} and "
+                f'[mock] Open "{top["subject"][:60]}" from {top["sender"]} and '
                 "reply or archive it — under 2 minutes."
             )
         return (
-            "**Quick win**\n"
-            "[mock] Inbox is clear — pick your oldest unread email and archive it."
+            "**Quick win**\n[mock] Inbox is clear — pick your oldest unread email and archive it."
         )
 
     # ── Cleanup batch naming ──────────────────────────────────────────────────
@@ -176,6 +175,35 @@ class MockAIEngine:
                 "rationale": f"[mock] Safe to {action} — grouped by shared signals.",
             }
         return {"batches": batches}
+
+    # ── Soul-aware email composition ──────────────────────────────────────────
+
+    def compose_email(
+        self,
+        intent: str,
+        recipient_context: str = "",
+        thread_snippet: str = "",
+        soul: dict | None = None,
+    ) -> str:
+        """Deterministic stand-in for AIEngine.compose_email.
+
+        Returns the same ``Subject: …\\n\\n<body>`` contract so the full draft
+        pipeline (split → persist → review) is testable without an API key.
+        Unlike the real engine, the mock never gates on cloud mode.
+        """
+        soul = soul or {}
+        voice = soul.get("voice_style") or "professional"
+        # Derive a plausible subject from the thread or intent.
+        first_line = (thread_snippet or intent or "your message").strip().splitlines()[0]
+        subject = first_line[:60]
+        if not subject.lower().startswith("re:"):
+            subject = f"Re: {subject}"
+        body = (
+            f"[mock {voice} draft] Thanks for your note. "
+            f'Regarding "{intent[:80] or "this"}" — here is a placeholder reply '
+            "generated without AI so the draft flow can be tested end to end."
+        )
+        return f"Subject: {subject}\n\n{body}"
 
     # ── Avoidance insight ────────────────────────────────────────────────────
 

@@ -84,7 +84,8 @@ class EmailProvider(ABC):
         """
         Return True if this provider supports the named capability.
 
-        Known capabilities: 'labels', 'threads', 'unsubscribe', 'rules', 'untrash'
+        Known capabilities: 'labels', 'threads', 'unsubscribe', 'rules',
+        'untrash', 'drafts' (create/send replies — Gmail only)
 
         Callers should check before invoking Gmail-specific features so that
         unsupported commands can show a clear message rather than crash.

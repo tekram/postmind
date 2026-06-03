@@ -37,6 +37,7 @@ async def _same_origin_guard(request: Request, call_next):
     """
     if request.method in ("POST", "PUT", "PATCH", "DELETE"):
         from urllib.parse import urlparse
+
         from starlette.responses import PlainTextResponse
 
         origin = request.headers.get("origin") or request.headers.get("referer")
@@ -45,6 +46,7 @@ async def _same_origin_guard(request: Request, call_next):
             if src and src != request.url.netloc:
                 return PlainTextResponse("Cross-origin request blocked.", status_code=403)
     return await call_next(request)
+
 
 # In-memory scan cache — keyed by "latest", short TTL
 _scan_cache: dict[str, dict] = {}
@@ -91,6 +93,7 @@ def _get_web_account() -> str | None:
     """
     from postmind.config import get_active_account
     from postmind.core.account_registry import list_accounts
+
     email = _active_web_account or get_active_account()
     accounts = list_accounts()
     if accounts and not any(a.email == email for a in accounts):
@@ -99,11 +102,13 @@ def _get_web_account() -> str | None:
 
 
 def _is_authed() -> bool:
-    from postmind.config import token_path_for, TOKEN_PATH
+    from postmind.config import token_path_for
+
     email = _get_web_account()
     if not email:
         return TOKEN_PATH.exists()  # legacy fallback for unmigrated installs
     from postmind.core.account_registry import list_accounts
+
     acct = next((a for a in list_accounts() if a.email == email), None)
     if not acct:
         return TOKEN_PATH.exists()
@@ -149,6 +154,7 @@ def _chat_engine_kwargs() -> dict:
 def _base() -> dict:
     """Base template context — request passed separately to TemplateResponse."""
     from postmind.core.account_registry import list_accounts
+
     accounts = list_accounts()
     current_email = _get_web_account()
     return {
@@ -186,6 +192,7 @@ def _build_provider():
 
     if provider_name == "imap":
         import os
+
         pw = os.environ.get("POSTMIND_IMAP_PASSWORD", "")
         s = get_settings()
         return get_provider(
@@ -213,25 +220,28 @@ def _enrich_groups(groups) -> list[dict]:
         conf = compute_confidence_score(g)
         risk = classify_sender_risk(g)
         size_str = (
-            f"{g.total_size_mb} MB" if g.total_size_mb >= 0.1
+            f"{g.total_size_mb} MB"
+            if g.total_size_mb >= 0.1
             else f"{g.total_size_bytes // 1024} KB"
         )
-        enriched.append({
-            "sender_email": g.sender_email,
-            "sender_name": g.sender_name or g.sender_email,
-            "count": g.count,
-            "size_str": size_str,
-            "size_mb": g.total_size_mb,
-            "oldest": g.earliest_date.strftime("%b %Y"),
-            "oldest_ts": int(g.earliest_date.timestamp()),
-            "has_unsubscribe": g.has_unsubscribe,
-            "confidence": conf,
-            "safety_label": confidence_safety_label(conf),
-            "tier_icon": risk_tier_icon(conf),
-            "risk": risk,
-            "impact_score": g.impact_score,
-            "sample_subjects": g.sample_subjects,
-        })
+        enriched.append(
+            {
+                "sender_email": g.sender_email,
+                "sender_name": g.sender_name or g.sender_email,
+                "count": g.count,
+                "size_str": size_str,
+                "size_mb": g.total_size_mb,
+                "oldest": g.earliest_date.strftime("%b %Y"),
+                "oldest_ts": int(g.earliest_date.timestamp()),
+                "has_unsubscribe": g.has_unsubscribe,
+                "confidence": conf,
+                "safety_label": confidence_safety_label(conf),
+                "tier_icon": risk_tier_icon(conf),
+                "risk": risk,
+                "impact_score": g.impact_score,
+                "sample_subjects": g.sample_subjects,
+            }
+        )
     return enriched
 
 
@@ -244,6 +254,7 @@ async def dashboard(request: Request):
     ctx["active"] = "dashboard"
 
     from postmind.core.account_registry import list_accounts as _list_accts
+
     if not _list_accts() and not _is_authed():
         return RedirectResponse("/onboarding", status_code=302)
 
@@ -251,7 +262,10 @@ async def dashboard(request: Request):
     # summary yet, send them there instead of the empty/standard dashboard.
     _acct = _get_web_account()
     if _acct:
-        from postmind.core.storage import AccountRepo as _AR, EmailRepo as _ER, get_session as _gs
+        from postmind.core.storage import AccountRepo as _AR
+        from postmind.core.storage import EmailRepo as _ER
+        from postmind.core.storage import get_session as _gs
+
         _s = _gs()
         try:
             _row = _AR(_s).get(_acct)
@@ -292,10 +306,16 @@ async def dashboard(request: Request):
                     sort_by="score",
                 )
                 acct_row = AccountRepo(session).get(account_email)
-                scanned_at = acct_row.last_synced_at.strftime("%d %b %Y") if (acct_row and acct_row.last_synced_at) else "local cache"
+                scanned_at = (
+                    acct_row.last_synced_at.strftime("%d %b %Y")
+                    if (acct_row and acct_row.last_synced_at)
+                    else "local cache"
+                )
                 total_emails = (
                     session.query(EmailRecord)
-                    .filter(EmailRecord.account_email == account_email, EmailRecord.is_inbox.is_(True))
+                    .filter(
+                        EmailRecord.account_email == account_email, EmailRecord.is_inbox.is_(True)
+                    )
                     .count()
                 )
                 profile = {}
@@ -314,30 +334,40 @@ async def dashboard(request: Request):
         bns = best_next_step(recs)
         total_reclaimable = reclaimable_mb(recs)
 
+        from datetime import datetime as _dt
+        from datetime import timezone as _tz
+
         from postmind.core.storage import DailyBriefRepo
-        from datetime import datetime as _dt, timezone as _tz
+
         _today = _dt.now(_tz.utc).date().isoformat()
         _db_rec = DailyBriefRepo(get_session()).get_today(account_email, _today)
-        ctx.update({
-            "has_scan": True,
-            "scanned_at": scanned_at,
-            "account_email": account_email,
-            "profile": profile,
-            "top_senders": _enrich_groups(groups[:5]),
-            "total_reclaimable": total_reclaimable,
-            "sender_count": len(groups),
-            "best_next": bns,
-            "total_emails": total_emails,
-            "daily_brief_preview": {
-                "exists": _db_rec is not None,
-                "snippet": (_db_rec.content[:200] + "…") if _db_rec else None,
-                "ai_used": _db_rec.ai_used if _db_rec else False,
-                "generated_at": _db_rec.generated_at.strftime("%H:%M") if _db_rec else None,
-            },
-        })
+        ctx.update(
+            {
+                "has_scan": True,
+                "scanned_at": scanned_at,
+                "account_email": account_email,
+                "profile": profile,
+                "top_senders": _enrich_groups(groups[:5]),
+                "total_reclaimable": total_reclaimable,
+                "sender_count": len(groups),
+                "best_next": bns,
+                "total_emails": total_emails,
+                "daily_brief_preview": {
+                    "exists": _db_rec is not None,
+                    "snippet": (_db_rec.content[:200] + "…") if _db_rec else None,
+                    "ai_used": _db_rec.ai_used if _db_rec else False,
+                    "generated_at": _db_rec.generated_at.strftime("%H:%M") if _db_rec else None,
+                },
+            }
+        )
     else:
         ctx["has_scan"] = False
-        ctx["daily_brief_preview"] = {"exists": False, "snippet": None, "ai_used": False, "generated_at": None}
+        ctx["daily_brief_preview"] = {
+            "exists": False,
+            "snippet": None,
+            "ai_used": False,
+            "generated_at": None,
+        }
 
     return _resp(request, "dashboard.html", ctx)
 
@@ -387,9 +417,7 @@ def _render_brief_html(content: str) -> str:
 
     def _flush_para() -> None:
         if para:
-            blocks.append(
-                '<p class="text-ink text-sm leading-relaxed">' + " ".join(para) + "</p>"
-            )
+            blocks.append('<p class="text-ink text-sm leading-relaxed">' + " ".join(para) + "</p>")
             para.clear()
 
     for raw in content.splitlines():
@@ -455,9 +483,9 @@ def _render_brief_links(brief, account_email: str) -> str:
         return (
             '<div class="mt-5 pt-4 border-t border-hairline">'
             '<p class="text-ink-subtle text-[11px] font-semibold uppercase tracking-[0.06em] mb-2">'
-            'What needs attention</p>'
-            f'{inner}'
-            '</div>'
+            "What needs attention</p>"
+            f"{inner}"
+            "</div>"
         )
 
     items = []
@@ -473,6 +501,7 @@ def _render_brief_links(brief, account_email: str) -> str:
         )
 
     from postmind.config import load_account_config
+
     is_gmail = load_account_config(account_email).get("provider", "gmail") == "gmail"
 
     # External-link glyph, shown only for clickable (Gmail) rows.
@@ -492,7 +521,7 @@ def _render_brief_links(brief, account_email: str) -> str:
             f'<span class="min-w-0 flex-1">'
             f'<span class="block text-ink text-sm font-medium truncate">{subject}</span>'
             f'<span class="block text-ink-tertiary text-xs truncate">{sender}</span>'
-            f'</span>'
+            f"</span>"
         )
         if is_gmail and gid:
             # Gmail's /u/<n>/ segment is a numeric account *index* (0 = default);
@@ -510,9 +539,7 @@ def _render_brief_links(brief, account_email: str) -> str:
                 f'hover:bg-surface-2 transition-colors">{icon}{inner}</a>'
             )
         else:
-            rows.append(
-                f'<div class="flex items-start gap-2.5 px-0 py-1.5">{inner}</div>'
-            )
+            rows.append(f'<div class="flex items-start gap-2.5 px-0 py-1.5">{inner}</div>')
 
     return _section(f'<div class="space-y-0.5">{"".join(rows)}</div>')
 
@@ -526,8 +553,10 @@ async def brief_page(request: Request):
     if not account_email:
         return RedirectResponse("/onboarding", status_code=302)
 
+    from datetime import datetime as _dt
+    from datetime import timezone as _tz
+
     from postmind.core.storage import DailyBriefRepo, get_session
-    from datetime import datetime as _dt, timezone as _tz
 
     session = get_session()
     today_str = _dt.now(_tz.utc).date().isoformat()
@@ -535,16 +564,18 @@ async def brief_page(request: Request):
     recent = DailyBriefRepo(session).list_recent(account_email, limit=7)
     session.close()
 
-    ctx.update({
-        "brief": brief,
-        "brief_status_html": _render_brief_status(brief) if brief else "",
-        "brief_links_html": _render_brief_links(brief, account_email) if brief else "",
-        "brief_html": _render_brief_html(brief.content) if brief else "",
-        "recent": recent,
-        "today_str": today_str,
-        "account_email": account_email,
-        "ai_mode": _ai_mode(),
-    })
+    ctx.update(
+        {
+            "brief": brief,
+            "brief_status_html": _render_brief_status(brief) if brief else "",
+            "brief_links_html": _render_brief_links(brief, account_email) if brief else "",
+            "brief_html": _render_brief_html(brief.content) if brief else "",
+            "recent": recent,
+            "today_str": today_str,
+            "account_email": account_email,
+            "ai_mode": _ai_mode(),
+        }
+    )
     return _resp(request, "daily_brief.html", ctx)
 
 
@@ -552,6 +583,7 @@ async def brief_page(request: Request):
 async def brief_generate(request: Request):
     """On-demand generation — called by "Generate Now" button via HTMX POST."""
     import html as _html
+
     account_email = _get_web_account() or ""
     if not account_email:
         return HTMLResponse("<p class='text-warning text-sm'>No active account.</p>")
@@ -560,6 +592,7 @@ async def brief_generate(request: Request):
 
     def _gen():
         from postmind.core.daily_brief import DailyBriefGenerator
+
         return DailyBriefGenerator(account_email).get_or_generate(force=True)
 
     try:
@@ -583,8 +616,8 @@ async def brief_generate(request: Request):
         f'<div id="brief-content" class="px-5 py-5">'
         f'<div class="flex items-center gap-2 mb-4">{ai_badge}'
         f'<span class="text-ink-tertiary text-xs">Generated at {gen_time}</span></div>'
-        f'{status_html}{links_html}{content_html}'
-        f'</div>'
+        f"{status_html}{links_html}{content_html}"
+        f"</div>"
     )
 
 
@@ -616,7 +649,10 @@ async def welcome(request: Request):
 
         # Whole back-catalogue is the point on first run — scope "anywhere".
         groups = fetch_sender_groups_from_db(
-            account_email=account_email, scope="anywhere", min_count=1, top_n=1000,
+            account_email=account_email,
+            scope="anywhere",
+            min_count=1,
+            top_n=1000,
             sort_by="score",
         )
         compute_impact_scores(groups)
@@ -629,8 +665,7 @@ async def welcome(request: Request):
         try:
             row = AccountRepo(session).get(account_email)
             synced_at = (
-                row.last_synced_at.strftime("%d %b %Y")
-                if (row and row.last_synced_at) else None
+                row.last_synced_at.strftime("%d %b %Y") if (row and row.last_synced_at) else None
             )
         finally:
             session.close()
@@ -651,9 +686,7 @@ async def welcome(request: Request):
 
             def _narrate():
                 engine = AIEngine()
-                return engine.summarize_cleanup_plan(
-                    digest, plan.total_emails, plan.total_senders
-                )
+                return engine.summarize_cleanup_plan(digest, plan.total_emails, plan.total_senders)
 
             narration = await loop.run_in_executor(_executor, _narrate)
             intro = narration.get("intro", "")
@@ -669,6 +702,7 @@ async def welcome(request: Request):
     # Mark welcomed so subsequent visits to / go to the normal dashboard.
     def _mark():
         from postmind.core.storage import AccountRepo, get_session
+
         AccountRepo(get_session()).mark_welcomed(account_email)
 
     try:
@@ -676,13 +710,15 @@ async def welcome(request: Request):
     except Exception:
         pass
 
-    ctx.update({
-        "plan": plan,
-        "intro": intro,
-        "synced_at": synced_at,
-        "account_email": account_email,
-        "undo_days": get_settings().undo_window_days,
-    })
+    ctx.update(
+        {
+            "plan": plan,
+            "intro": intro,
+            "synced_at": synced_at,
+            "account_email": account_email,
+            "undo_days": get_settings().undo_window_days,
+        }
+    )
     return _resp(request, "welcome.html", ctx)
 
 
@@ -717,7 +753,10 @@ async def cleanup(request: Request):
         )
 
         groups = fetch_sender_groups_from_db(
-            account_email=account_email, scope="anywhere", min_count=1, top_n=1000,
+            account_email=account_email,
+            scope="anywhere",
+            min_count=1,
+            top_n=1000,
             sort_by="score",
         )
         compute_impact_scores(groups)
@@ -742,7 +781,8 @@ async def cleanup(request: Request):
             session_counts = {}
         RULE_OFFER_THRESHOLD = 3
         rule_offer_keys = {
-            b.key for b in plan.batches
+            b.key
+            for b in plan.batches
             if b.key in ("promos-unopened", "old-clutter")
             and session_counts.get(b.key, 0) >= RULE_OFFER_THRESHOLD
         }
@@ -782,13 +822,15 @@ async def cleanup(request: Request):
         except Exception:
             pass  # any AI failure → deterministic Phase-1 batches stand on their own
 
-    ctx.update({
-        "plan": plan,
-        "account_email": account_email,
-        "undo_days": get_settings().undo_window_days,
-        "auto_threshold": auto_threshold,
-        "rule_offer_keys": rule_offer_keys,
-    })
+    ctx.update(
+        {
+            "plan": plan,
+            "account_email": account_email,
+            "undo_days": get_settings().undo_window_days,
+            "auto_threshold": auto_threshold,
+            "rule_offer_keys": rule_offer_keys,
+        }
+    )
     return _resp(request, "cleanup.html", ctx)
 
 
@@ -818,6 +860,7 @@ async def cleanup_confirm(request: Request):
     feedback_items: list[dict] = []
     try:
         import json as _json
+
         parsed = _json.loads(feedback_raw) if feedback_raw else []
         if isinstance(parsed, list):
             feedback_items = [i for i in parsed if isinstance(i, dict)]
@@ -835,7 +878,9 @@ async def cleanup_confirm(request: Request):
     if not cached:
         return _resp(request, "error.html", {"error": "Scan data expired. Re-open Clean Up."})
 
-    from postmind.core.storage import BlocklistRepo, get_session as _gs
+    from postmind.core.storage import BlocklistRepo
+    from postmind.core.storage import get_session as _gs
+
     groups = cached["groups"]
     account_email = cached["account_email"]
     blocked_set = BlocklistRepo(_gs()).blocked_emails(account_email) if account_email else set()
@@ -884,7 +929,8 @@ async def cleanup_confirm(request: Request):
                 continue
             sender_set = set(senders)
             selected_groups = [
-                g for g in groups
+                g
+                for g in groups
                 if g.sender_email in sender_set and g.sender_email not in blocked_set
             ]
             if not selected_groups:
@@ -929,10 +975,16 @@ async def cleanup_confirm(request: Request):
         # surfacing an error.
         if feedback_items or create_rule_key:
             return RedirectResponse("/cleanup", status_code=303)
-        return _resp(request, "error.html", {"error": "Nothing to do — selected senders are protected or no longer in the scan."})
+        return _resp(
+            request,
+            "error.html",
+            {"error": "Nothing to do — selected senders are protected or no longer in the scan."},
+        )
 
     result_action = actions_done[0] if len(set(actions_done)) == 1 else "mixed"
-    return RedirectResponse(f"/undo?purged={count}&undo_id={undo_id}&action={result_action}", status_code=303)
+    return RedirectResponse(
+        f"/undo?purged={count}&undo_id={undo_id}&action={result_action}", status_code=303
+    )
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
@@ -948,7 +1000,7 @@ def _parse_age_filter(since: str) -> tuple[int | None, int | None]:
     if not since:
         return None, None
     if since.startswith("older:"):
-        val = since[len("older:"):]
+        val = since[len("older:") :]
         if val.endswith("d") and val[:-1].isdigit():
             return None, int(val[:-1])
         return None, None
@@ -1003,7 +1055,9 @@ async def stats_data(
 
         session = get_session()
         try:
-            has_local_data = bool(account_email and EmailRepo(session).get_inbox(account_email, limit=1))
+            has_local_data = bool(
+                account_email and EmailRepo(session).get_inbox(account_email, limit=1)
+            )
 
             if has_local_data:
                 # Prefer the local cache: it holds the full synced history, so age
@@ -1023,15 +1077,21 @@ async def stats_data(
                 profile = {"emailAddress": account_email}
                 data_source = "local cache"
                 import time as _time
+
                 from postmind.core.storage import EmailRecord
+
                 db_q = session.query(EmailRecord).filter(EmailRecord.account_email == account_email)
                 if db_scope == "inbox":
                     db_q = db_q.filter(EmailRecord.is_inbox.is_(True))
                 _now_ms = int(_time.time() * 1000)
                 if newer_days:
-                    db_q = db_q.filter(EmailRecord.internal_date >= _now_ms - newer_days * 86_400_000)
+                    db_q = db_q.filter(
+                        EmailRecord.internal_date >= _now_ms - newer_days * 86_400_000
+                    )
                 if older_days:
-                    db_q = db_q.filter(EmailRecord.internal_date <= _now_ms - older_days * 86_400_000)
+                    db_q = db_q.filter(
+                        EmailRecord.internal_date <= _now_ms - older_days * 86_400_000
+                    )
                 total_emails_in_scope = db_q.count()
             else:
                 client = _build_provider()
@@ -1096,7 +1156,9 @@ async def stats_data(
 # ── Purge ─────────────────────────────────────────────────────────────────────
 
 
-def _render_purge_preview(request: Request, senders: list[str], action: str = "trash") -> HTMLResponse:
+def _render_purge_preview(
+    request: Request, senders: list[str], action: str = "trash"
+) -> HTMLResponse:
     """Render the confirm-first preview for the given senders from the current
     scan cache. Shared by the POST form flow and the GET deep-link the chat
     assistant produces. ``action`` is "trash" (move to Trash) or "archive"
@@ -1113,20 +1175,26 @@ def _render_purge_preview(request: Request, senders: list[str], action: str = "t
     groups = cached["groups"]
     selected_groups = [g for g in groups if g.sender_email in senders]
     if not selected_groups:
-        return _resp(request, "error.html", {"error": "None of those senders are in the current scan. Re-run Stats and try again."})
+        return _resp(
+            request,
+            "error.html",
+            {"error": "None of those senders are in the current scan. Re-run Stats and try again."},
+        )
     total_count = sum(g.count for g in selected_groups)
     total_mb = round(sum(g.total_size_bytes for g in selected_groups) / (1024 * 1024), 1)
 
     ctx = _base()
-    ctx.update({
-        "active": "stats",
-        "selected": _enrich_groups(selected_groups),
-        "senders": [g.sender_email for g in selected_groups],
-        "total_count": total_count,
-        "total_mb": total_mb,
-        "action": action,
-        "undo_days": get_settings().undo_window_days,
-    })
+    ctx.update(
+        {
+            "active": "stats",
+            "selected": _enrich_groups(selected_groups),
+            "senders": [g.sender_email for g in selected_groups],
+            "total_count": total_count,
+            "total_mb": total_mb,
+            "action": action,
+            "undo_days": get_settings().undo_window_days,
+        }
+    )
     return _resp(request, "purge_preview.html", ctx)
 
 
@@ -1162,16 +1230,24 @@ async def purge_confirm(request: Request):
     if not cached:
         return _resp(request, "error.html", {"error": "Scan data expired. Please re-run Stats."})
 
-    from postmind.core.storage import BlocklistRepo, get_session as _gs
+    from postmind.core.storage import BlocklistRepo
+    from postmind.core.storage import get_session as _gs
+
     groups = cached["groups"]
     account_email = cached["account_email"]
     # Enforce protected senders at confirm time (not just at stage time): a sender
     # blocked after the cache was populated must never be touched.
     blocked_set = BlocklistRepo(_gs()).blocked_emails(account_email) if account_email else set()
-    selected_groups = [g for g in groups if g.sender_email in senders and g.sender_email not in blocked_set]
+    selected_groups = [
+        g for g in groups if g.sender_email in senders and g.sender_email not in blocked_set
+    ]
 
     if not selected_groups:
-        return _resp(request, "error.html", {"error": "Nothing to do — selected senders are protected or no longer in the scan."})
+        return _resp(
+            request,
+            "error.html",
+            {"error": "Nothing to do — selected senders are protected or no longer in the scan."},
+        )
 
     def _do_purge():
         from postmind.core.storage import UndoLogRepo, get_session
@@ -1207,7 +1283,9 @@ async def purge_confirm(request: Request):
     except Exception as exc:
         return _resp(request, "error.html", {"error": str(exc)})
 
-    return RedirectResponse(f"/undo?purged={count}&undo_id={undo_id}&action={action}", status_code=303)
+    return RedirectResponse(
+        f"/undo?purged={count}&undo_id={undo_id}&action={action}", status_code=303
+    )
 
 
 # ── Undo ─────────────────────────────────────────────────────────────────────
@@ -1236,29 +1314,41 @@ async def undo_page(request: Request):
     now = datetime.now(timezone.utc)
     rows = []
     for e in entries:
-        expires_at = e.expires_at.replace(tzinfo=timezone.utc) if e.expires_at.tzinfo is None else e.expires_at
-        executed_at = e.executed_at.replace(tzinfo=timezone.utc) if e.executed_at.tzinfo is None else e.executed_at
-        rows.append({
-            "id": e.id,
-            "operation": e.operation,
-            "description": e.description,
-            "count": len(e.message_ids),
-            "executed_at": executed_at.strftime("%b %d, %Y %H:%M"),
-            "expires_in": max(0, (expires_at - now).days),
-            "senders": e.op_metadata.get("senders", []),
-        })
+        expires_at = (
+            e.expires_at.replace(tzinfo=timezone.utc)
+            if e.expires_at.tzinfo is None
+            else e.expires_at
+        )
+        executed_at = (
+            e.executed_at.replace(tzinfo=timezone.utc)
+            if e.executed_at.tzinfo is None
+            else e.executed_at
+        )
+        rows.append(
+            {
+                "id": e.id,
+                "operation": e.operation,
+                "description": e.description,
+                "count": len(e.message_ids),
+                "executed_at": executed_at.strftime("%b %d, %Y %H:%M"),
+                "expires_in": max(0, (expires_at - now).days),
+                "senders": e.op_metadata.get("senders", []),
+            }
+        )
 
     ctx = _base()
-    ctx.update({
-        "active": "undo",
-        "entries": rows,
-        "account_email": account_email,
-        "purged": purged,
-        "purged_action": purged_action,
-        "restored": restored,
-        "undo_id": undo_id,
-        "undo_days": get_settings().undo_window_days,
-    })
+    ctx.update(
+        {
+            "active": "undo",
+            "entries": rows,
+            "account_email": account_email,
+            "purged": purged,
+            "purged_action": purged_action,
+            "restored": restored,
+            "undo_id": undo_id,
+            "undo_days": get_settings().undo_window_days,
+        }
+    )
     return _resp(request, "undo.html", ctx)
 
 
@@ -1270,7 +1360,7 @@ async def undo_restore(request: Request, entry_id: int):
 
         # Security check: ensure the undo entry belongs to the current account
         entry = UndoLogRepo(get_session()).get(entry_id)
-        if entry and hasattr(entry, 'account_email'):
+        if entry and hasattr(entry, "account_email"):
             current_acct = _get_web_account()
             if current_acct and entry.account_email and entry.account_email != current_acct:
                 raise HTTPException(status_code=404, detail="Operation not found")
@@ -1302,45 +1392,57 @@ async def settings_page(request: Request):
 
     try:
         from postmind.config import load_account_config
+
         s = get_settings()
         email = _get_web_account()
         acct_cfg = load_account_config(email) if email else {}
-        ctx.update({
-            "ai_mode": s.ai_mode,
-            "provider": acct_cfg.get("provider", s.provider),
-            "imap_server": acct_cfg.get("imap_server", s.imap_server),
-            "imap_user": acct_cfg.get("imap_user", s.imap_user),
-            "undo_days": s.undo_window_days,
-            "has_api_key": bool(s.anthropic_api_key),
-            "cloud_provider": s.cloud_provider,
-            "ollama_base_url": s.ollama_base_url,
-            "ollama_model": s.ollama_model,
-            "has_ollama_key": bool(s.ollama_api_key),
-            "chat_ai_mode": s.chat_ai_mode,  # "" = inherit
-            "chat_cloud_model": s.chat_cloud_model or s.ai_model,
-            "chat_ollama_model": s.chat_ollama_model or s.ollama_model,
-            "agent_autopilot": s.agent_autopilot,
-        })
+        ctx.update(
+            {
+                "ai_mode": s.ai_mode,
+                "provider": acct_cfg.get("provider", s.provider),
+                "imap_server": acct_cfg.get("imap_server", s.imap_server),
+                "imap_user": acct_cfg.get("imap_user", s.imap_user),
+                "undo_days": s.undo_window_days,
+                "has_api_key": bool(s.anthropic_api_key),
+                "cloud_provider": s.cloud_provider,
+                "ollama_base_url": s.ollama_base_url,
+                "ollama_model": s.ollama_model,
+                "has_ollama_key": bool(s.ollama_api_key),
+                "chat_ai_mode": s.chat_ai_mode,  # "" = inherit
+                "chat_cloud_model": s.chat_cloud_model or s.ai_model,
+                "chat_ollama_model": s.chat_ollama_model or s.ollama_model,
+                "agent_autopilot": s.agent_autopilot,
+            }
+        )
     except Exception:
-        ctx.update({
-            "ai_mode": "off", "provider": "gmail",
-            "imap_server": "", "imap_user": "",
-            "undo_days": 30, "has_api_key": False, "has_ollama_key": False,
-            "cloud_provider": "anthropic",
-            "ollama_base_url": "http://localhost:11434",
-            "ollama_model": "llama3.2",
-            "chat_ai_mode": "", "chat_cloud_model": "claude-sonnet-4-6",
-            "chat_ollama_model": "qwen2.5:32b",
-            "agent_autopilot": False,
-        })
+        ctx.update(
+            {
+                "ai_mode": "off",
+                "provider": "gmail",
+                "imap_server": "",
+                "imap_user": "",
+                "undo_days": 30,
+                "has_api_key": False,
+                "has_ollama_key": False,
+                "cloud_provider": "anthropic",
+                "ollama_base_url": "http://localhost:11434",
+                "ollama_model": "llama3.2",
+                "chat_ai_mode": "",
+                "chat_cloud_model": "claude-sonnet-4-6",
+                "chat_ollama_model": "qwen2.5:32b",
+                "agent_autopilot": False,
+            }
+        )
 
     total = sum(f.stat().st_size for f in DATA_DIR.rglob("*") if f.is_file())
-    ctx.update({
-        "data_dir": str(DATA_DIR),
-        "credentials_exist": CREDENTIALS_PATH.exists(),
-        "token_exists": _is_authed(),
-        "data_size_mb": round(total / (1024 * 1024), 1),
-    })
+    ctx.update(
+        {
+            "data_dir": str(DATA_DIR),
+            "credentials_exist": CREDENTIALS_PATH.exists(),
+            "token_exists": _is_authed(),
+            "data_size_mb": round(total / (1024 * 1024), 1),
+        }
+    )
     return _resp(request, "settings.html", ctx)
 
 
@@ -1374,6 +1476,7 @@ async def web_switch_account(request: Request):
     form = await request.form()
     email = (form.get("email") or "").strip()
     from postmind.core.account_registry import list_accounts
+
     if email and any(a.email == email for a in list_accounts()):
         _active_web_account = email
         _scan_cache.clear()
@@ -1382,9 +1485,10 @@ async def web_switch_account(request: Request):
 
 @app.get("/accounts", response_class=HTMLResponse)
 async def accounts_page(request: Request):
-    from postmind.core.account_registry import list_accounts
     from postmind.config import token_path_for
+    from postmind.core.account_registry import list_accounts
     from postmind.core.storage import AccountRepo, get_session
+
     _acct_session = get_session()
     _acct_repo = AccountRepo(_acct_session)
     # Repair any account whose timestamp was lost to an interrupted big sync,
@@ -1400,22 +1504,26 @@ async def accounts_page(request: Request):
         db_row = all_db.get(a.email)
         token_ok = token_path_for(a.email).exists() if a.provider == "gmail" else True
         last_sync = db_row.last_synced_at if db_row else None
-        accounts_detail.append({
-            "email": a.email,
-            "display_name": a.display_name,
-            "provider": a.provider,
-            "token_ok": token_ok,
-            "last_synced": last_sync.strftime("%b %d, %H:%M") if last_sync else "Never",
-            "imap_server": a.imap_server,
-            "is_active_web": a.email == _get_web_account(),
-        })
+        accounts_detail.append(
+            {
+                "email": a.email,
+                "display_name": a.display_name,
+                "provider": a.provider,
+                "token_ok": token_ok,
+                "last_synced": last_sync.strftime("%b %d, %H:%M") if last_sync else "Never",
+                "imap_server": a.imap_server,
+                "is_active_web": a.email == _get_web_account(),
+            }
+        )
     ctx = _base()
-    ctx.update({
-        "active": "accounts",
-        "accounts_detail": accounts_detail,
-        "added": request.query_params.get("added"),
-        "removed": request.query_params.get("removed"),
-    })
+    ctx.update(
+        {
+            "active": "accounts",
+            "accounts_detail": accounts_detail,
+            "added": request.query_params.get("added"),
+            "removed": request.query_params.get("removed"),
+        }
+    )
     return _resp(request, "accounts.html", ctx)
 
 
@@ -1426,9 +1534,15 @@ async def accounts_remove(request: Request):
     email = (form.get("email") or "").strip()
     if not email:
         raise HTTPException(status_code=400)
-    from postmind.core.storage import AccountRepo, get_session
-    from postmind.config import token_path_for, get_active_account, set_active_account, ACTIVE_ACCOUNT_PATH
+    from postmind.config import (
+        ACTIVE_ACCOUNT_PATH,
+        get_active_account,
+        set_active_account,
+        token_path_for,
+    )
     from postmind.core.account_registry import list_accounts
+    from postmind.core.storage import AccountRepo, get_session
+
     token = token_path_for(email)
     if token.exists():
         token.unlink()
@@ -1459,7 +1573,9 @@ async def accounts_add_page(request: Request):
 @app.post("/accounts/add/gmail/start", response_class=HTMLResponse)
 async def gmail_add_start(request: Request):
     if not CREDENTIALS_PATH.exists():
-        return HTMLResponse('<p class="text-red-600 text-sm">credentials.json not found in ~/.postmind/. Download it from Google Cloud Console first.</p>')
+        return HTMLResponse(
+            '<p class="text-red-600 text-sm">credentials.json not found in ~/.postmind/. Download it from Google Cloud Console first.</p>'
+        )
     task_id = uuid.uuid4().hex[:10]
     _oauth_tasks[task_id] = {"status": "running", "email": None, "error": None}
 
@@ -1467,12 +1583,15 @@ async def gmail_add_start(request: Request):
         state = _oauth_tasks[task_id]
         try:
             import shutil
-            from postmind.core.gmail_client import authenticate
-            from postmind.config import TOKENS_DIR, token_path_for, set_active_account
+
+            from postmind.config import TOKENS_DIR, set_active_account, token_path_for
             from postmind.core.account_registry import register_gmail
+            from postmind.core.gmail_client import authenticate
+
             tmp = TOKENS_DIR / f"_tmp_{task_id}.json"
             creds = authenticate(token_path=tmp)
             from googleapiclient.discovery import build
+
             svc = build("gmail", "v1", credentials=creds, cache_discovery=False)
             profile = svc.users().getProfile(userId="me").execute()
             email = profile["emailAddress"]
@@ -1521,10 +1640,18 @@ def _test_and_register_imap(server, user, password, port, folder, display_name):
     Password is used only for the connection test and is never written to disk
     (consistent with the existing /accounts/add/imap behavior).
     """
-    from postmind.core.providers.factory import get_provider
-    from postmind.core.account_registry import register_imap
     from postmind.config import set_active_account
-    provider = get_provider("imap", imap_server=server, imap_user=user, imap_password=password, imap_port=port, imap_folder=folder)
+    from postmind.core.account_registry import register_imap
+    from postmind.core.providers.factory import get_provider
+
+    provider = get_provider(
+        "imap",
+        imap_server=server,
+        imap_user=user,
+        imap_password=password,
+        imap_port=port,
+        imap_folder=folder,
+    )
     provider.get_profile()
     register_imap(user, server, user, port, folder, display_name or user)
     set_active_account(user)
@@ -1541,7 +1668,14 @@ async def imap_add(request: Request):
     display_name = (form.get("display_name") or "").strip()
     if not server or not user or not password:
         ctx = _base()
-        ctx.update({"active": "accounts", "tab": "imap", "has_credentials": CREDENTIALS_PATH.exists(), "error": "Server, username, and password are required."})
+        ctx.update(
+            {
+                "active": "accounts",
+                "tab": "imap",
+                "has_credentials": CREDENTIALS_PATH.exists(),
+                "error": "Server, username, and password are required.",
+            }
+        )
         return _resp(request, "accounts_add.html", ctx)
 
     try:
@@ -1551,7 +1685,14 @@ async def imap_add(request: Request):
         )
     except Exception as exc:
         ctx = _base()
-        ctx.update({"active": "accounts", "tab": "imap", "has_credentials": CREDENTIALS_PATH.exists(), "error": str(exc)})
+        ctx.update(
+            {
+                "active": "accounts",
+                "tab": "imap",
+                "has_credentials": CREDENTIALS_PATH.exists(),
+                "error": str(exc),
+            }
+        )
         return _resp(request, "accounts_add.html", ctx)
     return RedirectResponse("/accounts?added=1", status_code=303)
 
@@ -1562,22 +1703,25 @@ async def imap_add(request: Request):
 @app.get("/onboarding", response_class=HTMLResponse)
 async def onboarding(request: Request):
     from postmind.core.account_registry import list_accounts
+
     step = int(request.query_params.get("step", "1"))
     tab = request.query_params.get("tab", "gmail")
     if tab not in ("gmail", "imap"):
         tab = "gmail"
     s = get_settings()
     ctx = _base()
-    ctx.update({
-        "step": step,
-        "tab": tab,
-        "has_credentials": CREDENTIALS_PATH.exists(),
-        "has_accounts": len(list_accounts()) > 0,
-        "ai_mode": s.ai_mode,
-        "ollama_base_url": s.ollama_base_url,
-        "ollama_model": s.ollama_model,
-        "has_api_key": bool(s.anthropic_api_key),
-    })
+    ctx.update(
+        {
+            "step": step,
+            "tab": tab,
+            "has_credentials": CREDENTIALS_PATH.exists(),
+            "has_accounts": len(list_accounts()) > 0,
+            "ai_mode": s.ai_mode,
+            "ollama_base_url": s.ollama_base_url,
+            "ollama_model": s.ollama_model,
+            "has_api_key": bool(s.anthropic_api_key),
+        }
+    )
     return _resp(request, "onboarding.html", ctx)
 
 
@@ -1595,19 +1739,22 @@ async def onboarding_connect_imap(request: Request):
 
     def _render_error(msg: str) -> HTMLResponse:
         from postmind.core.account_registry import list_accounts
+
         s = get_settings()
         ctx = _base()
-        ctx.update({
-            "step": 1,
-            "tab": "imap",
-            "has_credentials": CREDENTIALS_PATH.exists(),
-            "has_accounts": len(list_accounts()) > 0,
-            "ai_mode": s.ai_mode,
-            "ollama_base_url": s.ollama_base_url,
-            "ollama_model": s.ollama_model,
-            "has_api_key": bool(s.anthropic_api_key),
-            "imap_error": msg,
-        })
+        ctx.update(
+            {
+                "step": 1,
+                "tab": "imap",
+                "has_credentials": CREDENTIALS_PATH.exists(),
+                "has_accounts": len(list_accounts()) > 0,
+                "ai_mode": s.ai_mode,
+                "ollama_base_url": s.ollama_base_url,
+                "ollama_model": s.ollama_model,
+                "has_api_key": bool(s.anthropic_api_key),
+                "imap_error": msg,
+            }
+        )
         return _resp(request, "onboarding.html", ctx)
 
     if not server or not user or not password:
@@ -1642,6 +1789,7 @@ async def upload_credentials(request: Request):
         return RedirectResponse("/onboarding?step=1&error=no_file", status_code=303)
     content = await file.read()
     import json as _json
+
     try:
         data = _json.loads(content)
         if "web" not in data and "installed" not in data:
@@ -1657,6 +1805,7 @@ async def upload_credentials(request: Request):
 
 
 import threading as _threading
+
 _watch_thread: "_threading.Thread | None" = None
 _watch_stop_event = _threading.Event()
 _watch_interval: int = 30
@@ -1665,6 +1814,7 @@ _watch_interval: int = 30
 @app.get("/watch", response_class=HTMLResponse)
 async def watch_page(request: Request):
     from postmind.core.storage import AgentRepo, get_session
+
     ctx = _base()
     ctx["active"] = "watch"
     ctx["is_running"] = bool(_watch_thread and _watch_thread.is_alive())
@@ -1694,12 +1844,15 @@ async def watch_start(request: Request):
     if _watch_thread and _watch_thread.is_alive():
         return RedirectResponse("/watch", status_code=303)
     _watch_stop_event.clear()
+
     def _run():
         try:
             from postmind.core.daemon import start_daemon_background
+
             start_daemon_background(stop_event=_watch_stop_event)
         except Exception:
             pass
+
     _watch_thread = _threading.Thread(target=_run, daemon=True, name="postmind-watch")
     _watch_thread.start()
     return RedirectResponse("/watch?started=1", status_code=303)
@@ -1718,15 +1871,26 @@ async def watch_stop(request: Request):
 @app.get("/watch/status", response_class=HTMLResponse)
 async def watch_status(request: Request):
     from postmind.core.storage import AgentRepo, get_session
+
     is_running = bool(_watch_thread and _watch_thread.is_alive())
     agents = AgentRepo(get_session()).list_all()
     rows = ""
     for a in agents:
         last = a.last_run_at.strftime("%H:%M") if a.last_run_at else "never"
-        dot_color = "bg-teal-400" if a.is_active and a.status != "error" else ("bg-red-400" if a.status == "error" else "bg-slate-300")
+        dot_color = (
+            "bg-teal-400"
+            if a.is_active and a.status != "error"
+            else ("bg-red-400" if a.status == "error" else "bg-slate-300")
+        )
         rows += f'<tr><td class="py-2 px-4 text-sm font-medium text-slate-800">{a.name}</td><td class="py-2 px-4 text-xs text-slate-500">{a.account_email}</td><td class="py-2 px-4"><span class="w-2 h-2 rounded-full {dot_color} inline-block"></span></td><td class="py-2 px-4 text-xs text-slate-500">{last}</td><td class="py-2 px-4 text-xs text-slate-500">{a.last_found_count}</td></tr>'
-    status_badge = '<span class="inline-flex items-center gap-1.5 text-xs font-medium text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse"></span>Running</span>' if is_running else '<span class="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>Stopped</span>'
-    return HTMLResponse(f'<div id="watch-status" hx-get="/watch/status" hx-trigger="every 10s" hx-swap="outerHTML"><div class="flex items-center justify-between mb-4"><span class="text-sm font-medium text-slate-700">Daemon status</span>{status_badge}</div><table class="w-full"><thead><tr class="text-xs text-slate-400 uppercase tracking-wide border-b border-slate-100"><th class="py-2 px-4 text-left">Agent</th><th class="py-2 px-4 text-left">Account</th><th class="py-2 px-4 text-left">Status</th><th class="py-2 px-4 text-left">Last run</th><th class="py-2 px-4 text-left">Found</th></tr></thead><tbody>{rows}</tbody></table></div>')
+    status_badge = (
+        '<span class="inline-flex items-center gap-1.5 text-xs font-medium text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse"></span>Running</span>'
+        if is_running
+        else '<span class="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>Stopped</span>'
+    )
+    return HTMLResponse(
+        f'<div id="watch-status" hx-get="/watch/status" hx-trigger="every 10s" hx-swap="outerHTML"><div class="flex items-center justify-between mb-4"><span class="text-sm font-medium text-slate-700">Daemon status</span>{status_badge}</div><table class="w-full"><thead><tr class="text-xs text-slate-400 uppercase tracking-wide border-b border-slate-100"><th class="py-2 px-4 text-left">Agent</th><th class="py-2 px-4 text-left">Account</th><th class="py-2 px-4 text-left">Status</th><th class="py-2 px-4 text-left">Last run</th><th class="py-2 px-4 text-left">Found</th></tr></thead><tbody>{rows}</tbody></table></div>'
+    )
 
 
 # ── Agents ────────────────────────────────────────────────────────────────────
@@ -1736,9 +1900,10 @@ async def watch_status(request: Request):
 async def agents_page(request: Request):
     ctx = _base()
     ctx["active"] = "agents"
-    from postmind.core.storage import AgentRepo, get_session
-    from postmind.core.account_registry import list_accounts
     from postmind.config import get_settings
+    from postmind.core.account_registry import list_accounts
+    from postmind.core.storage import AgentRepo, get_session
+
     agents = AgentRepo(get_session()).list_all()
     accounts = list_accounts()
     registered_emails = {a.account_email for a in agents}
@@ -1761,6 +1926,7 @@ async def agents_page(request: Request):
             "run_followups": a.run_followups if a.run_followups is not None else True,
             "run_avoidance": a.run_avoidance if a.run_avoidance is not None else False,
             "run_daily_brief": a.run_daily_brief if a.run_daily_brief is not None else False,
+            "run_autodraft": getattr(a, "run_autodraft", False) or False,
         }
         for a in agents
     ]
@@ -1798,8 +1964,10 @@ async def agents_create(request: Request):
     if not email:
         raise HTTPException(status_code=400, detail="Email required")
     from postmind.core.storage import AgentRepo, get_session
+
     AgentRepo(get_session()).register(email, name, max(1, min(1440, interval)))
     from urllib.parse import quote
+
     return RedirectResponse(f"/agents?created={quote(name)}", status_code=303)
 
 
@@ -1809,6 +1977,7 @@ async def agents_toggle(request: Request):
     email = (form.get("email") or "").strip()
     active = form.get("active") == "true"
     from postmind.core.storage import AgentRepo, get_session
+
     AgentRepo(get_session()).set_active(email, active)
     return RedirectResponse("/agents", status_code=303)
 
@@ -1818,6 +1987,7 @@ async def agents_delete_route(request: Request):
     form = await request.form()
     email = (form.get("email") or "").strip()
     from postmind.core.storage import AgentRepo, get_session
+
     AgentRepo(get_session()).delete(email)
     return RedirectResponse("/agents", status_code=303)
 
@@ -1829,6 +1999,7 @@ async def agents_soul(request: Request):
     if not email:
         raise HTTPException(status_code=400, detail="Email required")
     from postmind.core.storage import AgentRepo, get_session
+
     AgentRepo(get_session()).update_soul(
         account_email=email,
         voice_style=(form.get("voice_style") or "").strip() or None,
@@ -1845,12 +2016,14 @@ async def agents_features(request: Request):
     if not email:
         raise HTTPException(status_code=400, detail="Email required")
     from postmind.core.storage import AgentRepo, get_session
+
     AgentRepo(get_session()).update_features(
         account_email=email,
         run_rules=form.get("run_rules") == "on",
         run_followups=form.get("run_followups") == "on",
         run_avoidance=form.get("run_avoidance") == "on",
         run_daily_brief=form.get("run_daily_brief") == "on",
+        run_autodraft=form.get("run_autodraft") == "on",
     )
     return RedirectResponse("/agents", status_code=303)
 
@@ -1867,6 +2040,7 @@ async def agents_compose(request: Request):
         return HTMLResponse("<p class='text-red-500 text-sm'>Email and intent are required.</p>")
 
     from postmind.core.storage import AgentRepo, get_session
+
     agent = AgentRepo(get_session()).get_by_email(email)
     soul = {}
     if agent:
@@ -1878,6 +2052,7 @@ async def agents_compose(request: Request):
 
     try:
         from postmind.core.ai_engine import AIEngine
+
         ai = AIEngine()
         draft = ai.compose_email(
             intent=intent,
@@ -1887,6 +2062,7 @@ async def agents_compose(request: Request):
         )
         # Escape for safe HTML insertion
         import html
+
         escaped = html.escape(draft)
         return HTMLResponse(
             f"<pre class='whitespace-pre-wrap text-sm text-slate-800 bg-slate-50 "
@@ -1896,7 +2072,10 @@ async def agents_compose(request: Request):
         return HTMLResponse(f"<p class='text-amber-600 text-sm mt-3'>{html.escape(str(exc))}</p>")
     except Exception as exc:
         import html
-        return HTMLResponse(f"<p class='text-red-500 text-sm mt-3'>Error: {html.escape(str(exc))}</p>")
+
+        return HTMLResponse(
+            f"<p class='text-red-500 text-sm mt-3'>Error: {html.escape(str(exc))}</p>"
+        )
 
 
 def _write_env(updates: dict[str, str]) -> None:
@@ -1913,6 +2092,7 @@ def _write_env(updates: dict[str, str]) -> None:
             lines.append(new_line)
     env_file.write_text("".join(lines))
     import postmind.config as _cfg
+
     _cfg._settings = None
 
 
@@ -2003,6 +2183,7 @@ async def update_agent_settings(request: Request):
 async def blocked_list(request: Request):
     def _get():
         from postmind.core.storage import BlocklistRepo, get_session
+
         client = _build_provider()
         acct = client.get_email_address()
         entries = BlocklistRepo(get_session()).list_all(acct)
@@ -2015,11 +2196,13 @@ async def blocked_list(request: Request):
         return _resp(request, "error.html", {"error": str(exc)})
 
     ctx = _base()
-    ctx.update({
-        "active": "settings",
-        "entries": [{"email": e.sender_email, "domain": e.sender_domain} for e in entries],
-        "account_email": acct,
-    })
+    ctx.update(
+        {
+            "active": "settings",
+            "entries": [{"email": e.sender_email, "domain": e.sender_domain} for e in entries],
+            "account_email": acct,
+        }
+    )
     return _resp(request, "blocked.html", ctx)
 
 
@@ -2032,6 +2215,7 @@ async def blocked_add(request: Request):
 
     def _add():
         from postmind.core.storage import BlocklistRepo, get_session
+
         client = _build_provider()
         acct = client.get_email_address()
         BlocklistRepo(get_session()).add(acct, sender)
@@ -2050,6 +2234,7 @@ async def blocked_remove(request: Request):
 
     def _remove():
         from postmind.core.storage import BlocklistRepo, get_session
+
         client = _build_provider()
         acct = client.get_email_address()
         BlocklistRepo(get_session()).remove(acct, sender)
@@ -2104,7 +2289,7 @@ def _sync_overview(account_email: str) -> dict:
     Reads everything from local SQLite (instant) except the mailbox total,
     which needs one best-effort Gmail profile call to compute coverage.
     """
-    from datetime import datetime, timezone
+    from datetime import timezone
 
     import postmind.config as _cfg
     from postmind.core.storage import AccountRepo, EmailRecord, get_session
@@ -2120,9 +2305,7 @@ def _sync_overview(account_email: str) -> dict:
         AccountRepo(session).backfill_last_synced(account_email)
         acct = AccountRepo(session).get(account_email)
 
-        base = session.query(EmailRecord).filter(
-            EmailRecord.account_email == account_email
-        )
+        base = session.query(EmailRecord).filter(EmailRecord.account_email == account_email)
         total = base.count()
         if total == 0:
             return overview
@@ -2142,16 +2325,11 @@ def _sync_overview(account_email: str) -> dict:
             if load_account_config(account_email).get("provider", "gmail") == "gmail":
                 from postmind.core.gmail_client import GmailClient
 
-                mailbox_total = GmailClient().get_profile().get(
-                    "messagesTotal", 0
-                ) or 0
+                mailbox_total = GmailClient().get_profile().get("messagesTotal", 0) or 0
         except Exception:
             mailbox_total = 0
 
-        coverage_pct = (
-            min(round(total / mailbox_total * 100), 100)
-            if mailbox_total else 0
-        )
+        coverage_pct = min(round(total / mailbox_total * 100), 100) if mailbox_total else 0
 
         db_path = _cfg.DB_PATH
         try:
@@ -2164,7 +2342,8 @@ def _sync_overview(account_email: str) -> dict:
             "last_synced_ago": _humanize_ago(last_dt) if last_dt else None,
             "last_synced_abs": (
                 last_dt.astimezone(timezone.utc).strftime("%b %d, %Y · %H:%M UTC")
-                if last_dt else None
+                if last_dt
+                else None
             ),
             "total_cached": total,
             "inbox_cached": inbox,
@@ -2230,9 +2409,16 @@ async def sync_start(request: Request):
         import json as _json
         import time as _time
 
-        from postmind.core.gmail_client import GmailClient
-        from postmind.core.storage import AccountRepo, EmailRecord, EmailRepo, UndoLogRepo, get_session
         from sqlalchemy import select as _select
+
+        from postmind.core.gmail_client import GmailClient
+        from postmind.core.storage import (
+            AccountRepo,
+            EmailRecord,
+            EmailRepo,
+            UndoLogRepo,
+            get_session,
+        )
         from postmind.core.storage import EmailRecord as _ER
 
         state = _sync_tasks[task_id]
@@ -2260,9 +2446,9 @@ async def sync_start(request: Request):
 
             # Load existing IDs once for dedup across all ranges
             existing_ids: set[str] = set(
-                session.execute(
-                    _select(_ER.gmail_id).where(_ER.account_email == account_email)
-                ).scalars().all()
+                session.execute(_select(_ER.gmail_id).where(_ER.account_email == account_email))
+                .scalars()
+                .all()
             )
 
             ranges = _DEEP_RANGES if deep else [("", "")]
@@ -2302,9 +2488,7 @@ async def sync_start(request: Request):
                 state["total"] = total_new
 
                 range_note = f" [{range_label}]" if deep else ""
-                state["message"] = (
-                    f"Found {len(ids):,}{range_note} — syncing {len(new_ids):,} new…"
-                )
+                state["message"] = f"Found {len(ids):,}{range_note} — syncing {len(new_ids):,} new…"
                 state["step"] = 2
 
                 for i in range(0, len(new_ids), chunk_size):
@@ -2362,6 +2546,7 @@ async def sync_start(request: Request):
             # about freshness.
             try:
                 from postmind.core.storage import AccountRepo
+
                 AccountRepo(session).update_last_synced(account_email)
             except Exception:
                 pass
@@ -2392,7 +2577,9 @@ async def sync_start(request: Request):
                 )
                 state["complete"] = False
             else:
-                state["detail"] = f"Local cache is up to date — {len(existing_ids):,} emails cached."
+                state["detail"] = (
+                    f"Local cache is up to date — {len(existing_ids):,} emails cached."
+                )
                 state["complete"] = True
 
         except Exception as exc:
@@ -2423,14 +2610,17 @@ async def sync_start(request: Request):
 @app.get("/sync/active")
 async def sync_active():
     from fastapi.responses import JSONResponse
+
     if _active_sync_task_id and _active_sync_task_id in _sync_tasks:
         state = _sync_tasks[_active_sync_task_id]
-        return JSONResponse({
-            "task_id": _active_sync_task_id,
-            "status": state["status"],
-            "message": state["message"],
-            "count": state["count"],
-        })
+        return JSONResponse(
+            {
+                "task_id": _active_sync_task_id,
+                "status": state["status"],
+                "message": state["message"],
+                "count": state["count"],
+            }
+        )
     return JSONResponse({"task_id": None})
 
 
@@ -2450,7 +2640,7 @@ async def sync_poll(task_id: str):
         return HTMLResponse(f"""
 <div id="sync-result" class="bg-red-50 border border-red-200 rounded-xl p-4">
   <p class="text-red-800 font-medium text-sm">Sync failed</p>
-  <p class="text-red-600 text-sm mt-1">{state['error']}</p>
+  <p class="text-red-600 text-sm mt-1">{state["error"]}</p>
 </div>""")
 
     if status == "done":
@@ -2488,10 +2678,14 @@ async def sync_poll(task_id: str):
       <div class="w-4 h-4 border-2 border-teal-500 border-t-transparent rounded-full animate-spin shrink-0"></div>
       <span class="text-slate-600 text-sm">{msg}</span>
     </div>
-    {f'''<div class="w-full bg-slate-100 rounded-full h-1.5">
+    {
+        f'''<div class="w-full bg-slate-100 rounded-full h-1.5">
       <div class="bg-teal-500 h-1.5 rounded-full transition-all" style="width:{bar_width}%"></div>
     </div>
-    <p class="text-slate-400 text-xs">{count:,} / {total:,} emails — {pct}%</p>''' if total > 0 else ""}
+    <p class="text-slate-400 text-xs">{count:,} / {total:,} emails — {pct}%</p>'''
+        if total > 0
+        else ""
+    }
   </div>
 </div>""")
 
@@ -2524,8 +2718,15 @@ def _prune_triage_pending() -> None:
         _triage_pending.pop(tok, None)
 
 
-def _cls_payload(gmail_id: str, priority: str, category: str, explanation: str,
-                 suggested_action: str, requires_reply: bool, deadline_hint: str) -> dict:
+def _cls_payload(
+    gmail_id: str,
+    priority: str,
+    category: str,
+    explanation: str,
+    suggested_action: str,
+    requires_reply: bool,
+    deadline_hint: str,
+) -> dict:
     """Build the classification dict the template + stream both render from."""
     return {
         "id": gmail_id,
@@ -2547,20 +2748,23 @@ def _fetch_triage_messages(scope: str, limit: int):
     if scope == "all":
         # Read from the local synced DB — no Gmail API calls needed.
         from postmind.core.storage import EmailRepo, get_session
+
         repo = EmailRepo(get_session())
         records = repo.get_inbox(account_email=account_email, limit=limit)
         messages = []
         for r in records:
             from_ = f"{r.sender_name} <{r.sender_email}>" if r.sender_name else r.sender_email
-            messages.append(Message(
-                id=r.gmail_id,
-                thread_id=r.thread_id or "",
-                snippet=r.snippet or "",
-                headers=MessageHeader(subject=r.subject or "", from_=from_),
-                label_ids=[],
-                size_estimate=r.size_estimate or 0,
-                internal_date=0,
-            ))
+            messages.append(
+                Message(
+                    id=r.gmail_id,
+                    thread_id=r.thread_id or "",
+                    snippet=r.snippet or "",
+                    headers=MessageHeader(subject=r.subject or "", from_=from_),
+                    label_ids=[],
+                    size_estimate=r.size_estimate or 0,
+                    internal_date=0,
+                )
+            )
         return messages, account_email
 
     client = GmailClient()
@@ -2578,10 +2782,25 @@ async def triage_page(request: Request):
     ctx["active"] = "triage"
 
     if _ai_mode() == "off":
-        return _resp(request, "triage.html", {**ctx, "ai_off": True, "results": [], "scope": "unread", "limit": 20})
+        return _resp(
+            request,
+            "triage.html",
+            {**ctx, "ai_off": True, "results": [], "scope": "unread", "limit": 20},
+        )
 
     if not _is_authed():
-        return _resp(request, "triage.html", {**ctx, "ai_off": False, "auth_error": True, "results": [], "scope": "unread", "limit": 20})
+        return _resp(
+            request,
+            "triage.html",
+            {
+                **ctx,
+                "ai_off": False,
+                "auth_error": True,
+                "results": [],
+                "scope": "unread",
+                "limit": 20,
+            },
+        )
 
     limit = int(request.query_params.get("limit", "20"))
     scope = request.query_params.get("scope", "unread")  # "unread" or "all"
@@ -2637,17 +2856,19 @@ async def triage_page(request: Request):
         pending_token = uuid.uuid4().hex
         _triage_pending[pending_token] = {"messages": pending, "created": time.time()}
 
-    ctx.update({
-        "ai_off": False,
-        "auth_error": False,
-        "results": rows,
-        "pending_token": pending_token,
-        "pending_count": len(pending),
-        "account_email": account_email,
-        "limit": limit,
-        "scope": scope,
-        "scanned_at": datetime.now(timezone.utc).strftime("%H:%M"),
-    })
+    ctx.update(
+        {
+            "ai_off": False,
+            "auth_error": False,
+            "results": rows,
+            "pending_token": pending_token,
+            "pending_count": len(pending),
+            "account_email": account_email,
+            "limit": limit,
+            "scope": scope,
+            "scanned_at": datetime.now(timezone.utc).strftime("%H:%M"),
+        }
+    )
     return _resp(request, "triage.html", ctx)
 
 
@@ -2664,8 +2885,10 @@ async def triage_classify_stream(request: Request):
     entry = _triage_pending.pop(token, None) if token else None
 
     if _ai_mode() == "off" or not entry:
+
         async def _empty():
             yield _sse({"type": "done"})
+
         return StreamingResponse(_empty(), media_type="text/event-stream")
 
     messages = entry["messages"]
@@ -2674,7 +2897,9 @@ async def triage_classify_stream(request: Request):
     _SENTINEL = object()
 
     def _produce():
-        from concurrent.futures import ThreadPoolExecutor as _Pool, as_completed
+        from concurrent.futures import ThreadPoolExecutor as _Pool
+        from concurrent.futures import as_completed
+
         from postmind.core.ai_engine import AIEngine, _chunks
         from postmind.core.storage import ClassificationCacheRepo, get_session
 
@@ -2695,11 +2920,16 @@ async def triage_classify_stream(request: Request):
                     # A batch that fails to classify shouldn't hang the row — fall
                     # back to a neutral classification so the UI resolves.
                     from postmind.core.ai_engine import ClassifiedEmail
+
                     return [
                         ClassifiedEmail(
-                            gmail_id=m.id, category="other", priority="medium",
+                            gmail_id=m.id,
+                            category="other",
+                            priority="medium",
                             explanation="Could not classify automatically.",
-                            suggested_action="keep", requires_reply=False, deadline_hint="",
+                            suggested_action="keep",
+                            requires_reply=False,
+                            deadline_hint="",
                         )
                         for m in chunk
                     ]
@@ -2708,19 +2938,35 @@ async def triage_classify_stream(request: Request):
                 futures = [pool.submit(_do, ch) for ch in chunks]
                 for fut in as_completed(futures):
                     classified = fut.result()
-                    cache_repo.upsert_many([
-                        {
-                            "gmail_id": c.gmail_id, "category": c.category, "priority": c.priority,
-                            "explanation": c.explanation, "suggested_action": c.suggested_action,
-                            "requires_reply": c.requires_reply, "deadline_hint": c.deadline_hint,
-                        }
-                        for c in classified
-                    ])
+                    cache_repo.upsert_many(
+                        [
+                            {
+                                "gmail_id": c.gmail_id,
+                                "category": c.category,
+                                "priority": c.priority,
+                                "explanation": c.explanation,
+                                "suggested_action": c.suggested_action,
+                                "requires_reply": c.requires_reply,
+                                "deadline_hint": c.deadline_hint,
+                            }
+                            for c in classified
+                        ]
+                    )
                     for c in classified:
-                        _put({"type": "row", **_cls_payload(
-                            c.gmail_id, c.priority, c.category, c.explanation,
-                            c.suggested_action, c.requires_reply, c.deadline_hint,
-                        )})
+                        _put(
+                            {
+                                "type": "row",
+                                **_cls_payload(
+                                    c.gmail_id,
+                                    c.priority,
+                                    c.category,
+                                    c.explanation,
+                                    c.suggested_action,
+                                    c.requires_reply,
+                                    c.deadline_hint,
+                                ),
+                            }
+                        )
         except Exception as exc:
             _put({"type": "error", "message": str(exc)})
         finally:
@@ -2759,11 +3005,27 @@ async def triage_classify_stream(request: Request):
 # The name — never the path — is what the assistant shows the user.
 _PAGES = {
     "/": {"name": "Dashboard", "desc": "inbox overview at a glance"},
-    "/brief": {"name": "Daily Brief", "desc": "today's AI-generated morning summary of important emails, follow-ups, and action items"},
-    "/agent": {"name": "Super Agent", "desc": "natural-language command center that can clean up, unsubscribe, send, and automate (with confirm-first cards)"},
+    "/brief": {
+        "name": "Daily Brief",
+        "desc": "today's AI-generated morning summary of important emails, follow-ups, and action items",
+    },
+    "/agent": {
+        "name": "Super Agent",
+        "desc": "natural-language command center that can clean up, unsubscribe, send, and automate (with confirm-first cards)",
+    },
     "/stats": {"name": "Stats", "desc": "senders ranked by storage impact, with a Purge button"},
-    "/triage": {"name": "Triage", "desc": "AI-classified unread inbox (priority, category, action)"},
-    "/agents": {"name": "Agents", "desc": "per-account heartbeat watchers and their voice/soul config"},
+    "/triage": {
+        "name": "Triage",
+        "desc": "AI-classified unread inbox (priority, category, action)",
+    },
+    "/drafts": {
+        "name": "Drafts",
+        "desc": "AI-drafted replies in your voice, parked in Gmail for review before sending",
+    },
+    "/agents": {
+        "name": "Agents",
+        "desc": "per-account heartbeat watchers and their voice/soul config",
+    },
     "/sync": {"name": "Sync", "desc": "pull the mailbox into the local cache"},
     "/accounts": {"name": "Accounts", "desc": "add / switch / remove Gmail and IMAP accounts"},
     "/watch": {"name": "Watch", "desc": "start/stop the heartbeat daemon that runs agents"},
@@ -2797,7 +3059,7 @@ def _chat_overview_text(account_email: str) -> str:
     if not groups:
         return (
             "No inbox data yet — there's nothing to quote numbers from. Offer the user the "
-            "Sync page via the `navigate` tool (label \"Sync your inbox\") so they can pull "
+            'Sync page via the `navigate` tool (label "Sync your inbox") so they can pull '
             "their mailbox in first."
         )
 
@@ -2811,7 +3073,11 @@ def _chat_overview_text(account_email: str) -> str:
         "- Top senders by impact:",
     ]
     for g in groups[:8]:
-        size = f"{g.total_size_mb:.1f} MB" if g.total_size_mb >= 0.1 else f"{g.total_size_bytes // 1024} KB"
+        size = (
+            f"{g.total_size_mb:.1f} MB"
+            if g.total_size_mb >= 0.1
+            else f"{g.total_size_bytes // 1024} KB"
+        )
         lines.append(f"  • {g.display_name} <{g.sender_email}> — {g.count} emails, {size}")
     return "\n".join(lines)
 
@@ -2832,7 +3098,8 @@ def _chat_search_senders(query: str, account_email: str) -> str:
 
     q = query.lower().strip()
     matches = [
-        g for g in groups
+        g
+        for g in groups
         if q in (g.sender_email or "").lower()
         or q in (g.sender_name or "").lower()
         or q in (g.domain or "").lower()
@@ -2841,7 +3108,11 @@ def _chat_search_senders(query: str, account_email: str) -> str:
         return f"No senders matching '{query}' in the current scan."
     lines = [f"{len(matches)} sender(s) matching '{query}':"]
     for g in matches[:12]:
-        size = f"{g.total_size_mb:.1f} MB" if g.total_size_mb >= 0.1 else f"{g.total_size_bytes // 1024} KB"
+        size = (
+            f"{g.total_size_mb:.1f} MB"
+            if g.total_size_mb >= 0.1
+            else f"{g.total_size_bytes // 1024} KB"
+        )
         lines.append(f"- {g.display_name} <{g.sender_email}> — {g.count} emails, {size}")
     return "\n".join(lines)
 
@@ -2857,7 +3128,9 @@ _CHAT_TOOLS = [
         "description": "Search the user's senders by name, email address, or domain substring. Use when the user asks about email from a specific person, company, or domain.",
         "input_schema": {
             "type": "object",
-            "properties": {"query": {"type": "string", "description": "Name, email, or domain to search for."}},
+            "properties": {
+                "query": {"type": "string", "description": "Name, email, or domain to search for."}
+            },
             "required": ["query"],
         },
     },
@@ -2868,8 +3141,14 @@ _CHAT_TOOLS = [
             "type": "object",
             "properties": {
                 "intent": {"type": "string", "description": "What the email should accomplish."},
-                "recipient_context": {"type": "string", "description": "Who it's to and any relevant context."},
-                "thread_snippet": {"type": "string", "description": "The message being replied to, if any."},
+                "recipient_context": {
+                    "type": "string",
+                    "description": "Who it's to and any relevant context.",
+                },
+                "thread_snippet": {
+                    "type": "string",
+                    "description": "The message being replied to, if any.",
+                },
             },
             "required": ["intent"],
         },
@@ -2885,7 +3164,10 @@ _CHAT_TOOLS = [
                     "items": {"type": "string"},
                     "description": "Exact sender email addresses to stage for cleanup.",
                 },
-                "query": {"type": "string", "description": "Optionally match senders by name/email/domain substring instead of (or in addition to) explicit addresses."},
+                "query": {
+                    "type": "string",
+                    "description": "Optionally match senders by name/email/domain substring instead of (or in addition to) explicit addresses.",
+                },
             },
         },
     },
@@ -2897,9 +3179,24 @@ _CHAT_TOOLS = [
             "properties": {
                 "page": {
                     "type": "string",
-                    "enum": ["/", "/agent", "/stats", "/triage", "/agents", "/sync", "/accounts", "/watch", "/undo", "/settings"],
+                    "enum": [
+                        "/",
+                        "/agent",
+                        "/stats",
+                        "/triage",
+                        "/drafts",
+                        "/agents",
+                        "/sync",
+                        "/accounts",
+                        "/watch",
+                        "/undo",
+                        "/settings",
+                    ],
                 },
-                "label": {"type": "string", "description": "Short button label, e.g. 'Open Stats'."},
+                "label": {
+                    "type": "string",
+                    "description": "Short button label, e.g. 'Open Stats'.",
+                },
             },
             "required": ["page", "label"],
         },
@@ -2955,7 +3252,9 @@ def _resolve_action_targets(emails: list[str], query: str, account_email: str):
     if err:
         return [], [], [], err
 
-    blocked_set = BlocklistRepo(get_session()).blocked_emails(account_email) if account_email else set()
+    blocked_set = (
+        BlocklistRepo(get_session()).blocked_emails(account_email) if account_email else set()
+    )
     staged = []
     blocked = []
     sensitive = []
@@ -2975,14 +3274,20 @@ def _enrich_targets(groups) -> list[dict]:
 
     out = []
     for g in groups:
-        size = f"{g.total_size_mb:.1f} MB" if g.total_size_mb >= 0.1 else f"{g.total_size_bytes // 1024} KB"
-        out.append({
-            "sender_email": g.sender_email,
-            "sender_name": g.display_name,
-            "count": g.count,
-            "size_str": size,
-            "sensitive": classify_sender_risk(g) == "sensitive",
-        })
+        size = (
+            f"{g.total_size_mb:.1f} MB"
+            if g.total_size_mb >= 0.1
+            else f"{g.total_size_bytes // 1024} KB"
+        )
+        out.append(
+            {
+                "sender_email": g.sender_email,
+                "sender_name": g.display_name,
+                "count": g.count,
+                "size_str": size,
+                "sensitive": classify_sender_risk(g) == "sensitive",
+            }
+        )
     return out
 
 
@@ -3028,7 +3333,7 @@ hand off to the Super Agent: briefly say it can do that and use `navigate` to "/
 a label like "Open Super Agent". Don't attempt those yourself.
 
 The user is currently on: {here}.
-Active account: {account_email or 'none connected yet'}. AI mode: {ai_mode}.
+Active account: {account_email or "none connected yet"}. AI mode: {ai_mode}.
 
 Pages you can navigate to:
 {pages}
@@ -3055,7 +3360,10 @@ async def chat_endpoint(request: Request):
         if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content")
     ][-12:]
     if not messages:
-        return {"reply": "Hi! Ask me about your inbox, have me draft an email, or tell me what you'd like to clean up.", "actions": []}
+        return {
+            "reply": "Hi! Ask me about your inbox, have me draft an email, or tell me what you'd like to clean up.",
+            "actions": [],
+        }
 
     mode = _chat_mode()
     if mode == "off":
@@ -3081,8 +3389,11 @@ async def chat_endpoint(request: Request):
                 return _chat_search_senders(tool_input.get("query", ""), account_email)
             if name == "draft_email":
                 from postmind.core.storage import AgentRepo, get_session
+
                 soul = {}
-                agent = AgentRepo(get_session()).get_by_email(account_email) if account_email else None
+                agent = (
+                    AgentRepo(get_session()).get_by_email(account_email) if account_email else None
+                )
                 if agent:
                     soul = {
                         "voice_style": agent.voice_style,
@@ -3100,6 +3411,7 @@ async def chat_endpoint(request: Request):
                     return str(exc)
             if name == "propose_cleanup":
                 from urllib.parse import urlencode
+
                 matched, err = _chat_resolve_senders(
                     tool_input.get("senders") or [], tool_input.get("query", ""), account_email
                 )
@@ -3112,7 +3424,9 @@ async def chat_endpoint(request: Request):
                 href = "/purge/preview?" + urlencode([("senders", g.sender_email) for g in matched])
                 if not any(a["href"] == href for a in actions):
                     actions.append({"label": f"Review & confirm ({total} emails)", "href": href})
-                names = ", ".join(g.sender_email for g in matched[:5]) + ("…" if len(matched) > 5 else "")
+                names = ", ".join(g.sender_email for g in matched[:5]) + (
+                    "…" if len(matched) > 5 else ""
+                )
                 return (
                     f"Staged {len(matched)} sender(s) — {total} emails, ~{mb:.0f} MB ({names}). "
                     "Added a button to the purge preview; the user must confirm there before anything moves to Trash."
@@ -3184,7 +3498,7 @@ under autopilot.
 - Never write a URL or route path (like `/sync` or `/stats`) in your reply — refer to \
 pages by name ("the Sync page", "Stats"). Those are not commands the user types.
 
-Active account: {account_email or 'none connected yet'}. AI mode: {mode}.
+Active account: {account_email or "none connected yet"}. AI mode: {mode}.
 
 Live inbox snapshot:
 {overview}"""
@@ -3237,47 +3551,67 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
         if name == "analyze_storage":
             from postmind.core.sender_stats import fetch_sender_groups_from_db
             from postmind.core.storage import EmailRepo, get_session
+
             cached = _cache_get()
             if cached:
                 groups = cached["groups"]
             elif account_email and EmailRepo(get_session()).get_inbox(account_email, limit=1):
-                groups = fetch_sender_groups_from_db(account_email=account_email, scope="inbox", min_count=1, top_n=500, sort_by="size")
+                groups = fetch_sender_groups_from_db(
+                    account_email=account_email,
+                    scope="inbox",
+                    min_count=1,
+                    top_n=500,
+                    sort_by="size",
+                )
             else:
                 return "No scan data available — ask the user to open Stats or run a Sync first."
-            return agent_tools.summarize_storage(groups, tool_input.get("group_by", "sender"), int(tool_input.get("top_n", 10) or 10))
+            return agent_tools.summarize_storage(
+                groups, tool_input.get("group_by", "sender"), int(tool_input.get("top_n", 10) or 10)
+            )
         if name == "find_largest_messages":
             try:
                 provider = _build_provider()
-                return agent_tools.find_largest_messages(provider, tool_input.get("query", ""), int(tool_input.get("limit", 10) or 10))
+                return agent_tools.find_largest_messages(
+                    provider, tool_input.get("query", ""), int(tool_input.get("limit", 10) or 10)
+                )
             except Exception as exc:
                 return f"Couldn't fetch message sizes: {exc}"
         if name == "find_unopened_subscriptions":
             from postmind.core.storage import get_session
+
             if not account_email:
                 return "No active account."
             rows = agent_tools.find_unopened_subscriptions(
-                get_session(), account_email,
+                get_session(),
+                account_email,
                 int(tool_input.get("min_count", 3) or 3),
                 int(tool_input.get("limit", 15) or 15),
             )
             return agent_tools.format_unopened(rows)
         if name == "list_automation":
             from postmind.core.storage import AgentRepo, RuleRepo, get_session
+
             session = get_session()
             agent = AgentRepo(session).get_by_email(account_email) if account_email else None
             rules = RuleRepo(session).list_active(account_email) if account_email else []
             parts = []
             if agent:
-                parts.append(f"Heartbeat agent '{agent.name}' every {agent.interval_minutes}m (active={agent.is_active}, rules={agent.run_rules}).")
+                parts.append(
+                    f"Heartbeat agent '{agent.name}' every {agent.interval_minutes}m (active={agent.is_active}, rules={agent.run_rules})."
+                )
             else:
                 parts.append("No heartbeat agent yet.")
             if rules:
-                parts.append("Active rules: " + "; ".join(f"{r.name} → {r.action}" for r in rules[:5]))
+                parts.append(
+                    "Active rules: " + "; ".join(f"{r.name} → {r.action}" for r in rules[:5])
+                )
             else:
                 parts.append("No active rules.")
             return " ".join(parts)
         if name == "stage_trash":
-            matched, err = _chat_resolve_senders(tool_input.get("senders") or [], tool_input.get("query", ""), account_email)
+            matched, err = _chat_resolve_senders(
+                tool_input.get("senders") or [], tool_input.get("query", ""), account_email
+            )
             if err:
                 return err
             if not matched:
@@ -3287,10 +3621,16 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
             href = "/purge/preview?" + urlencode([("senders", g.sender_email) for g in matched])
             if not any(a.get("href") == href for a in actions):
                 actions.append({"label": f"Review & confirm ({total} emails)", "href": href})
-            names = ", ".join(g.sender_email for g in matched[:5]) + ("…" if len(matched) > 5 else "")
+            names = ", ".join(g.sender_email for g in matched[:5]) + (
+                "…" if len(matched) > 5 else ""
+            )
             return f"Staged {len(matched)} sender(s) — {total} emails, ~{mb:.0f} MB ({names}). The user must confirm in the preview before anything moves to Trash."
         if name in ("stage_archive", "stage_label", "stage_mark_read"):
-            action = {"stage_archive": "archive", "stage_label": "label", "stage_mark_read": "mark_read"}[name]
+            action = {
+                "stage_archive": "archive",
+                "stage_label": "label",
+                "stage_mark_read": "mark_read",
+            }[name]
             provider = None
             try:
                 provider = _build_provider()
@@ -3311,7 +3651,11 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                 return f"No matching senders to {action.replace('_', ' ')}{extra} — nothing staged."
             total = sum(g.count for g in staged)
             verb = action.replace("_", " ")
-            title = {"archive": "Archive emails", "label": f"Label emails “{label_name}”", "mark_read": "Mark emails as read"}[action]
+            title = {
+                "archive": "Archive emails",
+                "label": f"Label emails “{label_name}”",
+                "mark_read": "Mark emails as read",
+            }[action]
             # Autopilot: auto-execute reversible actions without a confirm card
             # (opt-in, off by default; trash/unsubscribe/send never qualify). Even
             # under autopilot, SENSITIVE senders (bank/legal/health) keep the human
@@ -3323,39 +3667,53 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                 parts = []
                 if auto:
                     try:
-                        _undo_id, count = _execute_reversible_action(account_email, action, auto, label_name)
+                        _undo_id, count = _execute_reversible_action(
+                            account_email, action, auto, label_name
+                        )
                     except Exception as exc:
                         return f"Couldn't {verb}: {exc}"
                     if not any(a.get("href") == "/undo" for a in actions):
                         actions.append({"label": "Undo", "href": "/undo"})
-                    parts.append(f"Autopilot: {verb}d {count} emails from {len(auto)} sender(s); reversible from Undo for 30 days.")
+                    parts.append(
+                        f"Autopilot: {verb}d {count} emails from {len(auto)} sender(s); reversible from Undo for 30 days."
+                    )
                 if held:
-                    cards.append({
-                        "type": "bulk_action",
-                        "title": title,
-                        "fields": {
-                            "action": action, "label_name": label_name,
-                            "targets": _enrich_targets(held), "total_count": sum(g.count for g in held),
-                            "blocked": blocked, "sensitive": sensitive, "undoable": True,
-                        },
-                    })
-                    parts.append(f"{len(held)} sensitive sender(s) (bank/legal/health) need your confirmation — shown as a card.")
+                    cards.append(
+                        {
+                            "type": "bulk_action",
+                            "title": title,
+                            "fields": {
+                                "action": action,
+                                "label_name": label_name,
+                                "targets": _enrich_targets(held),
+                                "total_count": sum(g.count for g in held),
+                                "blocked": blocked,
+                                "sensitive": sensitive,
+                                "undoable": True,
+                            },
+                        }
+                    )
+                    parts.append(
+                        f"{len(held)} sensitive sender(s) (bank/legal/health) need your confirmation — shown as a card."
+                    )
                 if blocked:
                     parts.append(f"{len(blocked)} protected sender(s) skipped.")
                 return " ".join(parts) or "Nothing to do."
-            cards.append({
-                "type": "bulk_action",
-                "title": title,
-                "fields": {
-                    "action": action,
-                    "label_name": label_name,
-                    "targets": _enrich_targets(staged),
-                    "total_count": total,
-                    "blocked": blocked,
-                    "sensitive": sensitive,
-                    "undoable": True,
-                },
-            })
+            cards.append(
+                {
+                    "type": "bulk_action",
+                    "title": title,
+                    "fields": {
+                        "action": action,
+                        "label_name": label_name,
+                        "targets": _enrich_targets(staged),
+                        "total_count": total,
+                        "blocked": blocked,
+                        "sensitive": sensitive,
+                        "undoable": True,
+                    },
+                }
+            )
             note = f" ({len(blocked)} protected skipped)" if blocked else ""
             return f"Staged a {action.replace('_', ' ')} of {len(staged)} sender(s), {total} emails{note}. Showed a confirmation card; nothing happens until the user confirms. Reversible for 30 days."
         if name == "stage_unsubscribe":
@@ -3368,24 +3726,31 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                 extra = f" ({len(blocked)} protected sender(s) skipped)" if blocked else ""
                 return f"No matching senders to unsubscribe from{extra} — nothing staged."
             total = sum(g.count for g in staged)
-            cards.append({
-                "type": "unsubscribe",
-                "title": "Unsubscribe from senders",
-                "fields": {
-                    "targets": _enrich_targets(staged),
-                    "total_count": total,
-                    "blocked": blocked,
-                    "sensitive": sensitive,
-                },
-            })
+            cards.append(
+                {
+                    "type": "unsubscribe",
+                    "title": "Unsubscribe from senders",
+                    "fields": {
+                        "targets": _enrich_targets(staged),
+                        "total_count": total,
+                        "blocked": blocked,
+                        "sensitive": sensitive,
+                    },
+                }
+            )
             note = f" ({len(blocked)} protected skipped)" if blocked else ""
             return f"Staged unsubscribe from {len(staged)} sender(s){note}. Showed a confirmation card. Unsubscribe is external and NOT undoable; trashing the back-catalog is optional and undoable. Nothing happens until the user confirms."
         if name == "draft_email":
             from postmind.core.storage import AgentRepo, get_session
+
             soul = {}
             agent = AgentRepo(get_session()).get_by_email(account_email) if account_email else None
             if agent:
-                soul = {"voice_style": agent.voice_style, "user_context": agent.user_context, "writing_guidelines": agent.writing_guidelines}
+                soul = {
+                    "voice_style": agent.voice_style,
+                    "user_context": agent.user_context,
+                    "writing_guidelines": agent.writing_guidelines,
+                }
             try:
                 draft = ai.compose_email(
                     intent=tool_input.get("intent", ""),
@@ -3396,27 +3761,37 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
             except ValueError as exc:
                 return str(exc)
             subject, body = _split_draft(draft)
-            cards.append({
-                "type": "send_email",
-                "title": "Review draft & send",
-                "fields": {"to": (tool_input.get("to") or "").strip(), "subject": subject, "body": body},
-            })
+            cards.append(
+                {
+                    "type": "send_email",
+                    "title": "Review draft & send",
+                    "fields": {
+                        "to": (tool_input.get("to") or "").strip(),
+                        "subject": subject,
+                        "body": body,
+                    },
+                }
+            )
             return f"Drafted the email and showed an editable card. Subject: {subject}. The user can edit and must click Send — nothing is sent automatically."
         if name == "send_email":
-            cards.append({
-                "type": "send_email",
-                "title": "Review & send",
-                "fields": {
-                    "to": (tool_input.get("to") or "").strip(),
-                    "subject": (tool_input.get("subject") or "").strip(),
-                    "body": (tool_input.get("body") or "").strip(),
-                },
-            })
+            cards.append(
+                {
+                    "type": "send_email",
+                    "title": "Review & send",
+                    "fields": {
+                        "to": (tool_input.get("to") or "").strip(),
+                        "subject": (tool_input.get("subject") or "").strip(),
+                        "body": (tool_input.get("body") or "").strip(),
+                    },
+                }
+            )
             return "Showed an editable send-email card. Always-confirm: nothing is sent until the user clicks Send."
         if name == "create_agent":
             email = (tool_input.get("email") or account_email or "").strip()
             if not email:
-                return "No account to attach the agent to — ask the user to connect an account first."
+                return (
+                    "No account to attach the agent to — ask the user to connect an account first."
+                )
             card = {
                 "type": "create_agent",
                 "title": "Create heartbeat agent",
@@ -3443,17 +3818,19 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                 nl_rule = ai.translate_rule(nl)
             except Exception as exc:
                 return f"Couldn't translate that rule: {exc}"
-            cards.append({
-                "type": "create_rule",
-                "title": "Create rule",
-                "fields": {
-                    "natural_language": nl,
-                    "gmail_query": nl_rule.gmail_query,
-                    "action": nl_rule.action,
-                    "explanation": nl_rule.explanation,
-                    "warnings": nl_rule.warnings or [],
-                },
-            })
+            cards.append(
+                {
+                    "type": "create_rule",
+                    "title": "Create rule",
+                    "fields": {
+                        "natural_language": nl,
+                        "gmail_query": nl_rule.gmail_query,
+                        "action": nl_rule.action,
+                        "explanation": nl_rule.explanation,
+                        "warnings": nl_rule.warnings or [],
+                    },
+                }
+            )
             return f"Staged a rule: {nl_rule.explanation} (query: {nl_rule.gmail_query}, action: {nl_rule.action}). Showed the user a confirmation card."
         return f"Unknown tool: {name}"
 
@@ -3468,7 +3845,11 @@ async def agent_endpoint(request: Request):
         return {"reply": "Sorry — I couldn't read that request.", "actions": [], "cards": []}
     messages = _parse_agent_messages(body)
     if not messages:
-        return {"reply": "Tell me what you'd like to do — e.g. “what's eating my storage?”, “delete everything from blah.com”, or “create an agent that archives newsletters weekly.”", "actions": [], "cards": []}
+        return {
+            "reply": "Tell me what you'd like to do — e.g. “what's eating my storage?”, “delete everything from blah.com”, or “create an agent that archives newsletters weekly.”",
+            "actions": [],
+            "cards": [],
+        }
 
     mode = _chat_mode()
     guidance = _agent_mode_guidance(mode)
@@ -3534,11 +3915,13 @@ async def agent_stream_endpoint(request: Request):
 
     if not messages:
         return StreamingResponse(
-            _empty_stream({
-                "reply": "Tell me what you'd like to do — e.g. “what's eating my storage?”, “delete everything from blah.com”, or “create an agent that archives newsletters weekly.”",
-                "actions": [],
-                "cards": [],
-            }),
+            _empty_stream(
+                {
+                    "reply": "Tell me what you'd like to do — e.g. “what's eating my storage?”, “delete everything from blah.com”, or “create an agent that archives newsletters weekly.”",
+                    "actions": [],
+                    "cards": [],
+                }
+            ),
             media_type="text/event-stream",
         )
 
@@ -3637,9 +4020,14 @@ async def agent_create_agent(request: Request):
     if not email:
         raise HTTPException(status_code=400, detail="Email required")
     from postmind.core.storage import AgentRepo, get_session
+
     session = get_session()
     repo = AgentRepo(session)
-    repo.register(email, (form.get("name") or email.split("@")[0].title()).strip(), max(1, min(1440, int(form.get("interval_minutes") or 30))))
+    repo.register(
+        email,
+        (form.get("name") or email.split("@")[0].title()).strip(),
+        max(1, min(1440, int(form.get("interval_minutes") or 30))),
+    )
     repo.update_soul(
         account_email=email,
         voice_style=(form.get("voice_style") or "").strip() or None,
@@ -3666,7 +4054,6 @@ async def agent_create_rule(request: Request):
 
     def _create():
         from postmind.core.bulk_engine import BulkEngine
-        from postmind.core.storage import get_session
 
         client = _build_provider()
         account_email = client.get_email_address()
@@ -3686,7 +4073,9 @@ async def agent_create_rule(request: Request):
 _AGENT_ACTIONS = {"archive", "label", "mark_read"}
 
 
-def _render_action_preview(request: Request, action: str, senders: list[str], label_name: str = "") -> HTMLResponse:
+def _render_action_preview(
+    request: Request, action: str, senders: list[str], label_name: str = ""
+) -> HTMLResponse:
     """Confirm-first preview for a reversible bulk action. Re-resolves the target
     set server-side from the scan cache — model text is never trusted for targets."""
     if action not in _AGENT_ACTIONS:
@@ -3699,39 +4088,55 @@ def _render_action_preview(request: Request, action: str, senders: list[str], la
     if err:
         return _resp(request, "error.html", {"error": err})
     if not staged:
-        return _resp(request, "error.html", {"error": "None of those senders are in the current scan (or all are protected). Re-run Stats and try again."})
+        return _resp(
+            request,
+            "error.html",
+            {
+                "error": "None of those senders are in the current scan (or all are protected). Re-run Stats and try again."
+            },
+        )
 
     total_count = sum(g.count for g in staged)
     total_mb = round(sum(g.total_size_bytes for g in staged) / (1024 * 1024), 1)
     ctx = _base()
-    ctx.update({
-        "active": "agent",
-        "action": action,
-        "label_name": label_name,
-        "selected": _enrich_targets(staged),
-        "senders": [g.sender_email for g in staged],
-        "total_count": total_count,
-        "total_mb": total_mb,
-        "blocked": blocked,
-        "sensitive": sensitive,
-        "undo_days": get_settings().undo_window_days,
-    })
+    ctx.update(
+        {
+            "active": "agent",
+            "action": action,
+            "label_name": label_name,
+            "selected": _enrich_targets(staged),
+            "senders": [g.sender_email for g in staged],
+            "total_count": total_count,
+            "total_mb": total_mb,
+            "blocked": blocked,
+            "sensitive": sensitive,
+            "undo_days": get_settings().undo_window_days,
+        }
+    )
     return _resp(request, "agent_action_preview.html", ctx)
 
 
 @app.get("/agent/action/preview", response_class=HTMLResponse)
 async def agent_action_preview_get(request: Request):
     p = request.query_params
-    return _render_action_preview(request, p.get("action", ""), p.getlist("senders"), p.get("label_name", ""))
+    return _render_action_preview(
+        request, p.get("action", ""), p.getlist("senders"), p.get("label_name", "")
+    )
 
 
 @app.post("/agent/action/preview", response_class=HTMLResponse)
 async def agent_action_preview_post(request: Request):
     form = await request.form()
-    return _render_action_preview(request, form.get("action", ""), form.getlist("senders"), form.get("label_name", ""))
+    return _render_action_preview(
+        request, form.get("action", ""), form.getlist("senders"), form.get("label_name", "")
+    )
 
 
-_AUTOPILOT_ACTIONS = ("archive", "label", "mark_read")  # reversible, undoable; never trash/unsubscribe/send
+_AUTOPILOT_ACTIONS = (
+    "archive",
+    "label",
+    "mark_read",
+)  # reversible, undoable; never trash/unsubscribe/send
 
 
 def _autopilot_on() -> bool:
@@ -3802,7 +4207,11 @@ async def agent_action_confirm(request: Request):
     if err:
         return _resp(request, "error.html", {"error": err})
     if not staged:
-        return _resp(request, "error.html", {"error": "Scan data expired or all senders protected. Re-run Stats."})
+        return _resp(
+            request,
+            "error.html",
+            {"error": "Scan data expired or all senders protected. Re-run Stats."},
+        )
 
     try:
         loop = asyncio.get_event_loop()
@@ -3813,7 +4222,9 @@ async def agent_action_confirm(request: Request):
     except Exception as exc:
         return _resp(request, "error.html", {"error": str(exc)})
 
-    return RedirectResponse(f"/undo?acted={count}&action={action}&undo_id={undo_id}", status_code=303)
+    return RedirectResponse(
+        f"/undo?acted={count}&action={action}&undo_id={undo_id}", status_code=303
+    )
 
 
 # ── Unsubscribe (real engine, optional back-catalog trash) ─────────────────────
@@ -3832,7 +4243,11 @@ async def agent_unsubscribe_confirm(request: Request):
     if err:
         return _resp(request, "error.html", {"error": err})
     if not staged:
-        return _resp(request, "error.html", {"error": "Scan data expired or all senders protected. Re-run Stats."})
+        return _resp(
+            request,
+            "error.html",
+            {"error": "Scan data expired or all senders protected. Re-run Stats."},
+        )
 
     def _do_unsub():
         from postmind.core.storage import UndoLogRepo, get_session
@@ -3840,7 +4255,9 @@ async def agent_unsubscribe_confirm(request: Request):
 
         client = _build_provider()
         if not client.supports("unsubscribe"):
-            raise ValueError("This account's provider does not support unsubscribe — only Gmail does.")
+            raise ValueError(
+                "This account's provider does not support unsubscribe — only Gmail does."
+            )
         gc = getattr(client, "gmail_client", None)
         if gc is None:
             raise ValueError("Unsubscribe requires a Gmail account.")
@@ -3885,7 +4302,10 @@ async def agent_unsubscribe_confirm(request: Request):
         return _resp(request, "error.html", {"error": str(exc)})
 
     if undo_id is not None:
-        return RedirectResponse(f"/undo?unsubscribed={ok}&of={total}&purged={trashed}&undo_id={undo_id}", status_code=303)
+        return RedirectResponse(
+            f"/undo?unsubscribed={ok}&of={total}&purged={trashed}&undo_id={undo_id}",
+            status_code=303,
+        )
     return RedirectResponse(f"/agent?unsubscribed={ok}&of={total}", status_code=303)
 
 
@@ -3901,8 +4321,11 @@ async def agent_send(request: Request):
     # Exactly one well-formed recipient — reject comma/whitespace-separated lists
     # so a confirmed single-recipient draft can't fan out to extra addresses.
     import re as _re
+
     if not _re.fullmatch(r"[^\s@,]+@[^\s@,]+\.[^\s@,]+", to):
-        return _resp(request, "error.html", {"error": "A single valid recipient address is required."})
+        return _resp(
+            request, "error.html", {"error": "A single valid recipient address is required."}
+        )
     if not body:
         return _resp(request, "error.html", {"error": "Email body is empty."})
 
@@ -3919,3 +4342,236 @@ async def agent_send(request: Request):
     except Exception as exc:
         return _resp(request, "error.html", {"error": f"Couldn't send: {exc}"})
     return RedirectResponse(f"/agent?sent={quote(to)}", status_code=303)
+
+
+# ── Autodraft — AI reply drafts parked for review ─────────────────────────────
+
+
+def _autodraft_service():
+    """Build an AutodraftService scoped to the current web account."""
+    import os
+
+    from postmind.core.ai_engine import AIEngine
+    from postmind.core.autodraft import AutodraftService
+    from postmind.core.mock_ai import MockAIEngine
+    from postmind.core.storage import AgentRepo, get_session
+
+    provider = _build_provider()
+    account_email = _get_web_account() or ""
+    agent = AgentRepo(get_session()).get_by_email(account_email) if account_email else None
+    soul = {}
+    if agent:
+        soul = {
+            "voice_style": agent.voice_style,
+            "user_context": agent.user_context,
+            "writing_guidelines": agent.writing_guidelines,
+        }
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    ai = AIEngine() if key else MockAIEngine()
+    return AutodraftService(provider, ai, account_email, soul=soul)
+
+
+def _draft_to_view(d) -> dict:
+    """Shape a DraftRecord for the template."""
+    trigger_labels = {
+        "reply_needed": "Reply needed",
+        "meeting": "Meeting request",
+        "followup": "Follow-up",
+        "manual": "On demand",
+    }
+    return {
+        "id": d.id,
+        "to_email": d.to_email,
+        "subject": d.subject,
+        "body": d.body,
+        "trigger": d.trigger,
+        "trigger_label": trigger_labels.get(d.trigger, d.trigger.replace("_", " ").title()),
+        "confidence": d.confidence,
+        "status": d.status,
+        "edited": d.status == "edited",
+        "created_at": d.created_at.strftime("%d %b %H:%M") if d.created_at else "",
+    }
+
+
+@app.get("/drafts", response_class=HTMLResponse)
+async def drafts_page(request: Request):
+    ctx = _base()
+    ctx["active"] = "drafts"
+    account_email = _get_web_account() or ""
+
+    provider_is_gmail = _provider_name() == "gmail"
+    cloud_ready = _ai_mode() == "cloud"
+
+    drafts: list[dict] = []
+    if account_email:
+        from postmind.core.storage import DraftRepo, get_session
+
+        rows = DraftRepo(get_session()).list_open(account_email)
+        drafts = [_draft_to_view(d) for d in rows]
+
+    ctx.update(
+        {
+            "drafts": drafts,
+            "provider_is_gmail": provider_is_gmail,
+            "cloud_ready": cloud_ready,
+            "is_authed": _is_authed(),
+        }
+    )
+    return _resp(request, "drafts.html", ctx)
+
+
+@app.get("/drafts/badge", response_class=HTMLResponse)
+async def drafts_badge(request: Request):
+    """Tiny HTMX-polled count pill for the sidebar."""
+    account_email = _get_web_account() or ""
+    count = 0
+    if account_email:
+        from postmind.core.storage import DraftRepo, get_session
+
+        count = DraftRepo(get_session()).count_open(account_email)
+    inner = (
+        f'<span class="ml-auto pm-pill bg-accent/15 text-teal-300 border border-accent/30 tabular">{count}</span>'
+        if count
+        else ""
+    )
+    return HTMLResponse(
+        f'<span id="drafts-badge" hx-get="/drafts/badge" hx-trigger="every 30s" '
+        f'hx-swap="outerHTML" class="contents">{inner}</span>'
+    )
+
+
+@app.post("/drafts/create")
+async def drafts_create(request: Request):
+    form = await request.form()
+    gmail_id = (form.get("gmail_id") or "").strip()
+    instruction = (form.get("instruction") or "").strip()
+    if not gmail_id:
+        return _resp(request, "error.html", {"error": "No message selected to reply to."})
+
+    def _do():
+        service = _autodraft_service()
+        return service.draft_reply(gmail_id, instruction=instruction, trigger="manual")
+
+    try:
+        loop = asyncio.get_event_loop()
+        rec = await loop.run_in_executor(_executor, _do)
+    except ValueError as exc:
+        return _resp(request, "error.html", {"error": str(exc)})
+    except Exception as exc:
+        return _resp(request, "error.html", {"error": f"Couldn't draft a reply: {exc}"})
+    return RedirectResponse(f"/drafts?created={rec.id}", status_code=303)
+
+
+@app.post("/drafts/{draft_id}/save")
+async def drafts_save(draft_id: int, request: Request):
+    form = await request.form()
+    subject = (form.get("subject") or "").strip()
+    body = (form.get("body") or "").strip()
+    if not body:
+        return _resp(request, "error.html", {"error": "Draft body can't be empty."})
+
+    def _do():
+        from postmind.core.storage import DraftRepo, get_session
+
+        repo = DraftRepo(get_session())
+        rec = repo.get(draft_id)
+        if not rec:
+            raise ValueError("Draft not found.")
+        client = _build_provider()
+        gc = getattr(client, "gmail_client", None)
+        if gc is not None and rec.gmail_draft_id:
+            gc.update_draft(
+                draft_id=rec.gmail_draft_id,
+                to=rec.to_email,
+                subject=subject,
+                body=body,
+                thread_id=rec.thread_id or None,
+                in_reply_to=rec.in_reply_to_rfc_id or None,
+            )
+        rec.subject = subject
+        rec.body = body
+        rec.status = "edited"
+        repo.s.commit()
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(_executor, _do)
+    except Exception as exc:
+        return _resp(request, "error.html", {"error": f"Couldn't save the draft: {exc}"})
+    return RedirectResponse("/drafts?saved=1", status_code=303)
+
+
+@app.post("/drafts/{draft_id}/send")
+async def drafts_send(draft_id: int, request: Request):
+    form = await request.form()
+    # The form carries the latest (possibly edited) subject/body so a Send always
+    # reflects what the user sees, even if they didn't Save first.
+    subject = (form.get("subject") or "").strip()
+    body = (form.get("body") or "").strip()
+    if not body:
+        return _resp(request, "error.html", {"error": "Email body is empty."})
+
+    def _do():
+        from postmind.core.storage import DraftRepo, get_session
+
+        repo = DraftRepo(get_session())
+        rec = repo.get(draft_id)
+        if not rec:
+            raise ValueError("Draft not found.")
+        import re as _re
+
+        if not _re.fullmatch(r"[^\s@,]+@[^\s@,]+\.[^\s@,]+", rec.to_email):
+            raise ValueError("This draft has an invalid recipient address.")
+        client = _build_provider()
+        gc = getattr(client, "gmail_client", None)
+        if gc is None:
+            raise ValueError("Sending mail requires a Gmail account.")
+        gc.send(
+            to=rec.to_email,
+            subject=subject or rec.subject,
+            body=body,
+            thread_id=rec.thread_id or None,
+            in_reply_to=rec.in_reply_to_rfc_id or None,
+        )
+        if rec.gmail_draft_id:
+            try:
+                gc.delete_draft(rec.gmail_draft_id)  # remove the now-sent parked draft
+            except Exception:
+                pass
+        repo.set_status(draft_id, "sent")
+        return rec.to_email
+
+    try:
+        loop = asyncio.get_event_loop()
+        to = await loop.run_in_executor(_executor, _do)
+    except ValueError as exc:
+        return _resp(request, "error.html", {"error": str(exc)})
+    except Exception as exc:
+        return _resp(request, "error.html", {"error": f"Couldn't send: {exc}"})
+    return RedirectResponse(f"/drafts?sent={quote(to)}", status_code=303)
+
+
+@app.post("/drafts/{draft_id}/dismiss")
+async def drafts_dismiss(draft_id: int, request: Request):
+    def _do():
+        from postmind.core.storage import DraftRepo, get_session
+
+        repo = DraftRepo(get_session())
+        rec = repo.get(draft_id)
+        if not rec:
+            return
+        client = _build_provider()
+        gc = getattr(client, "gmail_client", None)
+        if gc is not None and rec.gmail_draft_id:
+            try:
+                gc.delete_draft(rec.gmail_draft_id)
+            except Exception:
+                pass
+        repo.set_status(draft_id, "dismissed")
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(_executor, _do)
+    except Exception as exc:
+        return _resp(request, "error.html", {"error": f"Couldn't dismiss the draft: {exc}"})
+    return RedirectResponse("/drafts?dismissed=1", status_code=303)

@@ -258,6 +258,18 @@
                     {% endif %}
                   </span>
                 </label>
+                <label class="flex items-start gap-2 cursor-pointer">
+                  <input type="checkbox" name="run_autodraft" {% if agent.run_autodraft %}checked{% endif %}
+                         class="mt-0.5 rounded border-hairline-strong text-accent focus:ring-accent">
+                  <span class="text-xs text-ink-muted">
+                    <strong>Pre-draft replies</strong>
+                    {% if ai_mode != "cloud" %}
+                    <span class="text-warning block">Requires cloud AI — <a href="/settings" class="underline">enable it in Settings</a>. Drafts are parked in Gmail and never sent automatically.</span>
+                    {% else %}
+                    <span class="text-ink-tertiary block">Write replies in your voice for emails that need one, parked in <a href="/drafts" class="underline">Drafts</a> for your review. Never sent automatically.</span>
+                    {% endif %}
+                  </span>
+                </label>
                 <div class="pt-1">
                   <button type="submit"
                           class="pm-btn-secondary text-xs min-h-0 px-3 py-1.5">

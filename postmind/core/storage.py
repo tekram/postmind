@@ -99,6 +99,33 @@ class FollowUp(Base):
     note = Column(Text, default="")
 
 
+class DraftRecord(Base):
+    """An AI-generated reply draft parked in Gmail Drafts for human review.
+
+    Creating a draft is non-destructive and never reaches the recipient — only
+    an explicit human Send does. One open draft per (account_email, thread_id);
+    a new inbound message on the thread supersedes the prior draft.
+    """
+
+    __tablename__ = "draft_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_email = Column(String, nullable=False)
+    gmail_draft_id = Column(String, default="")  # Gmail-side draft ID
+    thread_id = Column(String, default="")
+    in_reply_to_gmail_id = Column(String, default="")  # the message this replies to
+    in_reply_to_rfc_id = Column(String, default="")  # original RFC-2822 Message-ID
+    to_email = Column(String, nullable=False)
+    subject = Column(String, default="")
+    body = Column(Text, default="")
+    trigger = Column(String, default="manual")  # manual | reply_needed | meeting | followup
+    confidence = Column(Integer, default=0)  # 0–100
+    model = Column(String, default="")  # which AI backend produced it
+    status = Column(String, default="ready")  # ready | edited | sent | dismissed | stale
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    reviewed_at = Column(DateTime, nullable=True)
+
+
 class UndoLogEntry(Base):
     """A reversible bulk operation — kept for undo_window_days."""
 
@@ -244,6 +271,7 @@ def _run_migrations(engine) -> None:
             ("run_followups", "INTEGER DEFAULT 1"),
             ("run_avoidance", "INTEGER DEFAULT 0"),
             ("run_daily_brief", "INTEGER DEFAULT 0"),
+            ("run_autodraft", "INTEGER DEFAULT 0"),
         ],
         "accounts": [
             ("welcomed_at", "DATETIME"),
@@ -270,6 +298,7 @@ def get_engine():
     global _engine
     if _engine is None:
         from sqlalchemy.pool import NullPool
+
         _engine = create_engine(
             f"sqlite:///{_cfg.DB_PATH}",
             connect_args={"check_same_thread": False},
@@ -326,9 +355,7 @@ class EmailRepo:
 
             # Build a list of plain dicts — one per record, excluding the
             # auto-generated ``id`` column so SQLite assigns it on INSERT.
-            col_names = [
-                c.name for c in EmailRecord.__table__.columns if c.name != "id"
-            ]
+            col_names = [c.name for c in EmailRecord.__table__.columns if c.name != "id"]
             # Python-side column defaults (e.g. synced_at) only fire on ORM
             # flush; the core insert below bypasses that, so stamp them here
             # or every bulk-synced row lands with synced_at = NULL.
@@ -365,11 +392,7 @@ class EmailRepo:
         Used by ``sync --skip-existing`` to avoid re-fetching metadata for
         messages that are already cached locally.
         """
-        rows = (
-            self.s.query(EmailRecord.gmail_id)
-            .filter_by(account_email=account_email)
-            .all()
-        )
+        rows = self.s.query(EmailRecord.gmail_id).filter_by(account_email=account_email).all()
         return {r.gmail_id for r in rows}
 
     def get(self, gmail_id: str) -> EmailRecord | None:
@@ -454,6 +477,92 @@ class FollowUpRepo:
         fu = self.s.get(FollowUp, follow_up_id)
         if fu:
             fu.snoozed_until = until
+            self.s.commit()
+
+
+class DraftRepo:
+    """Tracks AI-generated reply drafts awaiting human review."""
+
+    def __init__(self, session: Session):
+        self.s = session
+
+    def upsert_for_thread(self, draft: DraftRecord) -> DraftRecord:
+        """Store a draft, replacing any prior open (ready/edited) draft for the
+        same thread so a thread never accumulates duplicate autodrafts."""
+        existing = (
+            self.s.query(DraftRecord)
+            .filter(
+                DraftRecord.account_email == draft.account_email,
+                DraftRecord.thread_id == draft.thread_id,
+                DraftRecord.status.in_(("ready", "edited")),
+            )
+            .first()
+            if draft.thread_id
+            else None
+        )
+        if existing:
+            for col in (
+                "gmail_draft_id",
+                "in_reply_to_gmail_id",
+                "in_reply_to_rfc_id",
+                "to_email",
+                "subject",
+                "body",
+                "trigger",
+                "confidence",
+                "model",
+            ):
+                setattr(existing, col, getattr(draft, col))
+            existing.status = "ready"
+            existing.created_at = datetime.now(timezone.utc)
+            existing.reviewed_at = None
+            self.s.commit()
+            return existing
+        self.s.add(draft)
+        self.s.commit()
+        return draft
+
+    def get(self, draft_id: int) -> DraftRecord | None:
+        return self.s.get(DraftRecord, draft_id)
+
+    def open_for_thread(self, account_email: str, thread_id: str) -> DraftRecord | None:
+        return (
+            self.s.query(DraftRecord)
+            .filter(
+                DraftRecord.account_email == account_email,
+                DraftRecord.thread_id == thread_id,
+                DraftRecord.status.in_(("ready", "edited")),
+            )
+            .first()
+        )
+
+    def list_open(self, account_email: str, limit: int = 50) -> list[DraftRecord]:
+        return (
+            self.s.query(DraftRecord)
+            .filter(
+                DraftRecord.account_email == account_email,
+                DraftRecord.status.in_(("ready", "edited")),
+            )
+            .order_by(DraftRecord.confidence.desc(), DraftRecord.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+    def count_open(self, account_email: str) -> int:
+        return (
+            self.s.query(DraftRecord)
+            .filter(
+                DraftRecord.account_email == account_email,
+                DraftRecord.status.in_(("ready", "edited")),
+            )
+            .count()
+        )
+
+    def set_status(self, draft_id: int, status: str) -> None:
+        row = self.get(draft_id)
+        if row:
+            row.status = status
+            row.reviewed_at = datetime.now(timezone.utc)
             self.s.commit()
 
 
@@ -706,9 +815,7 @@ class ClassificationCacheRepo:
             .filter(ClassificationCacheRecord.gmail_id.in_(gmail_ids))
             .all()
         )
-        return {
-            r.gmail_id: {f: getattr(r, f) for f in self._FIELDS} for r in rows
-        }
+        return {r.gmail_id: {f: getattr(r, f) for f in self._FIELDS} for r in rows}
 
     def upsert_many(self, items: list[dict]) -> None:
         """Bulk-upsert classifications. Each item must include ``gmail_id``."""
@@ -721,9 +828,7 @@ class ClassificationCacheRepo:
             rows = [{c: item.get(c) for c in cols} for item in items]
             stmt = sqlite_insert(ClassificationCacheRecord.__table__).values(rows)
             update_cols = {c: stmt.excluded[c] for c in self._FIELDS}
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["gmail_id"], set_=update_cols
-            )
+            stmt = stmt.on_conflict_do_update(index_elements=["gmail_id"], set_=update_cols)
             self.s.execute(stmt)
             self.s.commit()
         except Exception:
@@ -732,11 +837,7 @@ class ClassificationCacheRepo:
                 gid = item.get("gmail_id")
                 if not gid:
                     continue
-                existing = (
-                    self.s.query(ClassificationCacheRecord)
-                    .filter_by(gmail_id=gid)
-                    .first()
-                )
+                existing = self.s.query(ClassificationCacheRecord).filter_by(gmail_id=gid).first()
                 if existing:
                     for f in self._FIELDS:
                         setattr(existing, f, item.get(f))
@@ -756,9 +857,9 @@ class DailyBrief(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     account_email = Column(String, nullable=False)
-    brief_date = Column(String, nullable=False)          # ISO "YYYY-MM-DD"
-    content = Column(Text, nullable=False)               # plain-text output
-    ai_used = Column(Boolean, default=False)             # True if Claude generated it
+    brief_date = Column(String, nullable=False)  # ISO "YYYY-MM-DD"
+    content = Column(Text, nullable=False)  # plain-text output
+    ai_used = Column(Boolean, default=False)  # True if Claude generated it
     unread_count = Column(Integer, default=0)
     new_since_yesterday = Column(Integer, default=0)
     high_priority_count = Column(Integer, default=0)
@@ -774,26 +875,29 @@ class Agent(Base):
     __tablename__ = "agents"
 
     id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False)           # e.g. "Work", "Personal"
+    name = Column(String, nullable=False)  # e.g. "Work", "Personal"
     account_email = Column(String, nullable=False, unique=True)
     interval_minutes = Column(Integer, default=30)
     is_active = Column(Boolean, default=True)
     last_run_at = Column(DateTime(timezone=True), nullable=True)
-    last_found_count = Column(Integer, default=0)   # emails found in last heartbeat
-    status = Column(String, default="idle")         # "idle" | "running" | "error"
+    last_found_count = Column(Integer, default=0)  # emails found in last heartbeat
+    status = Column(String, default="idle")  # "idle" | "running" | "error"
     error_message = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
 
     # Soul config — persistent persona that shapes email composition voice
-    voice_style = Column(String, nullable=True)    # "professional" | "casual" | "warm" | "direct" | "diplomatic"
-    user_context = Column(Text, nullable=True)     # who the user is, their role, key relationships
+    voice_style = Column(
+        String, nullable=True
+    )  # "professional" | "casual" | "warm" | "direct" | "diplomatic"
+    user_context = Column(Text, nullable=True)  # who the user is, their role, key relationships
     writing_guidelines = Column(Text, nullable=True)  # style rules, things to always/never do
 
     # Heartbeat feature toggles — which tasks run each cycle
-    run_rules = Column(Boolean, default=True)      # execute active automation rules
+    run_rules = Column(Boolean, default=True)  # execute active automation rules
     run_followups = Column(Boolean, default=True)  # sync follow-up reply detection
-    run_avoidance = Column(Boolean, default=False) # detect avoided emails (requires AI)
-    run_daily_brief = Column(Boolean, default=False) # generate AI morning brief once per day
+    run_avoidance = Column(Boolean, default=False)  # detect avoided emails (requires AI)
+    run_daily_brief = Column(Boolean, default=False)  # generate AI morning brief once per day
+    run_autodraft = Column(Boolean, default=False)  # pre-draft replies for review (cloud AI, Gmail)
 
 
 class DailyBriefRepo:
@@ -811,8 +915,13 @@ class DailyBriefRepo:
         existing = self.get_today(brief.account_email, brief.brief_date)
         if existing:
             for col in (
-                "content", "ai_used", "unread_count", "new_since_yesterday",
-                "high_priority_count", "overdue_followups_count", "avoided_count",
+                "content",
+                "ai_used",
+                "unread_count",
+                "new_since_yesterday",
+                "high_priority_count",
+                "overdue_followups_count",
+                "avoided_count",
                 "items_json",
             ):
                 setattr(existing, col, getattr(brief, col))
@@ -845,6 +954,7 @@ class AgentRepo:
             self.s.commit()
             return existing
         from datetime import datetime, timezone
+
         agent = Agent(
             name=name,
             account_email=account_email,
@@ -877,6 +987,7 @@ class AgentRepo:
         error: str | None = None,
     ) -> None:
         from datetime import datetime, timezone
+
         agent = self.get_by_email(account_email)
         if agent:
             agent.last_run_at = datetime.now(timezone.utc)
@@ -906,6 +1017,7 @@ class AgentRepo:
         run_followups: bool,
         run_avoidance: bool,
         run_daily_brief: bool = False,
+        run_autodraft: bool = False,
     ) -> None:
         agent = self.get_by_email(account_email)
         if agent:
@@ -913,6 +1025,7 @@ class AgentRepo:
             agent.run_followups = run_followups
             agent.run_avoidance = run_avoidance
             agent.run_daily_brief = run_daily_brief
+            agent.run_autodraft = run_autodraft
             self.s.commit()
 
     def delete(self, account_email: str) -> None:
@@ -938,6 +1051,7 @@ class AccountRepo:
             self.s.commit()
             return existing
         from datetime import datetime, timezone
+
         acct = Account(
             email=email,
             display_name=display_name or email,
@@ -962,6 +1076,7 @@ class AccountRepo:
 
     def update_last_synced(self, email: str) -> None:
         from datetime import datetime, timezone
+
         acct = self.get(email)
         if acct:
             acct.last_synced_at = datetime.now(timezone.utc)
@@ -982,6 +1097,7 @@ class AccountRepo:
         if not acct or acct.last_synced_at is not None:
             return
         from datetime import datetime, timezone
+
         from sqlalchemy import func
 
         newest = (
@@ -989,11 +1105,7 @@ class AccountRepo:
             .filter(EmailRecord.account_email == email)
             .scalar()
         )
-        cached_any = (
-            self.s.query(EmailRecord.id)
-            .filter(EmailRecord.account_email == email)
-            .first()
-        )
+        cached_any = self.s.query(EmailRecord.id).filter(EmailRecord.account_email == email).first()
         if not cached_any:
             return
         acct.last_synced_at = newest or datetime.now(timezone.utc)
@@ -1001,6 +1113,7 @@ class AccountRepo:
 
     def mark_welcomed(self, email: str) -> None:
         from datetime import datetime, timezone
+
         acct = self.get(email)
         if acct and acct.welcomed_at is None:
             acct.welcomed_at = datetime.now(timezone.utc)

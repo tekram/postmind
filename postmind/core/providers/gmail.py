@@ -71,7 +71,7 @@ class GmailProvider(EmailProvider):
     # ── Capabilities ──────────────────────────────────────────────────────────
 
     def supports(self, capability: str) -> bool:
-        """Gmail supports all capabilities: labels, threads, unsubscribe, rules, untrash."""
+        """Gmail supports all capabilities: labels, threads, unsubscribe, rules, untrash, drafts."""
         return True
 
     # ── Account ───────────────────────────────────────────────────────────────

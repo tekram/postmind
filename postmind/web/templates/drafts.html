@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}Drafts — postmind{% endblock %}
+{% block content %}
+
+<div class="p-8 max-w-4xl">
+
+  <!-- Header -->
+  <div class="flex items-start justify-between mb-6 gap-4 flex-wrap">
+    <div>
+      <h1 class="text-2xl font-semibold text-ink flex items-center gap-2.5">
+        Reply Drafts
+        <span class="pm-pill bg-accent-subtle text-accent border border-accent-border">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9.94 14.06l-1.06 2.32a1 1 0 01-1.82 0l-1.06-2.32a1 1 0 00-.5-.5L3.18 12.5a1 1 0 010-1.82l2.32-1.06a1 1 0 00.5-.5l1.06-2.32a1 1 0 011.82 0l1.06 2.32a1 1 0 00.5.5l2.32 1.06a1 1 0 010 1.82l-2.32 1.06a1 1 0 00-.5.5z"/>
+          </svg>
+          AI-drafted
+        </span>
+      </h1>
+      <p class="text-ink-subtle text-sm mt-1 max-w-xl">
+        Replies written in your voice and parked in Gmail. Review, tweak, then send —
+        <span class="text-ink-muted font-medium">nothing is sent until you click Send.</span>
+      </p>
+    </div>
+  </div>
+
+  <!-- Toasts -->
+  {% if request.query_params.get('sent') %}
+  <div class="mb-5 bg-success-bg border border-success-border rounded-card px-4 py-3 flex items-center gap-2.5 text-sm text-success">
+    <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+    Sent to {{ request.query_params.get('sent') }}.
+  </div>
+  {% elif request.query_params.get('created') %}
+  <div class="mb-5 bg-accent-subtle border border-accent-border rounded-card px-4 py-3 flex items-center gap-2.5 text-sm text-accent">
+    <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+    Draft ready below — review it before sending.
+  </div>
+  {% elif request.query_params.get('saved') %}
+  <div class="mb-5 bg-surface-2 border border-hairline rounded-card px-4 py-3 text-sm text-ink-muted">Changes saved.</div>
+  {% elif request.query_params.get('dismissed') %}
+  <div class="mb-5 bg-surface-2 border border-hairline rounded-card px-4 py-3 text-sm text-ink-muted">Draft dismissed and removed from Gmail.</div>
+  {% endif %}
+
+  {% if not provider_is_gmail %}
+  <!-- IMAP / non-Gmail: feature unavailable -->
+  <div class="pm-card p-8 text-center max-w-lg mx-auto">
+    <div class="w-12 h-12 mx-auto mb-3 rounded-card bg-surface-2 border border-hairline flex items-center justify-center">
+      <svg class="w-6 h-6 text-ink-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+    </div>
+    <h2 class="text-lg font-semibold text-ink">Drafting needs a Gmail account</h2>
+    <p class="text-ink-subtle text-sm mt-2 max-w-sm mx-auto">
+      Reply drafting uses Gmail's drafts API. The active account is connected over IMAP,
+      which doesn't support server-side drafts.
+    </p>
+    <a href="/accounts" class="pm-btn mt-5 inline-flex">Manage accounts</a>
+  </div>
+
+  {% else %}
+
+  {% if not cloud_ready %}
+  <!-- AI off / local: drafting unavailable, explain why -->
+  <div class="mb-6 bg-warning-bg border border-warning-border rounded-card px-4 py-3.5 flex items-start gap-3">
+    <svg class="w-5 h-5 text-warning shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+    <div class="text-sm">
+      <p class="font-medium text-ink">AI drafting needs cloud mode</p>
+      <p class="text-ink-subtle mt-0.5">
+        Writing a reply in your voice runs on Anthropic (subjects, snippets, and the
+        thread you're replying to are sent to the API). Turn on cloud mode to draft.
+        <a href="/settings" class="underline hover:text-ink-muted">Open Settings →</a>
+      </p>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if not drafts %}
+  <!-- Empty state -->
+  <div class="pm-card p-10 text-center">
+    <div class="w-12 h-12 mx-auto mb-4 rounded-card bg-accent-subtle border border-accent-border flex items-center justify-center">
+      <svg class="w-6 h-6 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+    </div>
+    <h2 class="text-lg font-semibold text-ink">No drafts waiting</h2>
+    <p class="text-ink-subtle text-sm mt-2 max-w-md mx-auto">
+      Drafts show up here two ways: hit <span class="font-medium text-ink-muted">Draft reply</span>
+      on any email in <a href="/triage" class="text-accent underline">Triage</a>, or let an
+      <a href="/agents" class="text-accent underline">agent</a> pre-draft replies for you in the background.
+    </p>
+    <div class="mt-6 flex items-center justify-center gap-2.5">
+      <a href="/triage" class="pm-btn">Go to Triage</a>
+      <a href="/agents" class="pm-btn-secondary">Enable auto-drafting</a>
+    </div>
+  </div>
+
+  {% else %}
+
+  <p class="text-ink-tertiary text-xs mb-3 tabular">{{ drafts | length }} draft{{ '' if drafts|length == 1 else 's' }} awaiting review</p>
+
+  <div class="space-y-4">
+    {% for d in drafts %}
+    <div class="pm-card overflow-hidden">
+      <!-- Card header: recipient + meta -->
+      <div class="px-5 pt-4 pb-3 border-b border-hairline flex items-start justify-between gap-3 flex-wrap">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-xs text-ink-tertiary">To</span>
+            <span class="text-sm font-medium text-ink truncate">{{ d.to_email }}</span>
+          </div>
+          <div class="flex items-center gap-2 mt-1.5 flex-wrap">
+            <span class="pm-badge text-accent bg-accent-subtle border border-accent-border">{{ d.trigger_label }}</span>
+            {% if d.confidence %}
+            <span class="pm-badge" title="Heuristic confidence this needed a reply">{{ d.confidence }}% match</span>
+            {% endif %}
+            {% if d.edited %}
+            <span class="pm-badge text-warning bg-warning-bg border border-warning-border">Edited</span>
+            {% endif %}
+            <span class="text-xs text-ink-tertiary">{{ d.created_at }}</span>
+          </div>
+        </div>
+        <span class="pm-pill bg-accent-subtle text-accent border border-accent-border shrink-0">
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.94 14.06l-1.06 2.32a1 1 0 01-1.82 0l-1.06-2.32a1 1 0 00-.5-.5L3.18 12.5a1 1 0 010-1.82l2.32-1.06a1 1 0 00.5-.5l1.06-2.32a1 1 0 011.82 0l1.06 2.32a1 1 0 00.5.5l2.32 1.06a1 1 0 010 1.82l-2.32 1.06a1 1 0 00-.5.5z"/></svg>
+          drafted by postmind
+        </span>
+      </div>
+
+      <!-- Editable form: default submit = Save; Send overrides via formaction -->
+      <form method="POST" action="/drafts/{{ d.id }}/save" class="px-5 py-4 space-y-3"
+            onsubmit="return window.__pmDraftSubmit(this, event);">
+        <div>
+          <label class="block text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-tertiary mb-1">Subject</label>
+          <input type="text" name="subject" value="{{ d.subject }}" class="pm-input font-medium">
+        </div>
+        <div>
+          <label class="block text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-tertiary mb-1">Message</label>
+          <textarea name="body" rows="7" class="pm-input font-sans leading-relaxed resize-y">{{ d.body }}</textarea>
+        </div>
+
+        <div class="flex items-center gap-2 pt-1 flex-wrap">
+          <button type="submit" formaction="/drafts/{{ d.id }}/send" data-send="1" class="pm-btn">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+            Send reply
+          </button>
+          <button type="submit" class="pm-btn-secondary">Save changes</button>
+          <span class="flex-1"></span>
+        </div>
+      </form>
+
+      <!-- Dismiss (separate form so it never carries edits) -->
+      <div class="px-5 pb-4 -mt-1">
+        <form method="POST" action="/drafts/{{ d.id }}/dismiss"
+              onsubmit="return confirm('Discard this draft? It will be removed from your Gmail drafts too.');">
+          <button type="submit" class="text-xs font-medium text-ink-tertiary hover:text-danger transition-colors inline-flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+            Dismiss draft
+          </button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <p class="text-ink-tertiary text-xs mt-6 border-t border-hairline pt-4">
+    Drafts are real Gmail drafts — you can also finish them from the Gmail app.
+    Sending uses your connected account and threads the reply into the original conversation.
+  </p>
+
+  {% endif %}
+  {% endif %}
+
+</div>
+
+<script>
+  // Confirm before the outward-facing Send; let Save/other submits through.
+  window.__pmDraftSubmit = function (form, ev) {
+    var btn = ev.submitter;
+    if (btn && btn.dataset.send === "1") {
+      if (!confirm("Send this reply now? This emails the recipient and can't be undone.")) {
+        return false;
+      }
+      btn.disabled = true;
+      btn.classList.add("opacity-60");
+    }
+    return true;
+  };
+</script>
+
+{% endblock %}

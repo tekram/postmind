@@ -35,15 +35,18 @@ def _triage_account(email: str) -> None:
     run_followups = getattr(agent, "run_followups", True)
     run_avoidance = getattr(agent, "run_avoidance", False)
     run_daily_brief = getattr(agent, "run_daily_brief", False)
+    run_autodraft = getattr(agent, "run_autodraft", False)
 
     found_count = 0
     try:
         from postmind.core.providers.factory import get_provider
+
         cfg = load_account_config(email)
         provider_name = cfg.get("provider", "gmail")
 
         if provider_name == "imap":
             import os
+
             pw = os.environ.get("POSTMIND_IMAP_PASSWORD", "")
             provider = get_provider(
                 "imap",
@@ -72,6 +75,7 @@ def _triage_account(email: str) -> None:
             if settings.ai_mode in ("cloud", "local"):
                 try:
                     from postmind.core.ai_engine import AIEngine
+
                     ai = AIEngine()
                     classified = ai.classify_emails(messages)
                     logger.info("Heartbeat %s: classified %d emails", email, len(classified))
@@ -90,6 +94,7 @@ def _triage_account(email: str) -> None:
             if run_rules:
                 try:
                     from postmind.core.bulk_engine import BulkEngine
+
                     engine = BulkEngine(gmail_client, email)
                     results = engine.run_rules(dry_run=False)
                     total = sum(r.affected_count for r in results.values())
@@ -102,24 +107,55 @@ def _triage_account(email: str) -> None:
             if run_followups:
                 try:
                     from postmind.core.follow_up import FollowUpTracker
+
                     tracker = FollowUpTracker(gmail_client, email)
                     replied = tracker.sync_replies()
                     due = tracker.get_due_follow_ups()
                     if replied or due:
                         logger.info(
                             "Heartbeat %s: %d replies detected, %d follow-ups due",
-                            email, replied, len(due),
+                            email,
+                            replied,
+                            len(due),
                         )
                 except Exception as exc:
                     logger.warning("Heartbeat %s: follow-up sync failed: %s", email, exc)
+
+            # Pre-draft replies for review (cloud AI only — composition needs it).
+            # Non-destructive: drafts are parked in Gmail Drafts, never sent.
+            if run_autodraft:
+                settings = get_settings()
+                if settings.ai_mode == "cloud":
+                    try:
+                        from postmind.core.ai_engine import AIEngine
+                        from postmind.core.autodraft import AutodraftService
+
+                        soul = {
+                            "voice_style": getattr(agent, "voice_style", None),
+                            "user_context": getattr(agent, "user_context", None),
+                            "writing_guidelines": getattr(agent, "writing_guidelines", None),
+                        }
+                        service = AutodraftService(provider, AIEngine(), email, soul=soul)
+                        drafts = service.run_for_inbox(limit=20)
+                        if drafts:
+                            logger.info(
+                                "Heartbeat %s: pre-drafted %d repl(y/ies) for review",
+                                email,
+                                len(drafts),
+                            )
+                    except Exception as exc:
+                        logger.warning("Heartbeat %s: autodraft failed: %s", email, exc)
+                else:
+                    logger.info("Heartbeat %s: autodraft skipped (needs cloud AI mode)", email)
 
             # Detect avoided emails (needs AI)
             if run_avoidance:
                 settings = get_settings()
                 if settings.ai_mode in ("cloud", "local"):
                     try:
-                        from postmind.core.avoidance import AvoidanceDetector
                         from postmind.core.ai_engine import AIEngine
+                        from postmind.core.avoidance import AvoidanceDetector
+
                         detector = AvoidanceDetector(gmail_client, email, ai=AIEngine())
                         avoided = detector.get_avoided_emails(with_insights=False)
                         if avoided:
@@ -129,12 +165,12 @@ def _triage_account(email: str) -> None:
                     except Exception as exc:
                         logger.warning("Heartbeat %s: avoidance detection failed: %s", email, exc)
 
-
         # Generate daily brief once per calendar day (local DB only — works for all providers)
         if run_daily_brief:
             try:
                 from postmind.core.daily_brief import DailyBriefGenerator
                 from postmind.core.storage import DailyBriefRepo
+
                 today_str = datetime.now(timezone.utc).date().isoformat()
                 if not DailyBriefRepo(get_session()).get_today(email, today_str):
                     DailyBriefGenerator(email).get_or_generate(force=False)
@@ -155,12 +191,11 @@ def _triage_account(email: str) -> None:
 def start_daemon(interval_minutes: int | None = None, *, run_immediately: bool = False) -> None:
     """Start the daemon. interval_minutes overrides per-agent config if provided."""
     try:
-        from apscheduler.schedulers.blocking import BlockingScheduler
         from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+        from apscheduler.schedulers.blocking import BlockingScheduler
     except ImportError:
         raise ImportError(
-            "APScheduler is required for postmind watch. "
-            "Install it with: pip install apscheduler"
+            "APScheduler is required for postmind watch. Install it with: pip install apscheduler"
         )
 
     from postmind.config import DB_PATH
@@ -172,6 +207,7 @@ def start_daemon(interval_minutes: int | None = None, *, run_immediately: bool =
     if not active_agents:
         # Fall back to accounts if no agents configured yet
         from postmind.core.account_registry import list_accounts
+
         accounts = list_accounts()
         if not accounts:
             raise RuntimeError("No accounts or agents registered.")
@@ -192,7 +228,9 @@ def start_daemon(interval_minutes: int | None = None, *, run_immediately: bool =
     )
 
     for agent in active_agents:
-        effective_interval = interval_minutes if interval_minutes is not None else agent.interval_minutes
+        effective_interval = (
+            interval_minutes if interval_minutes is not None else agent.interval_minutes
+        )
         job_id = f"heartbeat_{agent.account_email}"
         scheduler.add_job(
             _triage_account,
@@ -218,13 +256,13 @@ def start_daemon(interval_minutes: int | None = None, *, run_immediately: bool =
 def start_daemon_background(stop_event=None, interval_minutes: int | None = None) -> None:
     """Non-blocking variant for use inside the FastAPI web process."""
     try:
-        from apscheduler.schedulers.background import BackgroundScheduler
         from apscheduler.jobstores.memory import MemoryJobStore
+        from apscheduler.schedulers.background import BackgroundScheduler
     except ImportError:
         raise ImportError("Install apscheduler: pip install apscheduler")
 
-    from postmind.core.storage import AgentRepo, get_session
     from postmind.core.account_registry import list_accounts
+    from postmind.core.storage import AgentRepo, get_session
 
     agents = AgentRepo(get_session()).list_all()
     active = [a for a in agents if a.is_active]
@@ -255,6 +293,7 @@ def start_daemon_background(stop_event=None, interval_minutes: int | None = None
         scheduler.shutdown(wait=False)
     else:
         import time
+
         try:
             while True:
                 time.sleep(1)
