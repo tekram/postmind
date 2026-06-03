@@ -2861,6 +2861,7 @@ async def triage_page(request: Request):
         for m in messages:
             meta = {
                 "id": m.id,
+                "thread_id": m.thread_id or "",
                 "subject": m.headers.subject or "(no subject)",
                 "sender_name": m.sender_name or m.sender_email,
                 "sender_email": m.sender_email,
@@ -2945,7 +2946,10 @@ async def triage_classify_stream(request: Request):
         try:
             ai = AIEngine()
             settings = get_settings()
-            chunks = list(_chunks(messages, settings.ai_max_classify_batch))
+            # Local LLMs benefit from small batches: results trickle in quickly
+            # instead of one big call that blocks all cards until done.
+            batch_size = 3 if _ai_mode() == "local" else settings.ai_max_classify_batch
+            chunks = list(_chunks(messages, batch_size))
             workers = max(1, min(settings.ai_classify_parallelism, len(chunks)))
             cache_repo = ClassificationCacheRepo(get_session())
 
@@ -3032,6 +3036,39 @@ async def triage_classify_stream(request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/triage/trash")
+async def triage_trash(request: Request):
+    """Trash a single email from the triage page and return JSON for inline removal."""
+    form = await request.form()
+    gmail_id = (form.get("gmail_id") or "").strip()
+    if not gmail_id:
+        return JSONResponse({"ok": False, "error": "No message ID"}, status_code=400)
+
+    account_email = _get_web_account() or ""
+
+    def _do():
+        from postmind.core.storage import UndoLogRepo, get_session
+
+        client = _build_provider()
+        entry = UndoLogRepo(get_session()).record(
+            account_email=account_email,
+            operation="trash",
+            message_ids=[gmail_id],
+            description="Trashed 1 email from Triage",
+            metadata={},
+        )
+        client.batch_trash([gmail_id])
+        return entry.id
+
+    try:
+        loop = asyncio.get_event_loop()
+        undo_id = await loop.run_in_executor(_executor, _do)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+    return JSONResponse({"ok": True, "undo_id": undo_id})
 
 
 # ── Assistant (floating chat) ──────────────────────────────────────────────────

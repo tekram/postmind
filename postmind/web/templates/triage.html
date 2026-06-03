@@ -109,6 +109,7 @@
     const rows = JSON.parse(document.getElementById("triage-data").textContent);
     const pendingToken = {{ (pending_token | tojson) if pending_token else 'null' }};
     const DRAFT_ENABLED = {{ (ai_mode == 'cloud' and provider == 'gmail') | tojson }};
+    const IS_GMAIL = {{ (provider == 'gmail') | tojson }};
     const list = document.getElementById("triage-list");
     const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 };
     const byId = {};
@@ -182,25 +183,75 @@
       main.appendChild(el("p", "text-xs text-ink-subtle mt-1.5 italic", cls ? cls.explanation : ""));
       flex.appendChild(main);
 
-      // Action badge + (optional) draft-reply button
+      // Action badge + (optional) draft-reply button + trash button
       const act = el("div", "shrink-0 flex flex-col items-end gap-2");
       if (cls) act.appendChild(actionBadge(cls.suggested_action));
       const wantsReply = cls && (cls.requires_reply || cls.suggested_action === "reply");
-      if (DRAFT_ENABLED && wantsReply) {
-        const form = el("form");
-        form.method = "POST";
-        form.action = "/drafts/create";
-        const hid = el("input");
-        hid.type = "hidden"; hid.name = "gmail_id"; hid.value = r.id;
-        form.appendChild(hid);
-        const btn = el("button");
-        btn.type = "submit";
-        btn.className = "pm-btn-secondary text-xs py-1 px-2.5";
-        btn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>Draft reply';
-        btn.addEventListener("click", () => { btn.disabled = true; btn.textContent = "Drafting…"; });
-        form.appendChild(btn);
-        act.appendChild(form);
+      if (wantsReply && IS_GMAIL) {
+        if (DRAFT_ENABLED) {
+          const form = el("form");
+          form.method = "POST";
+          form.action = "/drafts/create";
+          const hid = el("input");
+          hid.type = "hidden"; hid.name = "gmail_id"; hid.value = r.id;
+          form.appendChild(hid);
+          const btn = el("button");
+          btn.type = "submit";
+          btn.className = "pm-btn-secondary text-xs py-1 px-2.5";
+          btn.innerHTML = '<svg class="w-3.5 h-3.5 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>Draft reply';
+          btn.addEventListener("click", () => { btn.disabled = true; btn.textContent = "Drafting…"; });
+          form.appendChild(btn);
+          act.appendChild(form);
+        } else {
+          // Local/offline mode: open Gmail thread directly
+          const subject = encodeURIComponent(r.subject || "");
+          const href = r.thread_id
+            ? "https://mail.google.com/mail/#all/" + encodeURIComponent(r.thread_id)
+            : "mailto:" + encodeURIComponent(r.sender_email) + "?subject=Re%3A+" + subject;
+          const a = el("a");
+          a.href = href;
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          a.className = "pm-btn-secondary text-xs py-1 px-2.5 inline-flex items-center gap-1";
+          a.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10l9-7 9 7v10a2 2 0 01-2 2H5a2 2 0 01-2-2V10z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>Reply';
+          act.appendChild(a);
+        }
       }
+      // Trash button — always shown, removes card inline on success
+      const trashBtn = el("button");
+      trashBtn.type = "button";
+      trashBtn.title = "Move to Trash";
+      trashBtn.className = "p-1 rounded text-ink-tertiary hover:text-danger hover:bg-danger-bg transition-colors";
+      trashBtn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><polyline points="3 6 5 6 21 6"/><path stroke-linecap="round" stroke-linejoin="round" d="M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2"/></svg>';
+      trashBtn.addEventListener("click", async () => {
+        trashBtn.disabled = true;
+        trashBtn.innerHTML = '<svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>';
+        try {
+          const fd = new FormData();
+          fd.append("gmail_id", r.id);
+          const res = await fetch("/triage/trash", { method: "POST", body: fd });
+          const data = await res.json();
+          if (data.ok) {
+            const cardEl = list.querySelector('[data-id="' + r.id + '"]');
+            if (cardEl) {
+              cardEl.style.transition = "opacity 0.2s";
+              cardEl.style.opacity = "0";
+              setTimeout(() => cardEl.remove(), 200);
+            }
+            // Remove from rows array so re-renders don't bring it back
+            const idx = rows.findIndex(x => x.id === r.id);
+            if (idx !== -1) rows.splice(idx, 1);
+            delete byId[r.id];
+            updateCounts();
+          } else {
+            trashBtn.disabled = false;
+            trashBtn.title = data.error || "Failed";
+          }
+        } catch {
+          trashBtn.disabled = false;
+        }
+      });
+      act.appendChild(trashBtn);
       flex.appendChild(act);
 
       card.appendChild(flex);
