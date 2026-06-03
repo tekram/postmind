@@ -61,3 +61,58 @@ def test_resolve_trash_query_newsletters_only_filters_to_unsubscribe():
 
     out = agent_tools.resolve_trash_query(prov, "older_than:2y", True, limit=100)
     assert [e["id"] for e in out] == ["m1"]
+
+
+def test_stage_trash_query_caches_and_emits_review_card(monkeypatch):
+    from postmind.web import server
+
+    account = "me@example.com"
+    monkeypatch.setattr(server, "_get_web_account", lambda: account)
+    server._REVIEW_CACHE.clear()
+
+    prov = MagicMock()
+    prov.supports.return_value = True
+    prov.list_message_ids.return_value = ["m1", "m2", "m3"]
+    prov.get_messages_metadata.return_value = [
+        _msg("m1", "news@promo.com", subject="A", unsub="<u>"),
+        _msg("m2", "news@promo.com", subject="B", unsub="<u>"),
+        _msg("m3", "alerts@bank.com", subject="C", unsub="<u>"),
+    ]
+    monkeypatch.setattr(server, "_build_provider", lambda: prov)
+
+    cards: list[dict] = []
+    executor = server._build_agent_tool_executor(account, MagicMock(), [], cards)
+    summary = executor(
+        "stage_trash_query",
+        {"gmail_query": "older_than:2y", "newsletters_only": True, "description": "old newsletters"},
+    )
+
+    assert len(cards) == 1
+    card = cards[0]
+    assert card["type"] == "trash_review"
+    token = card["fields"]["token"]
+    assert card["fields"]["total_count"] == 3
+    assert card["fields"]["sender_count"] == 2
+    assert card["fields"]["description"] == "old newsletters"
+    # Resolved set cached under the token, scoped to the account.
+    entry = server._REVIEW_CACHE[token]
+    assert entry["account_email"] == account
+    assert {e["id"] for e in entry["emails"]} == {"m1", "m2", "m3"}
+    assert "3" in summary  # mentions the count for the model
+
+
+def test_stage_trash_query_empty_match_stages_nothing(monkeypatch):
+    from postmind.web import server
+
+    account = "me@example.com"
+    monkeypatch.setattr(server, "_get_web_account", lambda: account)
+    prov = MagicMock()
+    prov.supports.return_value = True
+    prov.list_message_ids.return_value = []
+    monkeypatch.setattr(server, "_build_provider", lambda: prov)
+
+    cards: list[dict] = []
+    executor = server._build_agent_tool_executor(account, MagicMock(), [], cards)
+    summary = executor("stage_trash_query", {"gmail_query": "older_than:99y", "description": "x"})
+    assert cards == []
+    assert "nothing" in summary.lower()

@@ -52,6 +52,35 @@ async def _same_origin_guard(request: Request, call_next):
 _scan_cache: dict[str, dict] = {}
 _CACHE_TTL = 300  # 5 minutes
 
+# In-memory review cache — keyed by token, used by stage_trash_query
+_REVIEW_CACHE: dict[str, dict] = {}  # token -> {account_email, description, emails, expires}
+_REVIEW_TTL = 1800  # seconds
+
+
+def _review_put(account_email: str, description: str, emails: list[dict]) -> str:
+    import secrets
+
+    # Drop expired entries so the dict can't grow without bound.
+    now = time.time()
+    for tok in [t for t, e in _REVIEW_CACHE.items() if e["expires"] < now]:
+        _REVIEW_CACHE.pop(tok, None)
+    token = secrets.token_urlsafe(16)
+    _REVIEW_CACHE[token] = {
+        "account_email": account_email,
+        "description": description,
+        "emails": emails,
+        "expires": now + _REVIEW_TTL,
+    }
+    return token
+
+
+def _review_get(token: str) -> dict | None:
+    entry = _REVIEW_CACHE.get(token)
+    if entry and time.time() < entry["expires"]:
+        return entry
+    return None
+
+
 # In-memory sync task state: task_id → state dict
 _sync_tasks: dict[str, dict] = {}
 _active_sync_task_id: str | None = None
@@ -3625,6 +3654,45 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                 "…" if len(matched) > 5 else ""
             )
             return f"Staged {len(matched)} sender(s) — {total} emails, ~{mb:.0f} MB ({names}). The user must confirm in the preview before anything moves to Trash."
+        if name == "stage_trash_query":
+            gmail_query = (tool_input.get("gmail_query") or "").strip()
+            description = (tool_input.get("description") or gmail_query or "matching emails").strip()
+            newsletters_only = bool(tool_input.get("newsletters_only"))
+            if not gmail_query:
+                return "I need a search query (e.g. 'older_than:2y') to find emails to trash."
+            try:
+                provider = _build_provider()
+            except Exception as exc:
+                return f"Couldn't reach the mailbox to resolve that query: {exc}"
+            if not provider.supports("labels"):
+                return (
+                    "Email-level trash review is Gmail-only right now. "
+                    "For other accounts, name the senders and I'll stage a sender-level trash instead."
+                )
+            try:
+                emails = agent_tools.resolve_trash_query(provider, gmail_query, newsletters_only, limit=200)
+            except Exception as exc:
+                return f"Couldn't resolve that query: {exc}"
+            if not emails:
+                return f"Nothing matched '{gmail_query}' — nothing staged."
+            token = _review_put(account_email, description, emails)
+            sender_count = len({e["sender_email"] for e in emails})
+            cards.append(
+                {
+                    "type": "trash_review",
+                    "title": f"Review: {description}",
+                    "fields": {
+                        "token": token,
+                        "total_count": len(emails),
+                        "sender_count": sender_count,
+                        "description": description,
+                    },
+                }
+            )
+            return (
+                f"Staged {len(emails)} emails from {sender_count} sender(s) matching '{gmail_query}' "
+                f"for review. The user opens the review drawer and approves before anything moves to Trash."
+            )
         if name in ("stage_archive", "stage_label", "stage_mark_read"):
             action = {
                 "stage_archive": "archive",
