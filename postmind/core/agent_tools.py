@@ -134,6 +134,19 @@ WRITE_TOOLS: list[dict] = [
         },
     },
     {
+        "name": "stage_trash_query",
+        "description": "Stage an email-level trash REVIEW. Use when the user wants to delete a CLASS of mail described by criteria (e.g. 'newsletters older than 2 years', 'promotions from last year'). You do NOT delete — you compose a Gmail search query and the server resolves the matching emails into a review drawer the user approves message-by-message. Deletes go to Trash and are undoable for 30 days. Prefer this over stage_trash when the target is a query/time-range rather than named senders.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "gmail_query": {"type": "string", "description": "Gmail search operators that select the emails, e.g. 'older_than:2y', 'category:promotions older_than:1y'. A search string only — never message IDs."},
+                "newsletters_only": {"type": "boolean", "description": "When true, keep only messages that have a List-Unsubscribe header (true newsletters/subscriptions). Default false."},
+                "description": {"type": "string", "description": "Short human label for the review, e.g. 'newsletters older than 2 years'."},
+            },
+            "required": ["gmail_query", "description"],
+        },
+    },
+    {
         "name": "draft_email",
         "description": "Draft an email in the user's voice (soul-aware). Returns the Subject and body as text and shows the user an editable draft card. This produces text only — it sends nothing. To actually send, follow up with send_email once the user approves.",
         "input_schema": {
@@ -293,3 +306,43 @@ def find_largest_messages(provider, query: str = "", limit: int = 10) -> str:
         subj = (m.headers.subject or "(no subject)")[:60]
         lines.append(f"- {mb:.1f} MB — {subj} — from {m.sender_email}")
     return "\n".join(lines)
+
+
+def resolve_trash_query(
+    provider, gmail_query: str, newsletters_only: bool = False, limit: int = 200
+) -> list[dict]:
+    """Resolve a Gmail query into individual messages for the trash review panel.
+
+    The model supplies only a search string; we run it and shape the results.
+    When ``newsletters_only`` is set, keep only messages that carry a
+    List-Unsubscribe header (true newsletters/subscriptions). Returns dicts the
+    panel renders directly.
+    """
+    from datetime import datetime, timezone
+
+    limit = max(1, min(int(limit or 200), 500))
+    scope = (gmail_query or "").strip() or "in:inbox"
+    ids = provider.list_message_ids(query=scope, max_results=limit)
+    if not ids:
+        return []
+    messages = provider.get_messages_metadata(ids)
+    out: list[dict] = []
+    for m in messages:
+        if newsletters_only and not (m.headers.list_unsubscribe or "").strip():
+            continue
+        ms = m.internal_date or 0
+        date_str = ""
+        if ms:
+            date_str = datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+        out.append(
+            {
+                "id": m.id,
+                "subject": (m.headers.subject or "(no subject)"),
+                "sender_email": m.sender_email,
+                "sender_name": m.sender_name or m.sender_email,
+                "size_estimate": int(m.size_estimate or 0),
+                "internal_date": int(ms),
+                "date": date_str,
+            }
+        )
+    return out
