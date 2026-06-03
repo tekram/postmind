@@ -208,6 +208,30 @@ send, and sensitive senders always require explicit confirmation.
 postmind stats --ai-backend ollama --ai-model phi3   # requires Ollama running locally
 ```
 
+### Local power user (MCP + Goose)
+
+postmind ships an MCP server so any MCP-capable harness — ideally one running a
+**local** model — can drive your inbox over the same safety boundary the app uses.
+
+```bash
+postmind mcp   # stdio MCP server (requires the 'mcp' extra: pip install 'postmind[mcp]')
+```
+
+Point [**Goose**](https://block.github.io/goose/) at it as an MCP extension, on a local
+Ollama tool-caller (e.g. Qwen3-32B or Llama-3.3) so nothing leaves your machine. The host
+gets the READ tools, a read-only **`run_sql`** analytics tool, and the `stage_*` write tools.
+
+`run_sql` runs a single `SELECT` over a throwaway **snapshot** of the local cache (never the
+live DB), enforced read-only by a SQLite authorizer plus statement validation and row/time
+caps — so the harness can answer ad-hoc cross-cutting questions (temporal cohorts, classifier-
+vs-behavior correlations, attachment forensics) without us shipping a tool per question.
+
+**Operating contract — the boundary is non-negotiable:** the harness may **read** freely
+(including `run_sql`) and may **stage** writes, but every write executes only through
+`confirm_action(token)` after you approve a server-resolved target list. Never grant a harness
+a shell or the raw `postmind` CLI — `purge --permanent`, `clear-data`, and `accounts remove`
+are not behind stage→confirm.
+
 ---
 
 ## Privacy

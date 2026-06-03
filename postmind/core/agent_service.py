@@ -24,6 +24,7 @@ scope — it resolves senders straight from the locally synced DB:
 
 from __future__ import annotations
 
+import re
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -34,6 +35,46 @@ from postmind.config import get_active_account, get_settings, load_account_confi
 _REVERSIBLE = ("archive", "label", "mark_read", "trash")
 # Token lifetime — a staged action the user never confirms expires quietly.
 _TOKEN_TTL_SECONDS = 60 * 60
+
+# ── run_sql caps (read-only analytics) ──────────────────────────────────────────
+_SQL_ROW_CAP_DEFAULT = 500
+_SQL_ROW_CAP_MAX = 2000
+# Wall-clock guard: SQLite invokes the progress handler every N virtual-machine
+# opcodes; we raise once the deadline passes so a pathological query can't hang.
+_SQL_PROGRESS_OPS = 1000
+_SQL_TIMEOUT_SECONDS = 5.0
+_SQL_CELL_MAXLEN = 200
+# Hard memory bounds, independent of the row cap (a single row/cell can be huge):
+# cap any one string/blob the query produces, and the cumulative raw bytes we
+# materialize while fetching, so `randomblob`-style bombs can't OOM the host.
+_SQL_MAX_CELL_BYTES = 1_000_000
+_SQL_MAX_TOTAL_BYTES = 8_000_000
+# SQL functions that can read/write files, load native code, or allocate
+# unbounded memory — denied at the authorizer's SQLITE_FUNCTION hook.
+_SQL_FUNC_DENYLIST = frozenset(
+    {"load_extension", "randomblob", "zeroblob", "writefile", "readfile", "fileio", "edit"}
+)
+# Statements that are never read-only — rejected by a word-boundary scan even
+# though the authorizer would also deny them. Belt and suspenders. (Note: SQL
+# functions like ``replace()`` are intentionally NOT here — the authorizer is the
+# real backstop, so we keep only statement-level keywords to avoid rejecting
+# legitimate read queries that merely mention these words.)
+_SQL_DENYLIST = (
+    "attach",
+    "detach",
+    "pragma",
+    "insert",
+    "update",
+    "delete",
+    "drop",
+    "alter",
+    "vacuum",
+    "reindex",
+    "begin",
+    "commit",
+    "rollback",
+    "savepoint",
+)
 
 
 @dataclass
@@ -82,6 +123,9 @@ class AgentService:
         self._provider = None
         self._groups_cache: list | None = None
         self._staged: dict[str, StagedAction] = {}
+        # Lazy per-session read-only SQL snapshot (sqlite3 connection over a
+        # throwaway in-memory copy of the live DB). Built on first run_sql call.
+        self._sql_snapshot = None
 
     # ── Lazy dependencies ────────────────────────────────────────────────────
 
@@ -235,6 +279,173 @@ class AgentService:
             thread_snippet=thread_snippet,
             soul=soul,
         )
+
+    # ── Read-only SQL analytics (run_sql) ────────────────────────────────────
+
+    def _sql_connection(self):
+        """Return a cached read-only sqlite3 connection over a DB snapshot.
+
+        We never query the live DB. We snapshot the *active* SQLAlchemy engine's
+        connection (which in tests is an in-memory engine, on disk in prod) into
+        a throwaway ``:memory:`` sqlite3 connection via the backup API, then lock
+        that copy down with an authorizer that denies every non-read action code.
+        """
+        if self._sql_snapshot is not None:
+            return self._sql_snapshot
+
+        import sqlite3
+
+        from postmind.core.storage import get_engine
+
+        # Raw DBAPI connection from the live engine — works for both the on-disk
+        # prod engine and the in-memory test engine (where the data lives).
+        src_raw = get_engine().raw_connection()
+        try:
+            src = src_raw.driver_connection  # underlying sqlite3.Connection
+            dest = sqlite3.connect(":memory:")
+            src.backup(dest)
+        finally:
+            src_raw.close()
+
+        # Belt-and-suspenders: native-code loading off, and a hard cap on the size
+        # of any single string/blob the query can produce (defeats randomblob bombs).
+        try:
+            dest.enable_load_extension(False)
+        except (AttributeError, sqlite3.NotSupportedError):
+            pass
+        dest.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, _SQL_MAX_CELL_BYTES)
+
+        # Read-only enforcement at the opcode level (independent of the textual
+        # validator). Allow only read action codes; deny everything else. For
+        # SQLITE_FUNCTION the function name arrives as the 2nd arg — deny the ones
+        # that can touch files, load code, or allocate unbounded memory.
+        allowed = {
+            sqlite3.SQLITE_SELECT,
+            sqlite3.SQLITE_READ,
+            sqlite3.SQLITE_FUNCTION,
+            sqlite3.SQLITE_RECURSIVE,
+        }
+
+        def _authorizer(action, arg1, arg2, *_rest):
+            if action == sqlite3.SQLITE_FUNCTION:
+                fn = (arg2 or "").lower()
+                return sqlite3.SQLITE_DENY if fn in _SQL_FUNC_DENYLIST else sqlite3.SQLITE_OK
+            return sqlite3.SQLITE_OK if action in allowed else sqlite3.SQLITE_DENY
+
+        dest.set_authorizer(_authorizer)
+        self._sql_snapshot = dest
+        return dest
+
+    @staticmethod
+    def _validate_sql(query: str) -> str | None:
+        """Return an error string if ``query`` is not a single read-only SELECT."""
+        if not (query or "").strip():
+            return "Empty query."
+        # Strip comments so they can't hide a second statement or a keyword.
+        no_block = re.sub(r"/\*.*?\*/", " ", query, flags=re.DOTALL)
+        no_line = re.sub(r"--[^\n]*", " ", no_block)
+        cleaned = no_line.strip()
+        # Allow exactly one statement: drop a single trailing ';', then any
+        # remaining ';' followed by non-whitespace is a second statement.
+        if cleaned.endswith(";"):
+            cleaned = cleaned[:-1].rstrip()
+        if re.search(r";\s*\S", cleaned):
+            return "Only a single statement is allowed (no ';'-separated statements)."
+        if not cleaned:
+            return "Empty query."
+        first = cleaned.split(None, 1)[0].lower()
+        if first not in ("select", "with"):
+            return "Only SELECT (or WITH … SELECT) queries are allowed."
+        lowered = cleaned.lower()
+        for word in _SQL_DENYLIST:
+            if re.search(rf"\b{word}\b", lowered):
+                return f"Disallowed keyword '{word}' — run_sql is read-only (SELECT only)."
+        return None
+
+    def run_sql(self, query: str, row_cap: int = _SQL_ROW_CAP_DEFAULT) -> str:
+        """Run one read-only SELECT over a snapshot of the local email cache.
+
+        Defense in depth: snapshot copy (never the live DB), textual single-SELECT
+        validation, an opcode-level authorizer, and row/time caps. Returns compact
+        tabular text or a one-line error string — never raises into the loop.
+        """
+        err = self._validate_sql(query)
+        if err:
+            return f"Error: {err}"
+
+        cap = max(1, min(int(row_cap or _SQL_ROW_CAP_DEFAULT), _SQL_ROW_CAP_MAX))
+        try:
+            conn = self._sql_connection()
+        except Exception as exc:
+            return f"Error: could not open the analytics snapshot: {exc}"
+
+        deadline = time.monotonic() + _SQL_TIMEOUT_SECONDS
+        timed_out = False
+
+        def _progress():
+            nonlocal timed_out
+            # Non-zero return aborts the running statement (raises OperationalError).
+            if time.monotonic() > deadline:
+                timed_out = True
+                return 1
+            return 0
+
+        conn.set_progress_handler(_progress, _SQL_PROGRESS_OPS)
+        try:
+            cur = conn.cursor()
+            # nosec B608: not string interpolation — `query` is the user's full
+            # statement, validated to a single read-only SELECT and additionally
+            # gated by a SQLite authorizer that denies every write opcode.
+            cur.execute(query)  # nosec B608
+            cols = [d[0] for d in (cur.description or [])]
+            # Fetch row-by-row with a cumulative byte budget so a query that
+            # returns few rows of huge cells still can't balloon memory.
+            rows: list = []
+            budget_hit = False
+            total = 0
+            while len(rows) < cap + 1:
+                row = cur.fetchone()
+                if row is None:
+                    break
+                total += sum(len(v) if isinstance(v, (str, bytes)) else 24 for v in row)
+                rows.append(row)
+                if total > _SQL_MAX_TOTAL_BYTES:
+                    budget_hit = True
+                    break
+        except Exception as exc:
+            if timed_out:
+                return f"Error: query exceeded the {_SQL_TIMEOUT_SECONDS:.0f}s time limit."
+            return f"Error: {exc}"
+        finally:
+            conn.set_progress_handler(None, 0)
+
+        out = self._format_sql_rows(cols, rows, cap)
+        if budget_hit:
+            out += f"\n… result truncated at ~{_SQL_MAX_TOTAL_BYTES // 1_000_000} MB."
+        return out
+
+    @staticmethod
+    def _format_sql_rows(cols: list[str], rows: list, cap: int) -> str:
+        truncated = len(rows) > cap
+        rows = rows[:cap]
+        if not cols:
+            return "(no columns)"
+        if not rows:
+            return f"{' | '.join(cols)}\n(0 rows)"
+
+        def _cell(v) -> str:
+            s = "" if v is None else str(v)
+            if len(s) > _SQL_CELL_MAXLEN:
+                s = s[:_SQL_CELL_MAXLEN] + "…"
+            return s.replace("\n", " ").replace("\r", " ")
+
+        lines = [" | ".join(cols)]
+        lines.extend(" | ".join(_cell(c) for c in row) for row in rows)
+        if truncated:
+            lines.append(f"… more rows (truncated at {cap})")
+        else:
+            lines.append(f"({len(rows)} row{'s' if len(rows) != 1 else ''})")
+        return "\n".join(lines)
 
     # ── Target resolution + safety gating ────────────────────────────────────
 
