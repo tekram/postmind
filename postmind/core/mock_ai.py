@@ -157,6 +157,26 @@ class MockAIEngine:
             "[mock] Inbox is clear — pick your oldest unread email and archive it."
         )
 
+    # ── Cleanup batch naming ──────────────────────────────────────────────────
+
+    def propose_batches(self, digest: list[dict]) -> dict:
+        """Deterministic, body-free overlay mirroring AIEngine.propose_batches.
+
+        Prefixes each batch title with "[mock]" so callers/tests can confirm the
+        semantic layer ran, without sending anything anywhere."""
+        batches: dict[str, dict] = {}
+        for b in digest:
+            key = b.get("key")
+            if not key:
+                continue
+            title = (b.get("title") or "").strip() or "Cleanup batch"
+            action = b.get("action") or "clear"
+            batches[key] = {
+                "title": f"[mock] {title}",
+                "rationale": f"[mock] Safe to {action} — grouped by shared signals.",
+            }
+        return {"batches": batches}
+
     # ── Avoidance insight ────────────────────────────────────────────────────
 
     def analyze_avoided_email(self, msg: Message) -> str:

@@ -1567,6 +1567,29 @@ def build_cleanup_batches(
     )
 
 
+def cleanup_batches_digest(plan: CleanupBatchPlan, max_subjects: int = 5) -> list[dict]:
+    """Compact, body-free digest of a batch plan for ``AIEngine.propose_batches``.
+
+    Carries only aggregate signals plus a few sample *subject lines* (never bodies,
+    never the concrete ``message_ids``) so the naming call stays cheap and private.
+    The model rewrites titles/rationales keyed by ``key``; it never sees or sets the
+    sender lists, counts, or actions — those stay server-side on the plan."""
+    return [
+        {
+            "key": b.key,
+            "title": b.title,
+            "action": b.action,
+            "category": b.category,
+            "senders": b.sender_count,
+            "emails": b.count,
+            "size_mb": b.size_mb,
+            "confidence": b.confidence,
+            "subjects": [s["subject"] for s in b.sample[:max_subjects]],
+        }
+        for b in plan.batches
+    ]
+
+
 # ── Fetch + pipeline ─────────────────────────────────────────────────────────
 
 

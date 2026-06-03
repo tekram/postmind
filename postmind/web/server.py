@@ -757,6 +757,31 @@ async def cleanup(request: Request):
     except Exception as exc:
         return _resp(request, "error.html", {"error": str(exc)})
 
+    # Phase 2 — optional semantic layer. One body-free LLM call gives the batches
+    # warmer, subject-aware names; we apply only the returned title/rationale text
+    # by batch key. Numbers, senders, actions, and confidence stay server-side, and
+    # any failure (AI off, model error, off-target keys) degrades cleanly to the
+    # deterministic Phase-1 names.
+    if _ai_mode() != "off" and plan.has_opportunity:
+        try:
+            from postmind.core.ai_engine import AIEngine
+            from postmind.core.sender_stats import cleanup_batches_digest
+
+            digest = cleanup_batches_digest(plan)
+
+            def _name():
+                return AIEngine().propose_batches(digest)
+
+            named = await loop.run_in_executor(_executor, _name)
+            text_by_key = named.get("batches", {})
+            for batch in plan.batches:
+                t = text_by_key.get(batch.key)
+                if t:
+                    batch.title = t.get("title", batch.title)
+                    batch.rationale = t.get("rationale", batch.rationale)
+        except Exception:
+            pass  # any AI failure → deterministic Phase-1 batches stand on their own
+
     ctx.update({
         "plan": plan,
         "account_email": account_email,

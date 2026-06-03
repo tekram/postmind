@@ -353,6 +353,61 @@ everything is reversible. Respond with valid JSON only. No markdown.\
         intro = data.get("intro", "")
         return {"intro": intro if isinstance(intro, str) else "", "buckets": buckets}
 
+    def propose_batches(self, digest: list[dict]) -> dict:
+        """Rename the smart-cleanup batches with warmer, subject-aware copy for the
+        fast ``/cleanup`` flow.
+
+        ``digest`` is the body-free output of
+        ``sender_stats.cleanup_batches_digest`` — per batch: ``key``, current
+        ``title``, ``action``, dominant ``category``, sender/email/size counts,
+        ``confidence``, and a few sample *subject lines* (never bodies, never the
+        concrete ``message_ids``). The model sees only these aggregate signals; it
+        rewrites the title and rationale and may only reference the batch ``key``s it
+        was given. The server applies the returned text onto the server-side plan
+        and never trusts any figures, sender lists, or actions from the model.
+
+        Returns ``{"batches": {key: {"title": str, "rationale": str}}}``. Keys not
+        present in ``digest`` are dropped by the caller, so an off-target or empty
+        response degrades cleanly to the deterministic Phase-1 batch names."""
+        if not digest:
+            return {"batches": {}}
+
+        valid_keys = {b["key"] for b in digest}
+        prompt = f"""\
+We grouped a user's bulk mail into cleanup batches they'll approve or skip one tap \
+at a time. The numbers, senders, and actions are already decided — do NOT change \
+them, do NOT invent senders. Using the sample subject lines for flavor, give each \
+batch a clearer, more specific name so the user instantly recognizes what it is.
+
+{json.dumps(digest, indent=2)}
+
+Respond with a single JSON object:
+- batches: an object keyed by each batch's "key" (only use these keys: \
+{sorted(valid_keys)}). Each value is an object with:
+  - title: a short, specific batch title (max ~6 words) — concrete beats generic
+  - rationale: one short sentence on why it's safe to {{action}} these
+
+Be honest and concrete; reflect the real subjects. Never claim mail is deleted \
+permanently — everything is reversible. Respond with valid JSON only. No markdown.\
+"""
+        raw = self._complete(SYSTEM_PROMPT, prompt, max_tokens=768)
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
+
+        data = json.loads(raw)
+        batches_in = data.get("batches", {}) or {}
+        batches: dict[str, dict] = {}
+        for key, val in batches_in.items():
+            if key in valid_keys and isinstance(val, dict):
+                entry = {}
+                if isinstance(val.get("title"), str) and val["title"].strip():
+                    entry["title"] = val["title"].strip()
+                if isinstance(val.get("rationale"), str) and val["rationale"].strip():
+                    entry["rationale"] = val["rationale"].strip()
+                if entry:
+                    batches[key] = entry
+        return {"batches": batches}
+
     # ── Weekly digest summary ────────────────────────────────────────────────
 
     def generate_digest(

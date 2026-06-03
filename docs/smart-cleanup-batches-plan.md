@@ -146,6 +146,9 @@ store the raw material; we just need to close the loop:
 
 ## 5. Phasing
 
+> **Status (2026-06):** Phases 1, 3, 4, and 2 are shipped. Phase 1 contract is
+> §9, Phase 3 is §10, Phase 2 is §11.
+
 **Phase 1 — Batcher + page (no new LLM).** Build `CleanupBatch` +
 `build_cleanup_batches()` from layers 1–2 only (deterministic + cached
 categories). Ship `/cleanup` with the card stack and keyboard flow, wired to the
@@ -371,3 +374,42 @@ senders rise, skipped senders fall (often out of auto-select, sometimes into
 
 Tests: `sender_priors` math (approve/skip/clamp), `batch_session_counts`,
 prior shifts a sender below auto-select, confirm records feedback + creates a rule.
+
+---
+
+## 11. Phase 2 implementation contract (semantic layer — shipped)
+
+One body-free LLM call gives the batches warmer, subject-aware names. Numbers,
+sender lists, actions, and confidence stay server-side; the model only rewrites
+title/rationale text keyed by batch `key`. Any failure (AI off, model error,
+off-target keys) degrades cleanly to the deterministic Phase-1 names.
+
+### 11a. Digest — `postmind/core/sender_stats.py`
+
+- `cleanup_batches_digest(plan, max_subjects=5)` → one dict per batch: `key`,
+  `title`, `action`, `category`, `senders`, `emails`, `size_mb`, `confidence`,
+  and up to `max_subjects` sample **subject lines** (from `batch.sample`). No
+  bodies, no `message_ids`, no sender emails — same privacy contract as
+  `cleanup_plan_digest`.
+
+### 11b. Engine — `postmind/core/ai_engine.py` + `mock_ai.py`
+
+- `AIEngine.propose_batches(digest)` → `{"batches": {key: {title, rationale}}}`.
+  Mirrors `summarize_cleanup_plan`: validates against the digest's keys, keeps
+  only non-blank string title/rationale, strips a markdown fence, drops unknown
+  keys, short-circuits on empty digest.
+- `MockAIEngine.propose_batches` returns a deterministic `[mock]`-prefixed
+  overlay so the path works with no API key (the test/no-key default).
+
+### 11c. Web — `postmind/web/server.py`
+
+- `GET /cleanup`: after the deterministic `_build`, if `_ai_mode() != "off"` and
+  `plan.has_opportunity`, build the digest and call `AIEngine().propose_batches`
+  in the executor, then apply `title`/`rationale` by `batch.key`. Wrapped in
+  `try/except: pass` — the deterministic batches stand on their own. Mirrors the
+  welcome-narration block exactly. AIEngine is only constructed when AI is on.
+
+Tests: digest is body-free + carries subjects + capped; `propose_batches` applies
+text / drops unknown keys / ignores blank+non-string / strips fence / empty
+short-circuits; mock overlay; and route-level — overlays when AI on, degrades on
+error, never constructs AIEngine when AI off.
