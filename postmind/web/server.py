@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from postmind import __version__
@@ -4304,13 +4304,10 @@ async def agent_action_confirm(request: Request):
 
 @app.get("/agent/review/{token}")
 async def agent_review_get(token: str):
-    from fastapi import HTTPException
-    from fastapi.responses import JSONResponse
-
-    from postmind.core.sender_stats import _is_sensitive_domain
+    from postmind.core.sender_stats import is_sensitive_sender
 
     entry = _review_get(token)
-    if not entry:
+    if not entry or entry["account_email"] != _get_web_account():
         raise HTTPException(status_code=404, detail="This review expired or was not found.")
 
     by_sender: dict[str, dict] = {}
@@ -4318,13 +4315,12 @@ async def agent_review_get(token: str):
         sender = e["sender_email"]
         g = by_sender.get(sender)
         if g is None:
-            domain = sender.split("@")[-1] if "@" in sender else sender
             g = by_sender[sender] = {
                 "sender_email": sender,
                 "sender_name": e.get("sender_name") or sender,
                 "count": 0,
                 "size_bytes": 0,
-                "sensitive": _is_sensitive_domain(domain),
+                "sensitive": is_sensitive_sender(sender, e.get("sender_name") or ""),
                 "emails": [],
             }
         g["count"] += 1

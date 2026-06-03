@@ -178,6 +178,7 @@ def test_get_review_groups_and_flags_sensitive(monkeypatch, shared_db):
     data = resp.json()
     assert data["total_count"] == 3
     assert data["description"] == "old stuff"
+    assert data["groups"][0]["sender_email"] == "news@promo.com"
     groups = {g["sender_email"]: g for g in data["groups"]}
     assert groups["news@promo.com"]["count"] == 2
     assert len(groups["news@promo.com"]["emails"]) == 2
@@ -191,3 +192,10 @@ def test_get_review_unknown_token_404(monkeypatch, shared_db):
     monkeypatch.setattr(server, "_get_web_account", lambda: "me@example.com")
     client = TestClient(server.app)
     assert client.get("/agent/review/nope").status_code == 404
+
+
+def test_is_sensitive_sender_uses_authoritative_keywords():
+    from postmind.core.sender_stats import is_sensitive_sender
+
+    assert is_sensitive_sender("alerts@chase.com") is True
+    assert is_sensitive_sender("news@promo.com") is False

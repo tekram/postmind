@@ -398,6 +398,14 @@ def classify_sender_risk(g: SenderGroup) -> str:
     return "review"
 
 
+def is_sensitive_sender(sender_email: str, sender_name: str = "") -> bool:
+    """Domain/name-level sensitive check matching classify_sender_risk's
+    sensitive rule — for callers that have an address but no SenderGroup."""
+    domain = sender_email.split("@")[-1] if "@" in sender_email else sender_email
+    combined = f"{domain} {sender_name or ''} {sender_email}".lower()
+    return any(kw in combined for kw in _SENSITIVE_DOMAIN_KEYWORDS)
+
+
 def sender_risk_tier_from_conf(g: SenderGroup, conf: int) -> tuple[str, str, str]:
     """
     Return (label, icon, color) using sender classification + explicit conf value.
