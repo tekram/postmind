@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
@@ -4343,6 +4343,39 @@ async def agent_review_get(token: str):
             "groups": groups,
         }
     )
+
+
+@app.post("/agent/review/{token}/confirm")
+async def agent_review_confirm(token: str, ids: list[str] = Form(default=[])):
+    from postmind.core.storage import UndoLogRepo, get_session
+
+    entry = _review_get(token)
+    if not entry or entry["account_email"] != _get_web_account():
+        raise HTTPException(status_code=404, detail="This review expired or was not found.")
+
+    account_email = entry["account_email"]
+    cached_ids = {e["id"] for e in entry["emails"]}
+    # Trust boundary: only ids that were server-resolved into this token may run.
+    selected = [i for i in (ids or []) if i in cached_ids]
+    if not selected:
+        return JSONResponse({"trashed": 0, "undo_href": "/undo"})
+
+    def _work() -> int:
+        provider = _build_provider()
+        UndoLogRepo(get_session()).record(
+            account_email=account_email,
+            operation="trash",
+            message_ids=selected,
+            description=f"Trashed {len(selected)} emails from review: {entry['description']}",
+            metadata={"source": "agent_review", "description": entry["description"]},
+        )
+        provider.batch_trash(selected)
+        return len(selected)
+
+    count = await asyncio.get_event_loop().run_in_executor(_executor, _work)
+    # Drop the consumed ids so a re-submit can't double-trash.
+    entry["emails"] = [e for e in entry["emails"] if e["id"] not in set(selected)]
+    return JSONResponse({"trashed": count, "undo_href": "/undo"})
 
 
 # ── Unsubscribe (real engine, optional back-catalog trash) ─────────────────────

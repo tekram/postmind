@@ -199,3 +199,41 @@ def test_is_sensitive_sender_uses_authoritative_keywords():
 
     assert is_sensitive_sender("alerts@chase.com") is True
     assert is_sensitive_sender("news@promo.com") is False
+
+
+def test_confirm_trashes_subset_and_writes_undo(monkeypatch, shared_db):
+    from postmind.web import server
+    from postmind.core.storage import UndoLogRepo, get_session
+
+    account = "me@example.com"
+    monkeypatch.setattr(server, "_get_web_account", lambda: account)
+    emails = [
+        {"id": "m1", "subject": "A", "sender_email": "news@promo.com", "sender_name": "Promo", "size_estimate": 1, "internal_date": 1, "date": "x"},
+        {"id": "m2", "subject": "B", "sender_email": "news@promo.com", "sender_name": "Promo", "size_estimate": 1, "internal_date": 1, "date": "x"},
+    ]
+    token = server._review_put(account, "old", emails)
+
+    trashed_ids = {}
+    prov = MagicMock()
+    prov.batch_trash.side_effect = lambda ids: trashed_ids.setdefault("ids", list(ids)) or len(ids)
+    monkeypatch.setattr(server, "_build_provider", lambda: prov)
+
+    client = TestClient(server.app)
+    # Submit one real id plus one foreign id that must be rejected.
+    resp = client.post(f"/agent/review/{token}/confirm", data={"ids": ["m1", "evil-id"]})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["trashed"] == 1
+    assert data["undo_href"] == "/undo"
+    assert trashed_ids["ids"] == ["m1"]  # foreign id dropped
+
+    logs = UndoLogRepo(get_session()).list_recent(account, limit=5)
+    assert any(set(l.message_ids) == {"m1"} for l in logs)
+
+
+def test_confirm_unknown_token_404(monkeypatch, shared_db):
+    from postmind.web import server
+
+    monkeypatch.setattr(server, "_get_web_account", lambda: "me@example.com")
+    client = TestClient(server.app)
+    assert client.post("/agent/review/nope/confirm", data={"ids": ["m1"]}).status_code == 404
