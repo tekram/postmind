@@ -230,6 +230,11 @@ def test_confirm_trashes_subset_and_writes_undo(monkeypatch, shared_db):
     logs = UndoLogRepo(get_session()).list_recent(account, limit=5)
     assert any(set(l.message_ids) == {"m1"} for l in logs)
 
+    # The un-submitted id survives in the cache (so it isn't silently lost),
+    # while the trashed id is consumed to prevent a double-trash on re-submit.
+    remaining = {e["id"] for e in server._REVIEW_CACHE[token]["emails"]}
+    assert remaining == {"m2"}
+
 
 def test_confirm_unknown_token_404(monkeypatch, shared_db):
     from postmind.web import server

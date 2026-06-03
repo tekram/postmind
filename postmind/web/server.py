@@ -4360,6 +4360,13 @@ async def agent_review_confirm(token: str, ids: list[str] = Form(default=[])):
     if not selected:
         return JSONResponse({"trashed": 0, "undo_href": "/undo"})
 
+    # Consume the selected ids from the cache *before* awaiting the executor.
+    # This runs without an intervening await, so it is atomic against other
+    # coroutines and closes the double-trash window if the same token is
+    # confirmed twice (e.g. a double-click or a duplicate request).
+    consumed = set(selected)
+    entry["emails"] = [e for e in entry["emails"] if e["id"] not in consumed]
+
     def _work() -> int:
         provider = _build_provider()
         UndoLogRepo(get_session()).record(
@@ -4372,9 +4379,13 @@ async def agent_review_confirm(token: str, ids: list[str] = Form(default=[])):
         provider.batch_trash(selected)
         return len(selected)
 
-    count = await asyncio.get_event_loop().run_in_executor(_executor, _work)
-    # Drop the consumed ids so a re-submit can't double-trash.
-    entry["emails"] = [e for e in entry["emails"] if e["id"] not in set(selected)]
+    try:
+        count = await asyncio.get_event_loop().run_in_executor(_executor, _work)
+    except Exception as exc:
+        # Match the other destructive endpoints: surface a graceful error rather
+        # than a 500. The undo log (if written) points at emails still in the
+        # inbox, so an undo of it is a harmless no-op.
+        return JSONResponse({"trashed": 0, "error": str(exc)}, status_code=500)
     return JSONResponse({"trashed": count, "undo_href": "/undo"})
 
 
