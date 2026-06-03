@@ -3963,6 +3963,30 @@ def config_cmd(
 
 
 @app.command()
+def mcp(
+    account: str = typer.Option(
+        None, "--account", "-a", help="Account email to bind the server to (default: active)."
+    ),
+):
+    """Run postmind as an MCP server (stdio) so any MCP host can drive your inbox.
+
+    Exposes the agent's READ tools plus stage→confirm WRITE tools over MCP, with
+    the same safety boundary as the Super Agent: WRITE tools only stage an action
+    and return a confirm token; nothing changes until the host calls
+    confirm_action after explicit user approval. Targets are server-resolved.
+
+    Add to an MCP host (e.g. Claude Desktop / Claude Agent SDK) as a stdio server
+    with command "postmind", args ["mcp"]. Requires the 'mcp' extra:
+    pip install 'postmind[mcp]'.
+    """
+    from postmind.config import get_active_account
+    from postmind.core.agent_mcp import main as _mcp_main
+
+    email = account or get_active_account()
+    _mcp_main(account_email=email)
+
+
+@app.command()
 def privacy():
     """Show what data postmind stores and whether any leaves your machine."""
     from postmind.config import (

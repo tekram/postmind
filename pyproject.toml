@@ -51,6 +51,8 @@ Homepage = "https://github.com/tekram/postmind"
 [project.optional-dependencies]
 # Headless browser support for unsubscribe fallback
 headless = ["playwright>=1.44.0"]
+# MCP server: expose postmind's agent tools to any MCP host (postmind mcp)
+mcp = ["mcp>=1.2.0"]
 # Local web UI: postmind serve
 web = [
     "fastapi>=0.110.0",

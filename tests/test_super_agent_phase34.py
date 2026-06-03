@@ -39,10 +39,11 @@ def test_local_tool_use_loop_runs_tool_then_returns_text():
     eng._ollama_model = "qwen2.5:32b"
     eng._ollama_headers = {}
 
+    # OpenAI-compatible /v1/chat/completions response shape.
     r1 = MagicMock(raise_for_status=lambda: None)
-    r1.json = lambda: {"message": {"content": "", "tool_calls": [{"function": {"name": "get_inbox_overview", "arguments": "{}"}}]}}
+    r1.json = lambda: {"choices": [{"message": {"content": "", "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "get_inbox_overview", "arguments": "{}"}}]}}]}
     r2 = MagicMock(raise_for_status=lambda: None)
-    r2.json = lambda: {"message": {"content": "You have 2 senders."}}
+    r2.json = lambda: {"choices": [{"message": {"content": "You have 2 senders."}}]}
     seq = [r1, r2]
     invoked = []
 

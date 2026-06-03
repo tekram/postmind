@@ -603,16 +603,22 @@ then the body. No preamble, no sign-off commentary.
     def _chat_local_tools(
         self, messages, system, tools, tool_executor, max_tokens, max_tool_iterations
     ) -> str:
-        """Tool-use loop against Ollama's /api/chat ``tools`` API.
+        """Tool-use loop against the local model's OpenAI-compatible API.
 
-        Converts our Anthropic-style tool schemas to Ollama's function format,
+        Uses ``/v1/chat/completions`` (Ollama, llama.cpp, LM Studio, vLLM all
+        expose it) rather than Ollama's native ``/api/chat``: the OpenAI tool
+        protocol is the one local tool-calling models are actually tuned on, so it
+        is markedly more reliable across models (qwen3, llama3.3, gpt-oss, …). For
+        best results point ``ollama_model`` at a strong tool-caller.
+
+        Converts our Anthropic-style tool schemas to OpenAI's function format,
         dispatches ``tool_calls`` through ``tool_executor``, and loops. Raises on
         any transport/protocol error so :meth:`chat` can fall back to plain
-        conversation (Ollama tool-use support varies by model).
+        conversation (local tool-use support still varies by model).
         """
         import httpx
 
-        ollama_tools = [
+        oa_tools = [
             {
                 "type": "function",
                 "function": {
@@ -623,37 +629,60 @@ then the body. No preamble, no sign-off commentary.
             }
             for t in tools
         ]
+        # Reuse the same Bearer auth header set up for /api/chat (cloud Ollama).
+        headers = self._ollama_headers
         convo = [{"role": "system", "content": system}]
         convo += [{"role": m["role"], "content": m["content"]} for m in messages]
 
         for _ in range(max_tool_iterations):
             resp = httpx.post(
-                f"{self._ollama_url}/api/chat",
-                headers=self._ollama_headers,
-                json={"model": self._ollama_model, "messages": convo, "tools": ollama_tools, "stream": False},
+                f"{self._ollama_url}/v1/chat/completions",
+                headers=headers,
+                json={
+                    "model": self._ollama_model,
+                    "messages": convo,
+                    "tools": oa_tools,
+                    "tool_choice": "auto",
+                    "stream": False,
+                    "max_tokens": max_tokens,
+                },
                 timeout=180.0,
             )
             resp.raise_for_status()
-            msg = resp.json()["message"]
+            msg = resp.json()["choices"][0]["message"]
             tool_calls = msg.get("tool_calls") or []
             if not tool_calls:
                 return (msg.get("content") or "").strip()
 
-            convo.append({"role": "assistant", "content": msg.get("content", ""), "tool_calls": tool_calls})
+            # Echo the assistant turn (with its tool_calls) verbatim, then answer
+            # each call with a matching tool_call_id — the OpenAI message shape.
+            convo.append(
+                {
+                    "role": "assistant",
+                    "content": msg.get("content") or "",
+                    "tool_calls": tool_calls,
+                }
+            )
             for tc in tool_calls:
                 fn = tc.get("function", {})
                 name = fn.get("name", "")
                 args = fn.get("arguments", {})
                 if isinstance(args, str):
                     try:
-                        args = json.loads(args)
+                        args = json.loads(args or "{}")
                     except Exception:
                         args = {}
                 try:
                     result = tool_executor(name, args) if tool_executor else "Tool unavailable."
                 except Exception as exc:
                     result = f"Error running {name}: {exc}"
-                convo.append({"role": "tool", "content": str(result)})
+                convo.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.get("id", ""),
+                        "content": str(result),
+                    }
+                )
 
         return "I wasn't able to finish that — could you rephrase or break it into smaller steps?"
 
