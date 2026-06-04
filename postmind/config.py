@@ -126,6 +126,11 @@ class Settings(BaseSettings):
     # Off by default; everything stays undoable from /undo.
     agent_autopilot: bool = False
 
+    # Background sync / daemon
+    auto_start_daemon: bool = True  # Start heartbeat daemon automatically on `postmind serve`
+    daemon_interval_minutes: int = 30  # How often the daemon polls for new mail
+    auto_sync_on_first_run: bool = True  # Kick off initial inbox sync for accounts never synced
+
     # Rate limiting
     gmail_batch_size: int = 50  # Max messages per Gmail batch request
     ai_max_classify_batch: int = 20  # Emails per AI classification call

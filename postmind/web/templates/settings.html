@@ -27,6 +27,12 @@
     <p class="text-success text-sm font-medium">Super Agent settings updated.</p>
   </div>
   {% endif %}
+  {% if success == 'daemon' %}
+  <div class="bg-success-bg border border-success-border rounded-card p-4 mb-6 flex items-center gap-2.5">
+    <svg class="w-4 h-4 shrink-0 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+    <p class="text-success text-sm font-medium">Background sync settings updated. Restart the server for changes to take effect.</p>
+  </div>
+  {% endif %}
   {% if success == 'clear_data' %}
   <div class="bg-success-bg border border-success-border rounded-card p-4 mb-6 flex items-center gap-2.5">
     <svg class="w-4 h-4 shrink-0 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
@@ -280,6 +286,59 @@
           </div>
         </label>
         <button type="submit" class="pm-btn mt-3">Save autopilot setting</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Background sync -->
+  <div class="pm-card mb-5">
+    <div class="px-5 py-4 border-b border-hairline">
+      <div class="flex items-center gap-2.5">
+        <!-- Lucide: refresh-cw -->
+        <svg class="w-4 h-4 shrink-0 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M23 4v6h-6M1 20v-6h6"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+        </svg>
+        <p class="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-tertiary">Automation</p>
+      </div>
+      <h2 class="font-semibold text-ink mt-2">Background Sync</h2>
+      <p class="text-ink-subtle text-xs mt-0.5">Keep your inbox cache fresh automatically. Takes effect on next server restart.</p>
+    </div>
+    <div class="p-5">
+      <form action="/settings/daemon" method="POST" class="space-y-4">
+        <label class="flex items-start gap-3 cursor-pointer">
+          <input type="checkbox" name="auto_start_daemon" {% if auto_start_daemon %}checked{% endif %}
+                 class="mt-0.5 rounded text-accent">
+          <div>
+            <p class="text-sm font-medium text-ink">Auto-start background daemon</p>
+            <p class="text-xs text-ink-subtle mt-0.5">
+              Start the heartbeat daemon automatically when <code class="font-mono bg-surface-2 px-1 rounded-chip">postmind serve</code> launches.
+              When off, start it manually from the <a href="/watch" class="text-accent hover:text-accent-hover underline">Watch</a> page.
+            </p>
+          </div>
+        </label>
+
+        <label class="flex items-start gap-3 cursor-pointer">
+          <input type="checkbox" name="auto_sync_on_first_run" {% if auto_sync_on_first_run %}checked{% endif %}
+                 class="mt-0.5 rounded text-accent">
+          <div>
+            <p class="text-sm font-medium text-ink">Auto-sync inbox on first run</p>
+            <p class="text-xs text-ink-subtle mt-0.5">
+              Automatically sync the inbox (up to 1,000 messages) if the account has never been synced.
+              Runs silently in the background — no progress UI.
+            </p>
+          </div>
+        </label>
+
+        <div class="flex items-center gap-3">
+          <label class="text-sm text-ink-muted shrink-0">Poll interval</label>
+          <input type="number" name="daemon_interval_minutes"
+                 value="{{ daemon_interval_minutes }}" min="1" max="1440"
+                 class="pm-input w-20 text-sm text-center tabular">
+          <span class="text-sm text-ink-muted">minutes</span>
+        </div>
+
+        <button type="submit" class="pm-btn">Save sync settings</button>
       </form>
     </div>
   </div>

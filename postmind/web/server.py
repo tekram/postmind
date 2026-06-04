@@ -7,6 +7,7 @@ import json
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -21,7 +22,72 @@ from postmind.config import CREDENTIALS_PATH, DATA_DIR, TOKEN_PATH, get_settings
 _THIS_DIR = Path(__file__).parent
 _TEMPLATES_DIR = _THIS_DIR / "templates"
 
-app = FastAPI(title="postmind", docs_url=None, redoc_url=None)
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Auto-start daemon and trigger initial sync based on settings."""
+    import logging as _log
+    import threading as _t
+
+    _startup_log = _log.getLogger(__name__)
+    s = get_settings()
+
+    if s.auto_start_daemon:
+        # _watch_thread/_watch_stop_event/_watch_interval are module globals
+        # defined in the Watch daemon section below — they exist at call time.
+        global _watch_thread, _watch_interval  # type: ignore[name-defined]
+        _watch_interval = s.daemon_interval_minutes
+        if not (_watch_thread and _watch_thread.is_alive()):
+            _watch_stop_event.clear()  # type: ignore[name-defined]
+
+            def _run_daemon() -> None:
+                from postmind.core.daemon import start_daemon_background
+
+                start_daemon_background(
+                    stop_event=_watch_stop_event,  # type: ignore[name-defined]
+                    interval_minutes=_watch_interval,
+                )
+
+            _watch_thread = _t.Thread(target=_run_daemon, daemon=True, name="postmind-watch")
+            _watch_thread.start()
+            _startup_log.info("postmind: daemon auto-started (interval=%dm)", _watch_interval)
+
+    if s.auto_sync_on_first_run:
+
+        def _maybe_sync() -> None:
+            try:
+                from postmind.config import get_active_account
+                from postmind.core.storage import AccountRepo, get_session
+
+                email = get_active_account()
+                if not email:
+                    return
+                row = AccountRepo(get_session()).get(email)
+                if row is None or row.last_synced_at is None:
+                    task_id = f"auto-{uuid.uuid4().hex[:8]}"
+                    _sync_tasks[task_id] = {  # type: ignore[name-defined]
+                        "status": "running",
+                        "step": 0,
+                        "message": "Auto-syncing inbox…",
+                        "count": 0,
+                        "total": 0,
+                        "error": None,
+                        "started_at": time.time(),
+                        "next_url": "/stats",
+                        "detail": "",
+                        "complete": False,
+                    }
+                    _startup_log.info("postmind: auto-sync started for %s", email)
+                    _sync_worker(task_id, "inbox", 1000, False)  # type: ignore[name-defined]
+            except Exception as exc:
+                _startup_log.warning("postmind: auto-sync failed: %s", exc)
+
+        _t.Thread(target=_maybe_sync, daemon=True, name="postmind-auto-sync").start()
+
+    yield
+
+
+app = FastAPI(title="postmind", docs_url=None, redoc_url=None, lifespan=_lifespan)
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 
@@ -1640,6 +1706,9 @@ async def settings_page(request: Request):
                 "chat_cloud_model": s.chat_cloud_model or s.ai_model,
                 "chat_ollama_model": s.chat_ollama_model or s.ollama_model,
                 "agent_autopilot": s.agent_autopilot,
+                "auto_start_daemon": s.auto_start_daemon,
+                "daemon_interval_minutes": s.daemon_interval_minutes,
+                "auto_sync_on_first_run": s.auto_sync_on_first_run,
             }
         )
     except Exception:
@@ -1659,6 +1728,9 @@ async def settings_page(request: Request):
                 "chat_cloud_model": "claude-sonnet-4-6",
                 "chat_ollama_model": "qwen2.5:32b",
                 "agent_autopilot": False,
+                "auto_start_daemon": True,
+                "daemon_interval_minutes": 30,
+                "auto_sync_on_first_run": True,
             }
         )
 
@@ -2404,6 +2476,23 @@ async def update_agent_settings(request: Request):
     return RedirectResponse("/settings?success=agent", status_code=303)
 
 
+@app.post("/settings/daemon")
+async def update_daemon_settings(request: Request):
+    """Configure background sync / daemon behaviour."""
+    form = await request.form()
+    auto_daemon = form.get("auto_start_daemon") == "on"
+    auto_sync = form.get("auto_sync_on_first_run") == "on"
+    interval = max(1, int(form.get("daemon_interval_minutes") or "30"))
+    _write_env(
+        {
+            "POSTMIND_AUTO_START_DAEMON": "true" if auto_daemon else "false",
+            "POSTMIND_AUTO_SYNC_ON_FIRST_RUN": "true" if auto_sync else "false",
+            "POSTMIND_DAEMON_INTERVAL_MINUTES": str(interval),
+        }
+    )
+    return RedirectResponse("/settings?success=daemon", status_code=303)
+
+
 # ── Protected senders ─────────────────────────────────────────────────────────
 
 
@@ -2604,6 +2693,190 @@ _DEEP_RANGES = [
 ]
 
 
+def _sync_worker(task_id: str, scope: str, limit: int | None, deep: bool) -> None:
+    """Core sync logic — runs in a thread pool. State is tracked via _sync_tasks[task_id]."""
+    import json as _json
+
+    from sqlalchemy import select as _select
+
+    from postmind.core.gmail_client import GmailClient
+    from postmind.core.storage import (
+        AccountRepo,
+        EmailRecord,
+        EmailRepo,
+        UndoLogRepo,
+        get_session,
+    )
+    from postmind.core.storage import EmailRecord as _ER
+
+    state = _sync_tasks[task_id]
+    try:
+        client = GmailClient()
+        profile = client.get_profile()
+        account_email = profile.get("emailAddress", "")
+        mailbox_total = profile.get("messagesTotal", 0)
+        state["message"] = f"Connected to {account_email}"
+        state["step"] = 1
+
+        base_query = "in:anywhere -in:trash -in:spam" if scope == "anywhere" else "in:inbox"
+        session = get_session()
+        repo = EmailRepo(session)
+        chunk_size = 50
+
+        # Ensure the account exists in the DB so update_last_synced (called
+        # per chunk below) actually records the timestamp instead of
+        # silently no-opping on a missing row.
+        if account_email:
+            try:
+                AccountRepo(session).register(account_email)
+            except Exception:
+                pass
+
+        # Load existing IDs once for dedup across all ranges
+        existing_ids: set[str] = set(
+            session.execute(_select(_ER.gmail_id).where(_ER.account_email == account_email))
+            .scalars()
+            .all()
+        )
+
+        ranges = _DEEP_RANGES if deep else [("", "")]
+        # Deep sync means "get everything" — never let the numeric limit
+        # truncate a date range, or large ranges (e.g. 50k+ in 10y+) would
+        # be silently capped to the N most-recent emails. The limit only
+        # caps quick (non-deep) syncs.
+        range_limit = None if deep else limit
+        total_saved = 0
+        total_skipped = 0
+        total_new = 0
+        total_failed = 0
+        found_ids: set[str] = set()
+
+        for range_filter, range_label in ranges:
+            if range_filter:
+                q = f"{base_query} {range_filter}"
+                state["message"] = f"Fetching IDs [{range_label}]…"
+            else:
+                q = base_query
+
+            try:
+                ids = client.list_message_ids(query=q, max_results=range_limit)
+            except Exception as exc:
+                state["message"] = f"Warning: could not fetch IDs for {range_label}: {exc}"
+                continue
+
+            if not ids:
+                continue
+
+            found_ids.update(ids)
+            new_ids = [i for i in ids if i not in existing_ids]
+            skipped = len(ids) - len(new_ids)
+            total_skipped += skipped
+            total_new += len(new_ids)
+            # Drive the progress bar: how many new emails we intend to fetch.
+            state["total"] = total_new
+
+            range_note = f" [{range_label}]" if deep else ""
+            state["message"] = f"Found {len(ids):,}{range_note} — syncing {len(new_ids):,} new…"
+            state["step"] = 2
+
+            for i in range(0, len(new_ids), chunk_size):
+                chunk_ids = new_ids[i : i + chunk_size]
+                try:
+                    messages = client.get_messages_metadata_batch(chunk_ids)
+                except Exception:
+                    time.sleep(2)
+                    try:
+                        messages = client.get_messages_metadata_batch(chunk_ids)
+                    except Exception:
+                        total_failed += len(chunk_ids)
+                        continue
+                records = [
+                    EmailRecord(
+                        account_email=account_email,
+                        gmail_id=msg.id,
+                        thread_id=msg.thread_id,
+                        subject=msg.headers.subject,
+                        sender_email=msg.sender_email,
+                        sender_name=msg.sender_name,
+                        snippet=msg.snippet or "",
+                        label_ids_json=_json.dumps(msg.label_ids),
+                        internal_date=msg.internal_date,
+                        size_estimate=msg.size_estimate,
+                        is_unread=msg.is_unread,
+                        is_inbox=msg.is_inbox,
+                        list_unsubscribe=msg.headers.list_unsubscribe or "",
+                    )
+                    for msg in messages
+                ]
+                repo.upsert_many(records)
+                # Stamp freshness as we go, not just at the end — a large
+                # mailbox sync gets rate-limited / interrupted, and we want
+                # the cache to still report when it was last touched.
+                try:
+                    AccountRepo(session).update_last_synced(account_email)
+                except Exception:
+                    pass
+                existing_ids.update(r.gmail_id for r in records)
+                total_saved += len(records)
+                # Items the batch silently dropped (per-message API errors).
+                total_failed += len(chunk_ids) - len(records)
+                state["count"] = total_saved
+                state["message"] = (
+                    f"Synced {total_saved:,} emails{range_note}…"
+                    if not deep
+                    else f"Synced {total_saved:,} total — current batch {range_label}…"
+                )
+                state["step"] = 3
+
+        UndoLogRepo(session).purge_expired()
+
+        # Record the sync timestamp so re-syncs and the daemon can reason
+        # about freshness.
+        try:
+            AccountRepo(session).update_last_synced(account_email)
+        except Exception:
+            pass
+
+        elapsed = int(time.time() - state["started_at"])
+        state["status"] = "done"
+        skip_note = f", {total_skipped:,} already cached" if total_skipped else ""
+        state["message"] = f"Synced {total_saved:,} emails in {elapsed}s{skip_note}"
+        state["count"] = total_saved
+
+        # Honest completeness check: did we cache everything we listed for
+        # this scope? Surface the gap instead of always claiming "up to date".
+        cached_in_scope = len(found_ids & existing_ids)
+        gap = len(found_ids) - cached_in_scope
+        if total_failed:
+            state["detail"] = (
+                f"{total_failed:,} emails could not be fetched — run sync again to retry."
+            )
+            state["complete"] = False
+        elif gap > 0:
+            state["detail"] = f"{gap:,} emails still not cached — re-run sync to finish."
+            state["complete"] = False
+        elif not deep and mailbox_total and len(existing_ids) < mailbox_total * 0.9:
+            # Quick sync only covered part of the mailbox.
+            state["detail"] = (
+                f"{len(existing_ids):,} of ~{mailbox_total:,} cached. "
+                "For your full mailbox, run a Deep sync of All mail."
+            )
+            state["complete"] = False
+        else:
+            state["detail"] = (
+                f"Local cache is up to date — {len(existing_ids):,} emails cached."
+            )
+            state["complete"] = True
+
+    except Exception as exc:
+        state["status"] = "error"
+        state["error"] = str(exc)
+        state["message"] = str(exc)
+    finally:
+        global _active_sync_task_id
+        _active_sync_task_id = None
+
+
 @app.post("/sync/start", response_class=HTMLResponse)
 async def sync_start(request: Request):
     form = await request.form()
@@ -2632,193 +2905,7 @@ async def sync_start(request: Request):
         "complete": True,
     }
     _active_sync_task_id = task_id
-
-    def _run():
-        import json as _json
-        import time as _time
-
-        from sqlalchemy import select as _select
-
-        from postmind.core.gmail_client import GmailClient
-        from postmind.core.storage import (
-            AccountRepo,
-            EmailRecord,
-            EmailRepo,
-            UndoLogRepo,
-            get_session,
-        )
-        from postmind.core.storage import EmailRecord as _ER
-
-        state = _sync_tasks[task_id]
-        try:
-            client = GmailClient()
-            profile = client.get_profile()
-            account_email = profile.get("emailAddress", "")
-            mailbox_total = profile.get("messagesTotal", 0)
-            state["message"] = f"Connected to {account_email}"
-            state["step"] = 1
-
-            base_query = "in:anywhere -in:trash -in:spam" if scope == "anywhere" else "in:inbox"
-            session = get_session()
-            repo = EmailRepo(session)
-            chunk_size = 50
-
-            # Ensure the account exists in the DB so update_last_synced (called
-            # per chunk below) actually records the timestamp instead of
-            # silently no-opping on a missing row.
-            if account_email:
-                try:
-                    AccountRepo(session).register(account_email)
-                except Exception:
-                    pass
-
-            # Load existing IDs once for dedup across all ranges
-            existing_ids: set[str] = set(
-                session.execute(_select(_ER.gmail_id).where(_ER.account_email == account_email))
-                .scalars()
-                .all()
-            )
-
-            ranges = _DEEP_RANGES if deep else [("", "")]
-            # Deep sync means "get everything" — never let the numeric limit
-            # truncate a date range, or large ranges (e.g. 50k+ in 10y+) would
-            # be silently capped to the N most-recent emails. The limit only
-            # caps quick (non-deep) syncs.
-            range_limit = None if deep else limit
-            total_saved = 0
-            total_skipped = 0
-            total_new = 0
-            total_failed = 0
-            found_ids: set[str] = set()
-
-            for range_filter, range_label in ranges:
-                if range_filter:
-                    q = f"{base_query} {range_filter}"
-                    state["message"] = f"Fetching IDs [{range_label}]…"
-                else:
-                    q = base_query
-
-                try:
-                    ids = client.list_message_ids(query=q, max_results=range_limit)
-                except Exception as exc:
-                    state["message"] = f"Warning: could not fetch IDs for {range_label}: {exc}"
-                    continue
-
-                if not ids:
-                    continue
-
-                found_ids.update(ids)
-                new_ids = [i for i in ids if i not in existing_ids]
-                skipped = len(ids) - len(new_ids)
-                total_skipped += skipped
-                total_new += len(new_ids)
-                # Drive the progress bar: how many new emails we intend to fetch.
-                state["total"] = total_new
-
-                range_note = f" [{range_label}]" if deep else ""
-                state["message"] = f"Found {len(ids):,}{range_note} — syncing {len(new_ids):,} new…"
-                state["step"] = 2
-
-                for i in range(0, len(new_ids), chunk_size):
-                    chunk_ids = new_ids[i : i + chunk_size]
-                    try:
-                        messages = client.get_messages_metadata_batch(chunk_ids)
-                    except Exception:
-                        _time.sleep(2)
-                        try:
-                            messages = client.get_messages_metadata_batch(chunk_ids)
-                        except Exception:
-                            total_failed += len(chunk_ids)
-                            continue
-                    records = [
-                        EmailRecord(
-                            account_email=account_email,
-                            gmail_id=msg.id,
-                            thread_id=msg.thread_id,
-                            subject=msg.headers.subject,
-                            sender_email=msg.sender_email,
-                            sender_name=msg.sender_name,
-                            snippet=msg.snippet or "",
-                            label_ids_json=_json.dumps(msg.label_ids),
-                            internal_date=msg.internal_date,
-                            size_estimate=msg.size_estimate,
-                            is_unread=msg.is_unread,
-                            is_inbox=msg.is_inbox,
-                            list_unsubscribe=msg.headers.list_unsubscribe or "",
-                        )
-                        for msg in messages
-                    ]
-                    repo.upsert_many(records)
-                    # Stamp freshness as we go, not just at the end — a large
-                    # mailbox sync gets rate-limited / interrupted, and we want
-                    # the cache to still report when it was last touched.
-                    try:
-                        AccountRepo(session).update_last_synced(account_email)
-                    except Exception:
-                        pass
-                    existing_ids.update(r.gmail_id for r in records)
-                    total_saved += len(records)
-                    # Items the batch silently dropped (per-message API errors).
-                    total_failed += len(chunk_ids) - len(records)
-                    state["count"] = total_saved
-                    state["message"] = (
-                        f"Synced {total_saved:,} emails{range_note}…"
-                        if not deep
-                        else f"Synced {total_saved:,} total — current batch {range_label}…"
-                    )
-                    state["step"] = 3
-
-            UndoLogRepo(session).purge_expired()
-
-            # Record the sync timestamp so re-syncs and the daemon can reason
-            # about freshness.
-            try:
-                from postmind.core.storage import AccountRepo
-
-                AccountRepo(session).update_last_synced(account_email)
-            except Exception:
-                pass
-
-            elapsed = int(time.time() - state["started_at"])
-            state["status"] = "done"
-            skip_note = f", {total_skipped:,} already cached" if total_skipped else ""
-            state["message"] = f"Synced {total_saved:,} emails in {elapsed}s{skip_note}"
-            state["count"] = total_saved
-
-            # Honest completeness check: did we cache everything we listed for
-            # this scope? Surface the gap instead of always claiming "up to date".
-            cached_in_scope = len(found_ids & existing_ids)
-            gap = len(found_ids) - cached_in_scope
-            if total_failed:
-                state["detail"] = (
-                    f"{total_failed:,} emails could not be fetched — run sync again to retry."
-                )
-                state["complete"] = False
-            elif gap > 0:
-                state["detail"] = f"{gap:,} emails still not cached — re-run sync to finish."
-                state["complete"] = False
-            elif not deep and mailbox_total and len(existing_ids) < mailbox_total * 0.9:
-                # Quick sync only covered part of the mailbox.
-                state["detail"] = (
-                    f"{len(existing_ids):,} of ~{mailbox_total:,} cached. "
-                    "For your full mailbox, run a Deep sync of All mail."
-                )
-                state["complete"] = False
-            else:
-                state["detail"] = (
-                    f"Local cache is up to date — {len(existing_ids):,} emails cached."
-                )
-                state["complete"] = True
-
-        except Exception as exc:
-            state["status"] = "error"
-            state["error"] = str(exc)
-            state["message"] = str(exc)
-        finally:
-            global _active_sync_task_id
-            _active_sync_task_id = None
-
-    _executor.submit(_run)
+    _executor.submit(_sync_worker, task_id, scope, limit, deep)
 
     # Return the polling fragment immediately
     html = f"""

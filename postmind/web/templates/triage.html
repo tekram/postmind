@@ -80,6 +80,9 @@
   </div>
 
   {% else %}
+  <!-- Rule proposals (HTMX-loaded) -->
+  <div hx-get="/rules/proposals" hx-trigger="load" hx-swap="innerHTML" class="max-w-4xl mb-4"></div>
+
   <!-- Progress banner while pending rows are still being classified -->
   <div id="triage-progress" class="hidden mb-4 flex items-center gap-2 text-sm text-ink-subtle max-w-4xl">
     <svg class="animate-spin h-4 w-4 text-accent" viewBox="0 0 24 24" fill="none">
