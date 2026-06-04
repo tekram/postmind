@@ -55,7 +55,8 @@ READ_TOOLS: list[dict] = [
             "promos, updates regardless of Gmail's category tab). "
             "For promotional-only use 'category:promotions'. "
             "For attachments use 'has:attachment larger:1M'. "
-            "Do NOT include date filters unless the user asked — omitting them finds more results."
+            "Do NOT include date filters unless the user asked — omitting them finds more results. "
+            "Each result includes a message_id you can pass to read_email to get the full content."
         ),
         "input_schema": {
             "type": "object",
@@ -63,6 +64,22 @@ READ_TOOLS: list[dict] = [
                 "limit": {"type": "integer", "description": "How many messages to return (default 10, max 25)."},
                 "query": {"type": "string", "description": "Optional Gmail-style scope. Default searches the full inbox."},
             },
+        },
+    },
+    {
+        "name": "read_email",
+        "description": (
+            "Fetch the full content of a specific email by its message_id. "
+            "Use when the user asks to read, view, or open a specific email from a prior search result. "
+            "Returns subject, sender, date, and body text. "
+            "Always use the message_id from a prior tool result — do NOT re-query to find the email again."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "message_id": {"type": "string", "description": "The message_id returned by find_largest_messages or another search tool."},
+            },
+            "required": ["message_id"],
         },
     },
     {
@@ -332,11 +349,38 @@ def find_largest_messages(provider, query: str = "", limit: int = 10) -> str:
     if fallback_scope:
         header += f" (broadened from '{scope}' — no results there)"
     lines = [header + ":"]
-    for m in messages[:limit]:
+    for i, m in enumerate(messages[:limit], 1):
         mb = (m.size_estimate or 0) / (1024 * 1024)
         subj = (m.headers.subject or "(no subject)")[:60]
-        lines.append(f"- {mb:.1f} MB — {subj} — from {m.sender_email}")
+        lines.append(f"{i}. {mb:.1f} MB — {subj} — from {m.sender_email} [message_id: {m.id}]")
     return "\n".join(lines)
+
+
+def read_email(provider, message_id: str) -> str:
+    """Fetch the full content of a single email by its message ID."""
+    if not message_id or not message_id.strip():
+        return "No message_id provided."
+    messages = provider.get_messages_batch([message_id.strip()])
+    if not messages:
+        return f"Could not fetch email with id '{message_id}'."
+    m = messages[0]
+    parts = [
+        f"Subject: {m.headers.subject or '(no subject)'}",
+        f"From: {m.headers.from_}",
+        f"To: {m.headers.to}",
+        f"Date: {m.headers.date}",
+        f"Size: {(m.size_estimate or 0) / (1024 * 1024):.1f} MB",
+    ]
+    body = (m.body_text or "").strip()
+    if not body and m.snippet:
+        body = m.snippet
+    if body:
+        parts.append(f"\n{body[:3000]}")
+        if len(m.body_text or "") > 3000:
+            parts.append("… (truncated)")
+    else:
+        parts.append("\n(no text body)")
+    return "\n".join(parts)
 
 
 def resolve_trash_query(

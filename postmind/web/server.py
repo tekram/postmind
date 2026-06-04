@@ -99,6 +99,54 @@ _active_web_account: str | None = None  # email override set by the web UI switc
 _executor = ThreadPoolExecutor(max_workers=4)
 
 
+def _maybe_synthesize_rules(account_email: str) -> None:
+    """Check for trash-pattern candidates and synthesize rule proposals if AI is on.
+
+    Best-effort, never raises. Designed to be called in a background executor
+    thread after a trash action so it never blocks the response.
+    """
+    if not account_email or _ai_mode() == "off":
+        return
+    try:
+        from postmind.core.ai_engine import AIEngine
+        from postmind.core.storage import RuleDefinition, RuleRepo, UserActionRepo, get_session
+
+        session = get_session()
+        candidates = UserActionRepo(session).candidates_for_rule_synthesis(account_email)
+        if not candidates:
+            return
+
+        ai = AIEngine()
+        rule_repo = RuleRepo(session)
+        for c in candidates[:3]:  # at most 3 new proposals per check
+            try:
+                nl_rule = ai.synthesize_rule_from_actions(
+                    sender_email=c["sender_email"],
+                    sender_name=c["sender_name"],
+                    trash_count=c["trash_count"],
+                    sample_subjects=c["sample_subjects"],
+                )
+                rule_repo.create(
+                    RuleDefinition(
+                        account_email=account_email,
+                        name=f"Auto-trash: {c['sender_name']}",
+                        natural_language=nl_rule.natural_language,
+                        gmail_query=nl_rule.gmail_query,
+                        action=nl_rule.action,
+                        action_params_json=__import__("json").dumps(nl_rule.action_params),
+                        ai_explanation=nl_rule.explanation,
+                        is_active=False,
+                        proposed_at=__import__("datetime").datetime.now(
+                            __import__("datetime").timezone.utc
+                        ),
+                    )
+                )
+            except Exception:
+                pass  # one bad synthesis doesn't block others
+    except Exception:
+        pass
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
@@ -506,23 +554,39 @@ def _render_brief_status(brief) -> str:
 def _render_brief_links(brief, account_email: str) -> str:
     """Render the brief's identified emails as the "What needs attention" list.
 
-    Each row deep-links into Gmail's web UI for that message
-    (``…/mail/u/<account>/#all/<id>``). IMAP accounts have no web equivalent,
-    so their rows render as plain (non-link) text. When the brief stored no
-    items, renders a single calm empty-state line instead of an empty list.
+    Each row deep-links into Gmail and has inline Trash / Archive / Reply buttons.
+    IMAP accounts get plain rows (no Gmail deep-link) but still get action buttons.
     """
     import html as _html
     import json as _json
     from urllib.parse import quote as _quote
 
-    def _section(inner: str) -> str:
-        return (
-            '<div class="mt-5 pt-4 border-t border-hairline">'
-            '<p class="text-ink-subtle text-[11px] font-semibold uppercase tracking-[0.06em] mb-2">'
-            "What needs attention</p>"
-            f"{inner}"
-            "</div>"
-        )
+    # SVG icon snippets reused per row
+    _icon_external = (
+        '<svg class="w-3.5 h-3.5 shrink-0 mt-0.5 text-ink-tertiary group-hover:text-accent transition-colors" '
+        'fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">'
+        '<path stroke-linecap="round" stroke-linejoin="round" '
+        'd="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>'
+    )
+    _icon_reply = (
+        '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">'
+        '<path stroke-linecap="round" stroke-linejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6M3 10l6-6"/></svg>'
+    )
+    _icon_archive = (
+        '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">'
+        '<path stroke-linecap="round" stroke-linejoin="round" '
+        'd="M5 8h14M5 8a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v0a2 2 0 01-2 2M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"/></svg>'
+    )
+    _icon_trash = (
+        '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">'
+        '<polyline points="3 6 5 6 21 6"/>'
+        '<path stroke-linecap="round" stroke-linejoin="round" d="M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2"/></svg>'
+    )
+    _icon_spin = (
+        '<svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">'
+        '<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>'
+        '<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>'
+    )
 
     items = []
     raw = getattr(brief, "items_json", None)
@@ -531,53 +595,98 @@ def _render_brief_links(brief, account_email: str) -> str:
             items = [i for i in _json.loads(raw) if isinstance(i, dict)]
         except (ValueError, TypeError):
             items = []
+
     if not items:
-        return _section(
+        return (
+            '<div class="mt-5 pt-4 border-t border-hairline">'
+            '<p class="text-ink-subtle text-[11px] font-semibold uppercase tracking-[0.06em] mb-2">What needs attention</p>'
             '<p class="text-ink-tertiary text-sm">Nothing needs your attention right now.</p>'
+            "</div>"
         )
 
     from postmind.config import load_account_config
 
     is_gmail = load_account_config(account_email).get("provider", "gmail") == "gmail"
 
-    # External-link glyph, shown only for clickable (Gmail) rows.
-    icon = (
-        '<svg class="w-3.5 h-3.5 shrink-0 mt-0.5 text-ink-tertiary group-hover:text-accent transition-colors" '
-        'fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">'
-        '<path stroke-linecap="round" stroke-linejoin="round" '
-        'd="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>'
+    # Bulk action bar
+    all_ids_js = _json.dumps([str(item.get("gmail_id") or "") for item in items if item.get("gmail_id")])
+    bulk_bar = (
+        '<div class="flex items-center justify-between mb-2">'
+        '<p class="text-ink-subtle text-[11px] font-semibold uppercase tracking-[0.06em]">What needs attention</p>'
+        '<div class="flex gap-1.5">'
+        f'<button onclick="_briefBulk(\'archive\', {_html.escape(all_ids_js)})" '
+        'title="Archive all" '
+        'class="flex items-center gap-1 text-[11px] text-ink-tertiary hover:text-accent border border-hairline hover:border-accent-border bg-transparent hover:bg-accent-subtle rounded px-2 py-0.5 transition-colors">'
+        f'{_icon_archive}<span>Archive all</span></button>'
+        f'<button onclick="_briefBulk(\'trash\', {_html.escape(all_ids_js)})" '
+        'title="Trash all" '
+        'class="flex items-center gap-1 text-[11px] text-ink-tertiary hover:text-danger border border-hairline hover:border-danger-border bg-transparent hover:bg-danger-bg rounded px-2 py-0.5 transition-colors">'
+        f'{_icon_trash}<span>Trash all</span></button>'
+        "</div></div>"
     )
 
     rows = []
     for item in items:
         sender = _html.escape(str(item.get("sender") or "")[:80])
         subject = _html.escape(str(item.get("subject") or "(no subject)")[:120])
-        gid = str(item.get("gmail_id") or "")
-        inner = (
+        gid = _html.escape(str(item.get("gmail_id") or ""))
+        gid_js = _json.dumps(str(item.get("gmail_id") or ""))
+
+        text_content = (
             f'<span class="min-w-0 flex-1">'
             f'<span class="block text-ink text-sm font-medium truncate">{subject}</span>'
             f'<span class="block text-ink-tertiary text-xs truncate">{sender}</span>'
             f"</span>"
         )
+
+        # Action buttons — hidden until row hover
+        btn_base = "p-1 rounded text-ink-tertiary transition-colors"
         if is_gmail and gid:
-            # Gmail's /u/<n>/ segment is a numeric account *index* (0 = default);
-            # putting an email there yields a full-page "Temporary Error (404)".
-            # We pin /u/0/ and disambiguate the account by email via ?authuser=
-            # (verified to open the right message even with multiple accounts).
-            # The message id is the API's hex id, which Gmail resolves in #all/<id>.
-            url = (
+            gmail_url = (
                 "https://mail.google.com/mail/u/0/"
-                f"?authuser={_quote(account_email, safe='@')}#all/{_quote(gid, safe='')}"
+                f"?authuser={_quote(account_email, safe='@')}#all/{_quote(str(item.get('gmail_id') or ''), safe='')}"
             )
-            rows.append(
-                f'<a href="{url}" target="_blank" rel="noopener noreferrer" '
-                f'class="group flex items-start gap-2.5 -mx-2 px-2 py-1.5 rounded-button '
-                f'hover:bg-surface-2 transition-colors">{icon}{inner}</a>'
+            reply_btn = (
+                f'<a href="{gmail_url}" target="_blank" rel="noopener noreferrer" '
+                f'title="Reply (open in Gmail)" '
+                f'class="{btn_base} hover:text-accent hover:bg-accent-subtle">'
+                f"{_icon_reply}</a>"
             )
         else:
-            rows.append(f'<div class="flex items-start gap-2.5 px-0 py-1.5">{inner}</div>')
+            reply_btn = ""
 
-    return _section(f'<div class="space-y-0.5">{"".join(rows)}</div>')
+        archive_btn = (
+            f'<button data-gid="{gid}" data-action="archive" '
+            f'onclick="_briefAction(this)" title="Archive" '
+            f'class="{btn_base} hover:text-accent hover:bg-accent-subtle">'
+            f"{_icon_archive}</button>"
+        )
+        trash_btn = (
+            f'<button data-gid="{gid}" data-action="trash" '
+            f'onclick="_briefAction(this)" title="Trash" '
+            f'class="{btn_base} hover:text-danger hover:bg-danger-bg">'
+            f"{_icon_trash}</button>"
+        )
+
+        actions = (
+            f'<span class="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">'
+            f"{reply_btn}{archive_btn}{trash_btn}"
+            f"</span>"
+        )
+
+        rows.append(
+            f'<div class="brief-item group flex items-start gap-2.5 -mx-2 px-2 py-1.5 rounded-button '
+            f'hover:bg-surface-2 transition-colors" data-gmail-id="{gid}">'
+            f"{_icon_external}{text_content}{actions}"
+            f"</div>"
+        )
+
+    return (
+        f'<div class="mt-5 pt-4 border-t border-hairline">'
+        f"{bulk_bar}"
+        f'<div class="space-y-0.5" id="brief-items-list">{"".join(rows)}</div>'
+        f"</div>"
+    )
 
 
 @app.get("/brief", response_class=HTMLResponse)
@@ -592,11 +701,15 @@ async def brief_page(request: Request):
     from datetime import datetime as _dt
     from datetime import timezone as _tz
 
+    from postmind.core.daily_brief import DailyBriefGenerator
     from postmind.core.storage import DailyBriefRepo, get_session
 
-    session = get_session()
     today_str = _dt.now(_tz.utc).date().isoformat()
-    brief = DailyBriefRepo(session).get_today(account_email, today_str)
+    loop = asyncio.get_event_loop()
+    brief = await loop.run_in_executor(
+        _executor, lambda: DailyBriefGenerator(account_email).get_or_generate(force=False)
+    )
+    session = get_session()
     recent = DailyBriefRepo(session).list_recent(account_email, limit=7)
     session.close()
 
@@ -2848,13 +2961,23 @@ async def triage_page(request: Request):
         classification; uncached rows render a placeholder and are streamed in
         afterwards) plus the messages still needing classification.
         """
-        from postmind.core.storage import ClassificationCacheRepo, get_session
+        from postmind.core.storage import (
+            ClassificationCacheRepo,
+            UserActionRepo,
+            get_session,
+        )
 
         messages, account_email = _fetch_triage_messages(scope, limit)
         if not messages:
             return [], [], account_email
 
-        cached = ClassificationCacheRepo(get_session()).get_many([m.id for m in messages])
+        session = get_session()
+        cached = ClassificationCacheRepo(session).get_many([m.id for m in messages])
+
+        # Load behavioral signals once for the sort step
+        action_repo = UserActionRepo(session)
+        _trash_senders = action_repo.high_trash_senders(account_email)
+        _replied_senders = action_repo.replied_senders(account_email)
 
         rows = []
         pending = []
@@ -2875,9 +2998,14 @@ async def triage_page(request: Request):
                 pending.append(m)
             rows.append(meta)
 
-        # Classified rows first (by priority); not-yet-classified rows trail them
-        # in fetch order — the client reorders once the stream fills them in.
-        rows.sort(key=lambda r: _PRIORITY_ORDER.get(r["cls"]["priority"], 3) if r["cls"] else 99)
+        def _triage_sort_key(r: dict) -> tuple:
+            priority_score = _PRIORITY_ORDER.get(r["cls"]["priority"], 3) if r["cls"] else 99
+            se = (r.get("sender_email") or "").lower()
+            # Replied senders float up (-1), high-trash senders sink (+1)
+            behavioral = -1 if se in _replied_senders else (1 if se in _trash_senders else 0)
+            return (priority_score, behavioral)
+
+        rows.sort(key=_triage_sort_key)
         return rows, pending, account_email
 
     try:
@@ -2953,9 +3081,14 @@ async def triage_classify_stream(request: Request):
             workers = max(1, min(settings.ai_classify_parallelism, len(chunks)))
             cache_repo = ClassificationCacheRepo(get_session())
 
+            # Load behavioral priors once per classify session
+            from postmind.core.storage import UserActionRepo
+            _acct = _get_web_account() or ""
+            _priors = UserActionRepo(get_session()).sender_action_counts(_acct) if _acct else {}
+
             def _do(chunk):
                 try:
-                    return ai.classify_batch(chunk)
+                    return ai.classify_batch(chunk, sender_priors=_priors)
                 except Exception:
                     # A batch that fails to classify shouldn't hang the row — fall
                     # back to a neutral classification so the UI resolves.
@@ -3049,10 +3182,17 @@ async def triage_trash(request: Request):
     account_email = _get_web_account() or ""
 
     def _do():
-        from postmind.core.storage import UndoLogRepo, get_session
+        from postmind.core.storage import (
+            ClassificationCacheRepo,
+            EmailRepo,
+            UndoLogRepo,
+            UserActionRepo,
+            get_session,
+        )
 
+        session = get_session()
         client = _build_provider()
-        entry = UndoLogRepo(get_session()).record(
+        entry = UndoLogRepo(session).record(
             account_email=account_email,
             operation="trash",
             message_ids=[gmail_id],
@@ -3060,6 +3200,22 @@ async def triage_trash(request: Request):
             metadata={},
         )
         client.batch_trash([gmail_id])
+
+        # Record behavioral signal
+        rec = EmailRepo(session).get(gmail_id)
+        cls = ClassificationCacheRepo(session).get_many([gmail_id]).get(gmail_id, {})
+        if rec:
+            UserActionRepo(session).record(
+                account_email=account_email,
+                gmail_id=gmail_id,
+                sender_email=rec.sender_email or "",
+                sender_name=rec.sender_name or "",
+                subject=rec.subject or "",
+                action="trash",
+                source="triage",
+                ai_category=cls.get("category", ""),
+                ai_priority=cls.get("priority", ""),
+            )
         return entry.id
 
     try:
@@ -3068,7 +3224,161 @@ async def triage_trash(request: Request):
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
+    # Fire-and-forget: check if this trash action triggers a rule proposal
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(_executor, _maybe_synthesize_rules, account_email)
+
     return JSONResponse({"ok": True, "undo_id": undo_id})
+
+
+@app.post("/brief/action")
+async def brief_action(request: Request):
+    """Trash or archive one or many emails directly from the Daily Brief page."""
+    form = await request.form()
+    action = (form.get("action") or "").strip()          # trash | archive | bulk_trash | bulk_archive
+    gmail_id = (form.get("gmail_id") or "").strip()
+    gmail_ids_raw = form.getlist("gmail_ids[]")
+
+    ids = [i for i in ([gmail_id] if gmail_id else gmail_ids_raw) if i]
+    if not ids:
+        return JSONResponse({"ok": False, "error": "No message IDs"}, status_code=400)
+
+    base_action = action.removeprefix("bulk_")           # "trash" or "archive"
+    if base_action not in ("trash", "archive"):
+        return JSONResponse({"ok": False, "error": f"Unknown action: {action}"}, status_code=400)
+
+    account_email = _get_web_account() or ""
+    verb = "Trashed" if base_action == "trash" else "Archived"
+    desc = f"{verb} {len(ids)} email{'s' if len(ids) != 1 else ''} from Daily Brief"
+
+    def _do():
+        from postmind.core.storage import (
+            ClassificationCacheRepo,
+            EmailRecord,
+            UndoLogRepo,
+            UserActionRepo,
+            get_session,
+        )
+
+        session = get_session()
+        client = _build_provider()
+        entry = UndoLogRepo(session).record(
+            account_email=account_email,
+            operation=base_action,
+            message_ids=ids,
+            description=desc,
+            metadata={},
+        )
+        if base_action == "trash":
+            client.batch_trash(ids)
+        else:
+            client.batch_archive(ids)
+
+        # Record behavioral signals (batch lookup to avoid N+1)
+        email_recs = {
+            r.gmail_id: r
+            for r in session.query(EmailRecord)
+            .filter(EmailRecord.gmail_id.in_(ids))
+            .all()
+        }
+        cls_map = ClassificationCacheRepo(session).get_many(ids)
+        repo = UserActionRepo(session)
+        for gid in ids:
+            rec = email_recs.get(gid)
+            cls = cls_map.get(gid, {})
+            if rec:
+                repo.record(
+                    account_email=account_email,
+                    gmail_id=gid,
+                    sender_email=rec.sender_email or "",
+                    sender_name=rec.sender_name or "",
+                    subject=rec.subject or "",
+                    action=base_action,
+                    source="brief",
+                    ai_category=cls.get("category", ""),
+                    ai_priority=cls.get("priority", ""),
+                )
+        return entry.id
+
+    try:
+        loop = asyncio.get_event_loop()
+        undo_id = await loop.run_in_executor(_executor, _do)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+    # Fire-and-forget rule synthesis check when trash actions are involved
+    if base_action == "trash":
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(_executor, _maybe_synthesize_rules, account_email)
+
+    return JSONResponse({"ok": True, "undo_id": undo_id, "count": len(ids)})
+
+
+# ── Rule proposals ────────────────────────────────────────────────────────────
+
+@app.get("/rules/proposals", response_class=HTMLResponse)
+async def rules_proposals_fragment(request: Request):
+    """HTMX fragment: proposed rules banner for /brief and /triage pages."""
+    account_email = _get_web_account() or ""
+    if not account_email:
+        return HTMLResponse("")
+
+    from postmind.core.storage import RuleRepo, get_session
+
+    proposals = RuleRepo(get_session()).list_proposed(account_email)
+    if not proposals:
+        return HTMLResponse("")
+
+    import html as _html
+
+    cards = []
+    for p in proposals[:3]:
+        name = _html.escape(p.name or "")
+        explanation = _html.escape(p.ai_explanation or "")
+        cards.append(
+            f'<div class="flex items-start justify-between gap-3 py-2.5 border-b border-hairline last:border-0" '
+            f'id="proposal-{p.id}">'
+            f'<div class="min-w-0 flex-1">'
+            f'<p class="text-sm font-medium text-ink truncate">{name}</p>'
+            f'<p class="text-xs text-ink-subtle mt-0.5">{explanation}</p>'
+            f'</div>'
+            f'<div class="shrink-0 flex gap-1.5">'
+            f'<button hx-post="/rules/proposals/{p.id}/confirm" hx-target="#proposal-{p.id}" hx-swap="outerHTML" '
+            f'class="pm-btn text-xs py-1 px-2.5">Create rule</button>'
+            f'<button hx-post="/rules/proposals/{p.id}/dismiss" hx-target="#proposal-{p.id}" hx-swap="outerHTML" '
+            f'class="pm-btn-secondary text-xs py-1 px-2.5">Dismiss</button>'
+            f'</div></div>'
+        )
+
+    inner = "".join(cards)
+    return HTMLResponse(
+        f'<div id="rule-proposals" class="pm-card mt-4 px-4 py-3 border-l-4 border-accent">'
+        f'<div class="flex items-center gap-2 mb-2">'
+        f'<svg class="w-4 h-4 text-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">'
+        f'<path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>'
+        f'<p class="text-sm font-semibold text-ink">Suggested automations based on your actions</p>'
+        f'</div>'
+        f'{inner}'
+        f'</div>'
+    )
+
+
+@app.post("/rules/proposals/{rule_id}/confirm", response_class=HTMLResponse)
+async def rule_proposal_confirm(rule_id: int, request: Request):
+    from postmind.core.storage import RuleRepo, get_session
+
+    RuleRepo(get_session()).confirm_proposal(rule_id)
+    return HTMLResponse(
+        '<div class="py-2 text-xs text-success">✓ Rule created and active.</div>'
+    )
+
+
+@app.post("/rules/proposals/{rule_id}/dismiss", response_class=HTMLResponse)
+async def rule_proposal_dismiss(rule_id: int, request: Request):
+    from postmind.core.storage import RuleRepo, get_session
+
+    RuleRepo(get_session()).dismiss_proposal(rule_id)
+    return HTMLResponse("")
 
 
 # ── Assistant (floating chat) ──────────────────────────────────────────────────
@@ -3569,6 +3879,9 @@ for find_largest_messages — it catches promotions, newsletters, and updates ac
 tabs. Avoid date filters unless the user asked; they drastically narrow results. \
 If that also returns nothing, tell the user and suggest checking the Sync page to pull in \
 more mail.
+- When the user refers to "the Nth one" or "that email" from a prior search result, use \
+the message_id from that prior result directly with read_email or stage_trash. NEVER \
+re-run find_largest_messages or any search tool to re-locate a previously listed email.
 - AUTOPILOT is currently {autopilot}. When ON, stage_archive/stage_label/stage_mark_read \
 execute immediately (no card) because they are fully reversible — tell the user what you \
 did and that it's undoable. Trash, unsubscribe, and send ALWAYS require a confirm card even \
@@ -3654,6 +3967,12 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                 )
             except Exception as exc:
                 return f"Couldn't fetch message sizes: {exc}"
+        if name == "read_email":
+            try:
+                provider = _build_provider()
+                return agent_tools.read_email(provider, tool_input.get("message_id", ""))
+            except Exception as exc:
+                return f"Couldn't fetch email: {exc}"
         if name == "find_unopened_subscriptions":
             from postmind.core.storage import get_session
 
@@ -4654,7 +4973,37 @@ async def drafts_create(request: Request):
 
     def _do():
         service = _autodraft_service()
-        return service.draft_reply(gmail_id, instruction=instruction, trigger="manual")
+        draft = service.draft_reply(gmail_id, instruction=instruction, trigger="manual")
+
+        # Reply is the strongest positive signal — record it
+        try:
+            from postmind.core.storage import (
+                ClassificationCacheRepo,
+                EmailRepo,
+                UserActionRepo,
+                get_session,
+            )
+
+            session = get_session()
+            email_rec = EmailRepo(session).get(gmail_id)
+            cls = ClassificationCacheRepo(session).get_many([gmail_id]).get(gmail_id, {})
+            acct = _get_web_account() or ""
+            if email_rec and acct:
+                UserActionRepo(session).record(
+                    account_email=acct,
+                    gmail_id=gmail_id,
+                    sender_email=email_rec.sender_email or "",
+                    sender_name=email_rec.sender_name or "",
+                    subject=email_rec.subject or "",
+                    action="reply",
+                    source="triage",
+                    ai_category=cls.get("category", ""),
+                    ai_priority=cls.get("priority", ""),
+                )
+        except Exception:
+            pass  # never block draft creation for a signal-capture failure
+
+        return draft
 
     try:
         loop = asyncio.get_event_loop()
