@@ -988,7 +988,7 @@ class UserActionRepo:
                 UserActionRecord(
                     account_email=account_email,
                     gmail_id=gmail_id,
-                    sender_email=sender_email,
+                    sender_email=(sender_email or "").lower(),
                     sender_name=sender_name,
                     subject=subject,
                     action=action,
