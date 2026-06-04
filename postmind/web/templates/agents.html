@@ -96,7 +96,21 @@
         </div>
       </div>
 
-      <!-- Step 3: Create an agent -->
+      <!-- Step 3: Define cleanup rules -->
+      <div class="flex items-start gap-3 px-5 py-3.5">
+        <div class="shrink-0 mt-0.5">
+          <span class="w-5 h-5 rounded-full border-2 border-hairline-strong flex items-center justify-center text-xs font-bold text-ink-tertiary">3</span>
+        </div>
+        <div>
+          <p class="text-sm text-ink">Define what to clean up</p>
+          <p class="text-xs text-ink-subtle mt-0.5">
+            Agents only execute rules you've defined — they don't decide on their own.
+            Use the <a href="/agent" class="text-accent underline font-medium">Super Agent</a> to describe what you want cleaned up (e.g. "trash promotions older than 7 days") and it'll build the rule for you.
+          </p>
+        </div>
+      </div>
+
+      <!-- Step 4: Create an agent -->
       <div class="flex items-start gap-3 px-5 py-3.5">
         <div class="shrink-0 mt-0.5">
           {% if step_agents %}
@@ -104,7 +118,7 @@
             <svg class="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
           </span>
           {% else %}
-          <span class="w-5 h-5 rounded-full border-2 border-hairline-strong flex items-center justify-center text-xs font-bold text-ink-tertiary">3</span>
+          <span class="w-5 h-5 rounded-full border-2 border-hairline-strong flex items-center justify-center text-xs font-bold text-ink-tertiary">4</span>
           {% endif %}
         </div>
         <div>
@@ -115,7 +129,7 @@
         </div>
       </div>
 
-      <!-- Step 4: Start the daemon -->
+      <!-- Step 5: Start the daemon -->
       <div class="flex items-start gap-3 px-5 py-3.5">
         <div class="shrink-0 mt-0.5">
           {% if step_daemon %}
@@ -123,7 +137,7 @@
             <svg class="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
           </span>
           {% else %}
-          <span class="w-5 h-5 rounded-full border-2 border-hairline-strong flex items-center justify-center text-xs font-bold text-ink-tertiary">4</span>
+          <span class="w-5 h-5 rounded-full border-2 border-hairline-strong flex items-center justify-center text-xs font-bold text-ink-tertiary">5</span>
           {% endif %}
         </div>
         <div>
@@ -200,6 +214,11 @@
       {% if agent.error %}
       <p class="text-xs text-danger mt-2 ml-6">{{ agent.error }}</p>
       {% endif %}
+
+      <!-- Review link -->
+      <div class="mt-2 ml-6">
+        <a href="/undo" class="text-xs text-ink-tertiary hover:text-accent underline underline-offset-2">Review what this agent cleaned up →</a>
+      </div>
 
       <!-- Agent Settings (collapsible) -->
       <div class="mt-3 border-t border-hairline pt-3">
