@@ -99,6 +99,9 @@
     </div>
   </div>
 
+  <!-- Rule proposals (HTMX-loaded, only appears when there are proposals) -->
+  <div hx-get="/rules/proposals" hx-trigger="load" hx-swap="innerHTML"></div>
+
   <!-- Recent briefs (history) -->
   {% set past = recent | selectattr("brief_date", "ne", today_str) | list %}
   {% if past %}
@@ -126,4 +129,79 @@
 
 </div>
 
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const _briefSpinSvg = '<svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>';
+
+function _briefTab(tab) {
+  document.getElementById('brief-tab-inbox').style.display = tab === 'inbox' ? '' : 'none';
+  document.getElementById('brief-tab-deals').style.display = tab === 'deals' ? '' : 'none';
+  const activeClass = 'px-3 py-1.5 text-xs font-semibold border-b-2 border-accent text-accent -mb-px bg-transparent';
+  const inactiveClass = 'px-3 py-1.5 text-xs font-semibold border-b-2 border-transparent text-ink-subtle -mb-px bg-transparent';
+  document.getElementById('tab-btn-inbox').className = tab === 'inbox' ? activeClass : inactiveClass;
+  document.getElementById('tab-btn-deals').className = tab === 'deals' ? activeClass : inactiveClass;
+}
+
+async function _briefAction(btn) {
+  const action = btn.dataset.action;
+  const gid    = btn.dataset.gid;
+  const row    = btn.closest('[data-gmail-id]');
+  if (!gid || !row) return;
+
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = _briefSpinSvg;
+
+  const fd = new FormData();
+  fd.append('action', action);
+  fd.append('gmail_id', gid);
+
+  try {
+    const res  = await fetch('/brief/action', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.ok) {
+      row.style.transition = 'opacity 0.2s, max-height 0.3s';
+      row.style.opacity = '0';
+      setTimeout(() => row.remove(), 280);
+    } else {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+      alert('Action failed: ' + (data.error || 'unknown'));
+    }
+  } catch {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+async function _briefBulk(action, ids) {
+  if (!ids || !ids.length) return;
+  const label = action === 'trash' ? 'Trash' : 'Archive';
+  if (!confirm(`${label} ${ids.length} email${ids.length === 1 ? '' : 's'}?`)) return;
+
+  const fd = new FormData();
+  fd.append('action', 'bulk_' + action);
+  ids.forEach(id => fd.append('gmail_ids[]', id));
+
+  try {
+    const res  = await fetch('/brief/action', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.ok) {
+      document.querySelectorAll('#brief-items-list [data-gmail-id]').forEach(el => {
+        el.style.transition = 'opacity 0.2s';
+        el.style.opacity = '0';
+      });
+      setTimeout(() => {
+        document.querySelectorAll('#brief-items-list [data-gmail-id]').forEach(el => el.remove());
+      }, 280);
+    } else {
+      alert('Bulk action failed: ' + (data.error || 'unknown'));
+    }
+  } catch (e) {
+    alert('Request failed: ' + e);
+  }
+}
+</script>
 {% endblock %}

@@ -53,7 +53,12 @@ class MockAIEngine:
 
     # ── Classification ───────────────────────────────────────────────────────
 
-    def classify_emails(self, messages: list[Message]) -> list[ClassifiedEmail]:
+    def classify_emails(
+        self,
+        messages: list[Message],
+        parallelism: int | None = None,
+        sender_priors: dict | None = None,
+    ) -> list[ClassifiedEmail]:
         results = []
         for msg in messages:
             cat, pri, action, needs_reply, explanation = _CATEGORIES[_bucket(msg.id)]
@@ -69,6 +74,18 @@ class MockAIEngine:
                 cat, pri, action, needs_reply = "newsletter", "low", "unsubscribe", False
                 explanation = "[mock] Has List-Unsubscribe header — classified as newsletter."
 
+            _DEAL_HIGH = ("% off", "free month", "bogo", "expires today", "flash sale", "50% off")
+            _DEAL_MID = ("discount", "coupon", "free shipping", "promo code", "save $", "off your")
+            _DEAL_LOW = ("deal", "offer", "sale", "promo", "clearance", "exclusive", "voucher")
+            if any(kw in subject_lower for kw in _DEAL_HIGH):
+                deal_score = 3
+            elif any(kw in subject_lower for kw in _DEAL_MID):
+                deal_score = 2
+            elif any(kw in subject_lower for kw in _DEAL_LOW):
+                deal_score = 1
+            else:
+                deal_score = 0
+
             results.append(
                 ClassifiedEmail(
                     gmail_id=msg.id,
@@ -78,6 +95,7 @@ class MockAIEngine:
                     suggested_action=action,
                     requires_reply=needs_reply,
                     deadline_hint="",
+                    deal_score=deal_score,
                 )
             )
         return results
@@ -93,6 +111,22 @@ class MockAIEngine:
             action_params=params,
             explanation=f'[mock] Auto-derived from: "{natural_language}"',
             warnings=["[mock] Review the Gmail query before enabling on production data."],
+        )
+
+    def synthesize_rule_from_actions(
+        self,
+        sender_email: str,
+        sender_name: str,
+        trash_count: int,
+        sample_subjects: list[str],
+    ) -> "NLRule":
+        return NLRule(
+            natural_language=f"Trash emails from {sender_name}",
+            gmail_query=f"from:{sender_email}",
+            action="trash",
+            action_params={},
+            explanation=f"[mock] Trash all emails from {sender_name} ({sender_email})",
+            warnings=[],
         )
 
     # ── Bulk intent ──────────────────────────────────────────────────────────
@@ -139,6 +173,7 @@ class MockAIEngine:
         overdue_follow_ups: list[dict],
         avoided_count: int,
         recent_unread: list[dict] | None = None,
+        recent_unclassified: list[dict] | None = None,
     ) -> str:
         # Mirror the real engine's new contract: just a short "Quick win" — no
         # status line and no email list (both are rendered deterministically by

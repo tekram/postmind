@@ -596,7 +596,15 @@ def _render_brief_links(brief, account_email: str) -> str:
         except (ValueError, TypeError):
             items = []
 
-    if not items:
+    deals = []
+    raw_deals = getattr(brief, "deals_json", None)
+    if raw_deals:
+        try:
+            deals = [i for i in _json.loads(raw_deals) if isinstance(i, dict)]
+        except (ValueError, TypeError):
+            deals = []
+
+    if not items and not deals:
         return (
             '<div class="mt-5 pt-4 border-t border-hairline">'
             '<p class="text-ink-subtle text-[11px] font-semibold uppercase tracking-[0.06em] mb-2">What needs attention</p>'
@@ -625,66 +633,137 @@ def _render_brief_links(brief, account_email: str) -> str:
         "</div></div>"
     )
 
-    rows = []
-    for item in items:
-        sender = _html.escape(str(item.get("sender") or "")[:80])
-        subject = _html.escape(str(item.get("subject") or "(no subject)")[:120])
-        gid = _html.escape(str(item.get("gmail_id") or ""))
-        gid_js = _json.dumps(str(item.get("gmail_id") or ""))
+    from datetime import datetime as _dt, timezone as _tz
 
-        text_content = (
-            f'<span class="min-w-0 flex-1">'
-            f'<span class="block text-ink text-sm font-medium truncate">{subject}</span>'
-            f'<span class="block text-ink-tertiary text-xs truncate">{sender}</span>'
-            f"</span>"
-        )
+    def _fmt_date(ms: int) -> str:
+        if not ms:
+            return ""
+        try:
+            dt = _dt.fromtimestamp(ms / 1000, tz=_tz.utc)
+            now_utc = _dt.now(_tz.utc)
+            if dt.date() == now_utc.date():
+                return dt.strftime("%-I:%M %p")
+            elif (now_utc.date() - dt.date()).days < 7:
+                return dt.strftime("%a %-I:%M %p")
+            else:
+                return dt.strftime("%b %-d")
+        except Exception:
+            return ""
 
-        # Action buttons — hidden until row hover
-        btn_base = "p-1 rounded text-ink-tertiary transition-colors"
-        if is_gmail and gid:
-            gmail_url = (
-                "https://mail.google.com/mail/u/0/"
-                f"?authuser={_quote(account_email, safe='@')}#all/{_quote(str(item.get('gmail_id') or ''), safe='')}"
+    _DEAL_SCORE_BADGE = {
+        3: '<span class="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-success-bg text-success border border-success-border" title="High-value deal">★★★</span>',
+        2: '<span class="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-accent-subtle text-accent border border-accent-border" title="Concrete offer">★★</span>',
+        1: '<span class="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-surface-2 text-ink-tertiary border border-hairline" title="Promo">★</span>',
+    }
+
+    def _build_rows(item_list: list, list_id: str, show_deal_score: bool = False) -> str:
+        rows = []
+        for item in item_list:
+            sender = _html.escape(str(item.get("sender") or "")[:80])
+            subject = _html.escape(str(item.get("subject") or "(no subject)")[:120])
+            gid = _html.escape(str(item.get("gmail_id") or ""))
+            is_unread = item.get("is_unread", True)
+            sent_label = _html.escape(_fmt_date(item.get("internal_date") or 0))
+            deal_score = item.get("deal_score", 0) if show_deal_score else 0
+
+            unread_dot = (
+                '<span class="shrink-0 w-1.5 h-1.5 rounded-full bg-accent mt-1.5" title="Unread"></span>'
+                if is_unread else
+                '<span class="shrink-0 w-1.5 h-1.5 mt-1.5"></span>'
             )
-            reply_btn = (
-                f'<a href="{gmail_url}" target="_blank" rel="noopener noreferrer" '
-                f'title="Reply (open in Gmail)" '
+            sent_span = (
+                f'<span class="text-ink-tertiary text-[11px] tabular-nums whitespace-nowrap">{sent_label}</span>'
+                if sent_label else ""
+            )
+            score_badge = _DEAL_SCORE_BADGE.get(deal_score, "") if deal_score else ""
+
+            subject_weight = "font-semibold" if is_unread else "font-medium text-ink-subtle"
+            text_content = (
+                f'<span class="min-w-0 flex-1">'
+                f'<span class="block text-ink text-sm {subject_weight} truncate">{subject}</span>'
+                f'<span class="flex items-center gap-1.5 text-ink-tertiary text-xs truncate">'
+                f'<span class="truncate">{sender}</span>'
+                f'{("<span>·</span>" + sent_span) if sent_span else ""}'
+                f'</span>'
+                f"</span>"
+            )
+
+            btn_base = "p-1 rounded text-ink-tertiary transition-colors"
+            if is_gmail and gid:
+                if show_deal_score:
+                    # Route deal opens through tracking endpoint
+                    open_url = f"/brief/deal-open?gid={_quote(str(item.get('gmail_id') or ''), safe='')}"
+                else:
+                    open_url = (
+                        "https://mail.google.com/mail/u/0/"
+                        f"?authuser={_quote(account_email, safe='@')}#all/{_quote(str(item.get('gmail_id') or ''), safe='')}"
+                    )
+                open_btn = (
+                    f'<a href="{open_url}" target="_blank" rel="noopener noreferrer" '
+                    f'title="Open in Gmail" '
+                    f'class="{btn_base} hover:text-accent hover:bg-accent-subtle">'
+                    f"{_icon_reply}</a>"
+                )
+            else:
+                open_btn = ""
+
+            archive_btn = (
+                f'<button data-gid="{gid}" data-action="archive" '
+                f'onclick="_briefAction(this)" title="Archive" '
                 f'class="{btn_base} hover:text-accent hover:bg-accent-subtle">'
-                f"{_icon_reply}</a>"
+                f"{_icon_archive}</button>"
             )
-        else:
-            reply_btn = ""
+            trash_btn = (
+                f'<button data-gid="{gid}" data-action="trash" '
+                f'onclick="_briefAction(this)" title="Trash" '
+                f'class="{btn_base} hover:text-danger hover:bg-danger-bg">'
+                f"{_icon_trash}</button>"
+            )
 
-        archive_btn = (
-            f'<button data-gid="{gid}" data-action="archive" '
-            f'onclick="_briefAction(this)" title="Archive" '
-            f'class="{btn_base} hover:text-accent hover:bg-accent-subtle">'
-            f"{_icon_archive}</button>"
-        )
-        trash_btn = (
-            f'<button data-gid="{gid}" data-action="trash" '
-            f'onclick="_briefAction(this)" title="Trash" '
-            f'class="{btn_base} hover:text-danger hover:bg-danger-bg">'
-            f"{_icon_trash}</button>"
-        )
+            actions = (
+                f'<span class="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">'
+                f"{open_btn}{archive_btn}{trash_btn}"
+                f"</span>"
+            )
 
-        actions = (
-            f'<span class="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">'
-            f"{reply_btn}{archive_btn}{trash_btn}"
-            f"</span>"
-        )
+            rows.append(
+                f'<div class="brief-item group flex items-start gap-2.5 -mx-2 px-2 py-1.5 rounded-button '
+                f'hover:bg-surface-2 transition-colors" data-gmail-id="{gid}">'
+                f"{unread_dot}{score_badge or _icon_external}{text_content}{actions}"
+                f"</div>"
+            )
+        return f'<div class="space-y-0.5" id="{list_id}">{"".join(rows)}</div>'
 
-        rows.append(
-            f'<div class="brief-item group flex items-start gap-2.5 -mx-2 px-2 py-1.5 rounded-button '
-            f'hover:bg-surface-2 transition-colors" data-gmail-id="{gid}">'
-            f"{_icon_external}{text_content}{actions}"
-            f"</div>"
-        )
+    # Inbox pane
+    if items:
+        inbox_pane = bulk_bar + _build_rows(items, "brief-items-list", show_deal_score=False)
+    else:
+        inbox_pane = '<p class="text-ink-tertiary text-sm">Nothing needs your attention right now.</p>'
+
+    # Deals pane — sorted by deal_score desc (already sorted by generator)
+    if deals:
+        deals_pane = _build_rows(deals, "deals-items-list", show_deal_score=True)
+    else:
+        deals_pane = '<p class="text-ink-tertiary text-sm">No deals or offers found in your recent emails.</p>'
+
+    deals_badge = f'<span class="ml-1 text-[10px] text-ink-tertiary">({len(deals)})</span>' if deals else ""
+
+    tab_bar = (
+        '<div class="flex gap-0 mb-3 border-b border-hairline">'
+        '<button onclick="_briefTab(\'inbox\')" id="tab-btn-inbox" '
+        'class="px-3 py-1.5 text-xs font-semibold border-b-2 border-accent text-accent -mb-px bg-transparent">'
+        "Inbox</button>"
+        '<button onclick="_briefTab(\'deals\')" id="tab-btn-deals" '
+        'class="px-3 py-1.5 text-xs font-semibold border-b-2 border-transparent text-ink-subtle -mb-px bg-transparent">'
+        f"Deals &amp; Offers{deals_badge}</button>"
+        "</div>"
+    )
 
     return (
         f'<div class="mt-5 pt-4 border-t border-hairline">'
-        f"{bulk_bar}"
-        f'<div class="space-y-0.5" id="brief-items-list">{"".join(rows)}</div>'
+        f"{tab_bar}"
+        f'<div id="brief-tab-inbox">{inbox_pane}</div>'
+        f'<div id="brief-tab-deals" style="display:none">{deals_pane}</div>'
         f"</div>"
     )
 
@@ -3312,6 +3391,44 @@ async def brief_action(request: Request):
         loop.run_in_executor(_executor, _maybe_synthesize_rules, account_email)
 
     return JSONResponse({"ok": True, "undo_id": undo_id, "count": len(ids)})
+
+
+@app.get("/brief/deal-open")
+async def brief_deal_open(gid: str = ""):
+    """Record that the user opened a deal email, then redirect to Gmail."""
+    if not gid:
+        return RedirectResponse("https://mail.google.com/", status_code=302)
+
+    account_email = _get_web_account() or ""
+
+    def _record():
+        from postmind.core.storage import EmailRecord, UserActionRepo, get_session
+
+        session = get_session()
+        rec = session.query(EmailRecord).filter_by(gmail_id=gid).first()
+        if rec and account_email:
+            UserActionRepo(session).record(
+                account_email=account_email,
+                gmail_id=gid,
+                sender_email=rec.sender_email or "",
+                sender_name=rec.sender_name or "",
+                subject=rec.subject or "",
+                action="deal_opened",
+                source="deals",
+            )
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(_executor, _record)
+    except Exception:
+        pass
+
+    from urllib.parse import quote as _q
+    gmail_url = (
+        "https://mail.google.com/mail/u/0/"
+        f"?authuser={_q(account_email, safe='@')}#all/{_q(gid, safe='')}"
+    )
+    return RedirectResponse(gmail_url, status_code=302)
 
 
 # ── Rule proposals ────────────────────────────────────────────────────────────

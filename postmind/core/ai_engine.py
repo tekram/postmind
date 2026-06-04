@@ -20,6 +20,7 @@ class ClassifiedEmail:
     suggested_action: str  # "reply", "archive", "unsubscribe", "delete", "keep", "delegate"
     requires_reply: bool
     deadline_hint: str  # e.g. "today", "this week", "" — extracted from content
+    deal_score: int = 0  # 0=not a deal; 1=weak/generic promo; 2=concrete offer; 3=high-value/time-sensitive
 
 
 @dataclass
@@ -151,7 +152,10 @@ class AIEngine:
     # ── Classification ───────────────────────────────────────────────────────
 
     def classify_emails(
-        self, messages: list[Message], parallelism: int | None = None
+        self,
+        messages: list[Message],
+        parallelism: int | None = None,
+        sender_priors: dict[str, dict[str, int]] | None = None,
     ) -> list[ClassifiedEmail]:
         """Classify emails. Returns one ClassifiedEmail per message, in order.
 
@@ -159,12 +163,16 @@ class AIEngine:
         concurrently — up to ``parallelism`` in flight (default
         ``ai_classify_parallelism``) — so wall-clock time scales with the slowest
         batch rather than the sum of all batches.
+
+        ``sender_priors`` is a ``{sender_email_lower: {action: count}}`` map from
+        ``UserActionRepo.sender_action_counts()``. When provided, each batch receives
+        behavioral context so the LLM can factor in the user's past decisions.
         """
         chunks = list(_chunks(messages, self._max_batch))
         if not chunks:
             return []
         if len(chunks) == 1:
-            return self.classify_batch(chunks[0])
+            return self.classify_batch(chunks[0], sender_priors=sender_priors)
 
         from concurrent.futures import ThreadPoolExecutor
 
@@ -173,9 +181,10 @@ class AIEngine:
 
         ordered: list[list[ClassifiedEmail]] = [[] for _ in chunks]
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            # Submit every batch up front so they run concurrently, then collect
-            # results in chunk order (.result() blocks but all calls are in flight).
-            futures = {pool.submit(self.classify_batch, ch): i for i, ch in enumerate(chunks)}
+            futures = {
+                pool.submit(self.classify_batch, ch, sender_priors): i
+                for i, ch in enumerate(chunks)
+            }
             for fut, i in futures.items():
                 ordered[i] = fut.result()
 
@@ -184,12 +193,40 @@ class AIEngine:
             results.extend(batch)
         return results
 
-    def classify_batch(self, messages: list[Message]) -> list[ClassifiedEmail]:
+    @staticmethod
+    def _prior_hint(from_header: str, sender_priors: dict[str, dict[str, int]]) -> str:
+        """Return a one-line behavioral context string for a sender, or empty string."""
+        if not sender_priors:
+            return ""
+        # Match against the email address portion of the From header
+        email_part = from_header.lower()
+        if "<" in email_part:
+            email_part = email_part.split("<")[-1].rstrip(">").strip()
+        actions = sender_priors.get(email_part, {})
+        if not actions:
+            return ""
+        parts = []
+        if actions.get("trash", 0) >= 3:
+            parts.append(f"trashed {actions['trash']}x by this user")
+        if actions.get("archive", 0) >= 3:
+            parts.append(f"archived {actions['archive']}x")
+        if actions.get("reply", 0) >= 1:
+            parts.append(f"user replied {actions['reply']}x — engaged sender")
+        if actions.get("deal_opened", 0) >= 1:
+            parts.append(f"user opened their deals {actions['deal_opened']}x — boost deal_score")
+        return f" [User history: {'; '.join(parts)}]" if parts else ""
+
+    def classify_batch(
+        self,
+        messages: list[Message],
+        sender_priors: dict[str, dict[str, int]] | None = None,
+    ) -> list[ClassifiedEmail]:
         email_summaries = []
         for i, msg in enumerate(messages):
+            prior = self._prior_hint(msg.headers.from_, sender_priors or {})
             email_summaries.append(
                 f"EMAIL {i + 1} (id={msg.id}):\n"
-                f"From: {msg.headers.from_}\n"
+                f"From: {msg.headers.from_}{prior}\n"
                 f"Subject: {msg.headers.subject}\n"
                 f"Snippet: {msg.snippet[:300]}"
             )
@@ -203,6 +240,13 @@ Classify the following {len(messages)} emails. For each, provide a JSON object w
 - suggested_action: one of "reply", "archive", "unsubscribe", "delete", "keep", "delegate"
 - requires_reply: true/false — does this email need a reply from the user?
 - deadline_hint: if there's a time constraint, brief hint ("today", "this week", "by Friday"), else ""
+- deal_score: integer 0–3 rating of deal quality — 0=not a deal; 1=vague promo with no specific benefit \
+("check out our new arrivals"); 2=concrete offer with clear value ("20% off", "free shipping on orders over $50"); \
+3=high-value or time-sensitive deal ("50% off", "free month", "expires today", "BOGO") — factor in the user's \
+past engagement with this sender's deals when available in [Deal history: ...] annotations
+
+Where available, "[User history: ...]" annotations on the From line show past user actions
+on emails from that sender — factor these into your priority and suggested_action.
 
 Respond with a JSON array of objects, one per email, in the same order. Nothing else.
 
@@ -226,6 +270,7 @@ Respond with a JSON array of objects, one per email, in the same order. Nothing 
                     suggested_action=item.get("suggested_action", "keep"),
                     requires_reply=bool(item.get("requires_reply", False)),
                     deadline_hint=item.get("deadline_hint", ""),
+                    deal_score=int(item.get("deal_score", 0)),
                 )
             )
         return results
@@ -259,6 +304,55 @@ Respond with valid JSON only. No markdown.\
             natural_language=natural_language,
             gmail_query=data["gmail_query"],
             action=data["action"],
+            action_params=data.get("action_params", {}),
+            explanation=data.get("explanation", ""),
+            warnings=data.get("warnings", []),
+        )
+
+    # ── Rule synthesis from behavioral signals ──────────────────────────────
+
+    def synthesize_rule_from_actions(
+        self,
+        sender_email: str,
+        sender_name: str,
+        trash_count: int,
+        sample_subjects: list[str],
+    ) -> NLRule:
+        """Synthesize a trash/archive rule for a sender the user consistently trashes.
+
+        Returns an NLRule ready to persist as an inactive RuleDefinition proposal.
+        Only uses sender metadata + subject lines — no email bodies, privacy-safe.
+        """
+        subjects_block = "\n".join(f"  - {s}" for s in sample_subjects[:5]) or "  (none available)"
+        nl = (
+            f"Automatically trash emails from {sender_name} ({sender_email}). "
+            f"The user has trashed {trash_count} emails from this sender."
+        )
+        prompt = f"""\
+A user has trashed {trash_count} emails from "{sender_name}" ({sender_email}).
+Sample subject lines from those emails:
+{subjects_block}
+
+Generate a Gmail automation rule to automatically trash future emails from this sender.
+Respond with a single JSON object:
+- gmail_query: precise Gmail search query (use from: operator; add subject: keywords if \
+the sender sends mixed content so legitimate emails aren't caught)
+- action: "trash"
+- action_params: {{}}
+- explanation: one plain-English sentence describing what the rule does
+- warnings: list of potential edge cases (e.g. if the sender also sends important emails)
+- confidence: 0.0–1.0
+
+Respond with valid JSON only. No markdown.\
+"""
+        raw = self._complete(SYSTEM_PROMPT, prompt, max_tokens=512)
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
+        data = json.loads(raw)
+        return NLRule(
+            natural_language=nl,
+            gmail_query=data["gmail_query"],
+            action=data.get("action", "trash"),
             action_params=data.get("action_params", {}),
             explanation=data.get("explanation", ""),
             warnings=data.get("warnings", []),
@@ -446,6 +540,7 @@ Be honest and helpful, not cheerful or corporate.\
         overdue_follow_ups: list[dict],
         avoided_count: int,
         recent_unread: list[dict] | None = None,
+        recent_unclassified: list[dict] | None = None,
     ) -> str:
         """Generate the "Quick win" of a morning brief. Privacy-first: sender+subject
         only, no bodies.
@@ -458,17 +553,20 @@ Be honest and helpful, not cheerful or corporate.\
         narrative), rendered by the UI.
         """
         recent_unread = recent_unread or []
+        recent_unclassified = recent_unclassified or []
 
         # Grounding context only — the model picks one of these to base the quick
         # win on; it never re-lists them (that list is rendered separately).
         attention = high_priority_items or recent_unread
+        # Include unclassified recent arrivals so the model can reference them.
+        all_context = attention + [i for i in recent_unclassified if i not in attention]
 
         prompt = f"""\
 You are writing the "Quick win" of a morning email brief for {today}.
 
 For context, these emails need attention (sender + subject only — use exactly \
 these, do not invent others):
-{json.dumps(attention[:8], indent=2, ensure_ascii=False) if attention else "None — inbox is empty."}
+{json.dumps(all_context[:10], indent=2, ensure_ascii=False) if all_context else "None — inbox is empty."}
 
 Overdue follow-ups:
 {json.dumps(overdue_follow_ups[:5], indent=2, ensure_ascii=False) if overdue_follow_ups else "None"}

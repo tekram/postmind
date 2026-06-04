@@ -14,6 +14,7 @@ from sqlalchemy import (
     Text,
     create_engine,
 )
+from sqlalchemy import func
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 import postmind.config as _cfg
@@ -177,6 +178,7 @@ class RuleDefinition(Base):
     last_run_at = Column(DateTime, nullable=True)
     run_count = Column(Integer, default=0)
     ai_explanation = Column(Text, default="")
+    proposed_at = Column(DateTime, nullable=True)  # set for synthesized proposals awaiting confirmation
 
     @property
     def action_params(self) -> dict:
@@ -254,6 +256,26 @@ class CleanupFeedbackRecord(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class UserActionRecord(Base):
+    """Per-message behavioral signal captured whenever the user acts on an email
+    from any surface (brief, triage, bulk, agent). Powers the learning loop:
+    prior injection into classification prompts, brief ranking, and rule synthesis."""
+
+    __tablename__ = "user_actions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_email = Column(String, nullable=False, index=True)
+    gmail_id = Column(String, nullable=False)  # not unique — undo + re-action possible
+    sender_email = Column(String, nullable=False)
+    sender_name = Column(String, default="")
+    subject = Column(String, default="")
+    action = Column(String, nullable=False)   # trash | archive | reply | keep | skip
+    source = Column(String, nullable=False)   # brief | triage | bulk | agent
+    ai_category = Column(String, default="")  # classification at time of action
+    ai_priority = Column(String, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+
 # ── Engine / session factory ─────────────────────────────────────────────────
 
 
@@ -279,9 +301,13 @@ def _run_migrations(engine) -> None:
         ],
         "daily_briefs": [
             ("items_json", "TEXT"),
+            ("deals_json", "TEXT"),
         ],
         "draft_records": [
             ("draft_type", "TEXT DEFAULT 'gmail'"),
+        ],
+        "rules": [
+            ("proposed_at", "DATETIME"),  # set when synthesized, cleared on confirm/dismiss
         ],
     }
     with engine.connect() as conn:
@@ -653,6 +679,38 @@ class RuleRepo:
             r.run_count += 1
             self.s.commit()
 
+    def list_proposed(self, account_email: str) -> list[RuleDefinition]:
+        """Return synthesized rules awaiting user confirmation (is_active=False, proposed_at set)."""
+        return (
+            self.s.query(RuleDefinition)
+            .filter(
+                RuleDefinition.account_email == account_email,
+                RuleDefinition.is_active == False,  # noqa: E712
+                RuleDefinition.proposed_at.isnot(None),
+            )
+            .order_by(RuleDefinition.proposed_at.desc())
+            .all()
+        )
+
+    def confirm_proposal(self, rule_id: int) -> bool:
+        """Activate a proposed rule. Returns True if found."""
+        r = self.s.get(RuleDefinition, rule_id)
+        if r and r.proposed_at is not None:
+            r.is_active = True
+            r.proposed_at = None
+            self.s.commit()
+            return True
+        return False
+
+    def dismiss_proposal(self, rule_id: int) -> bool:
+        """Delete a proposed rule. Returns True if found."""
+        r = self.s.get(RuleDefinition, rule_id)
+        if r and r.proposed_at is not None:
+            self.s.delete(r)
+            self.s.commit()
+            return True
+        return False
+
 
 class CleanupFeedbackRepo:
     """Records and aggregates /cleanup decisions for the learning loop."""
@@ -873,6 +931,7 @@ class DailyBrief(Base):
     # JSON list of the emails the brief identified, each {gmail_id, sender,
     # subject}, so the UI can render clickable "open in Gmail" deep links.
     items_json = Column(Text, nullable=True)
+    deals_json = Column(Text, nullable=True)  # JSON list of deal/offer emails, same shape as items_json
     generated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -905,6 +964,186 @@ class Agent(Base):
     run_autodraft = Column(Boolean, default=False)  # pre-draft replies for review (cloud AI, Gmail)
 
 
+class UserActionRepo:
+    """Records and queries per-message behavioral signals from all action surfaces."""
+
+    def __init__(self, session: Session):
+        self.s = session
+
+    def record(
+        self,
+        account_email: str,
+        gmail_id: str,
+        sender_email: str,
+        sender_name: str,
+        subject: str,
+        action: str,
+        source: str,
+        ai_category: str = "",
+        ai_priority: str = "",
+    ) -> None:
+        """Best-effort insert — never raises so callers don't need try/except."""
+        try:
+            self.s.add(
+                UserActionRecord(
+                    account_email=account_email,
+                    gmail_id=gmail_id,
+                    sender_email=sender_email,
+                    sender_name=sender_name,
+                    subject=subject,
+                    action=action,
+                    source=source,
+                    ai_category=ai_category,
+                    ai_priority=ai_priority,
+                )
+            )
+            self.s.commit()
+        except Exception:
+            self.s.rollback()
+
+    def sender_action_counts(
+        self, account_email: str, lookback_days: int = 90
+    ) -> dict[str, dict[str, int]]:
+        """{sender_email_lower: {action: count}} for the lookback window."""
+        from datetime import timedelta
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+        rows = (
+            self.s.query(
+                UserActionRecord.sender_email,
+                UserActionRecord.action,
+                func.count().label("n"),
+            )
+            .filter(
+                UserActionRecord.account_email == account_email,
+                UserActionRecord.created_at >= cutoff,
+            )
+            .group_by(UserActionRecord.sender_email, UserActionRecord.action)
+            .all()
+        )
+        result: dict[str, dict[str, int]] = {}
+        for sender_email, action, n in rows:
+            key = (sender_email or "").lower()
+            result.setdefault(key, {})[action] = n
+        return result
+
+    def high_trash_senders(
+        self,
+        account_email: str,
+        min_actions: int = 3,
+        trash_rate: float = 0.80,
+    ) -> set[str]:
+        """Sender emails (lowercased) where trash/(all actions) >= trash_rate."""
+        counts = self.sender_action_counts(account_email)
+        result = set()
+        for sender, actions in counts.items():
+            total = sum(actions.values())
+            if total < min_actions:
+                continue
+            if actions.get("trash", 0) / total >= trash_rate:
+                result.add(sender)
+        return result
+
+    def replied_senders(self, account_email: str, lookback_days: int = 90) -> set[str]:
+        """Sender emails (lowercased) the user has replied to at least once."""
+        from datetime import timedelta
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+        rows = (
+            self.s.query(UserActionRecord.sender_email)
+            .filter(
+                UserActionRecord.account_email == account_email,
+                UserActionRecord.action == "reply",
+                UserActionRecord.created_at >= cutoff,
+            )
+            .distinct()
+            .all()
+        )
+        return {(r.sender_email or "").lower() for r in rows}
+
+    def candidates_for_rule_synthesis(
+        self,
+        account_email: str,
+        min_trash: int = 5,
+        trash_rate: float = 0.85,
+    ) -> list[dict]:
+        """Return senders ripe for an auto-rule proposal.
+
+        Returns list of {sender_email, sender_name, trash_count, sample_subjects}.
+        Excludes senders that already have an active or proposed rule.
+        """
+        from datetime import timedelta
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+
+        # Count trash actions per sender
+        rows = (
+            self.s.query(
+                UserActionRecord.sender_email,
+                UserActionRecord.action,
+                func.count().label("n"),
+            )
+            .filter(
+                UserActionRecord.account_email == account_email,
+                UserActionRecord.created_at >= cutoff,
+            )
+            .group_by(UserActionRecord.sender_email, UserActionRecord.action)
+            .all()
+        )
+        by_sender: dict[str, dict[str, int]] = {}
+        for sender_email, action, n in rows:
+            key = (sender_email or "").lower()
+            by_sender.setdefault(key, {})[action] = n
+
+        # Find candidates
+        candidates = []
+        for sender_key, actions in by_sender.items():
+            total = sum(actions.values())
+            trash = actions.get("trash", 0)
+            if trash < min_trash or total < min_trash:
+                continue
+            if trash / total < trash_rate:
+                continue
+            candidates.append(sender_key)
+
+        if not candidates:
+            return []
+
+        # Exclude senders already covered by a rule
+        existing_queries = {
+            r.gmail_query
+            for r in self.s.query(RuleDefinition)
+            .filter_by(account_email=account_email)
+            .all()
+        }
+
+        result = []
+        for sender_key in candidates:
+            if any(sender_key in q for q in existing_queries):
+                continue
+            # Get sender_name + sample subjects from recent actions
+            recent = (
+                self.s.query(UserActionRecord)
+                .filter(
+                    UserActionRecord.account_email == account_email,
+                    func.lower(UserActionRecord.sender_email) == sender_key,
+                    UserActionRecord.action == "trash",
+                )
+                .order_by(UserActionRecord.created_at.desc())
+                .limit(5)
+                .all()
+            )
+            if not recent:
+                continue
+            result.append({
+                "sender_email": recent[0].sender_email,
+                "sender_name": recent[0].sender_name or recent[0].sender_email,
+                "trash_count": by_sender[sender_key].get("trash", 0),
+                "sample_subjects": [r.subject for r in recent if r.subject],
+            })
+        return result
+
+
 class DailyBriefRepo:
     def __init__(self, session: Session):
         self.s = session
@@ -928,6 +1167,7 @@ class DailyBriefRepo:
                 "overdue_followups_count",
                 "avoided_count",
                 "items_json",
+                "deals_json",
             ):
                 setattr(existing, col, getattr(brief, col))
             existing.generated_at = datetime.now(timezone.utc)
