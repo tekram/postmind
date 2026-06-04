@@ -32,9 +32,12 @@ CI runs on Python 3.11 and 3.13. Tests need no API key (they use `MockAIEngine`)
 
 Run the app:
 ```bash
-postmind serve     # web UI at http://localhost:8000 (requires .[web] extra)
+postmind serve     # web UI at http://127.0.0.1:8484 (default port; requires .[web] extra)
 postmind <cmd>     # CLI; see README "Commands Overview" for the full list
 ```
+
+If `postmind` isn't on PATH (common in a fresh shell), use `.venv/bin/postmind serve`.
+`make test` assumes `python` resolves; fall back to `.venv/bin/python -m pytest tests/ -q --tb=short`.
 
 ## Architecture
 
@@ -81,11 +84,21 @@ agent's tool *schemas* and stateless analysis helpers. Critical trust boundary:
   prompt injection from untrusted email bodies. Request-scoped execution (provider,
   account, scan cache, action accumulators) lives in `web/server.py`.
 
-**Web UI** (`web/server.py`, ~3.7k lines): FastAPI + Jinja2 templates in `web/templates/`,
-HTMX-style partial responses. Routes mirror the page list in the README (`/`, `/stats`,
-`/triage`, `/agent`, `/sync`, `/undo`, `/settings`, `/accounts`, `/agents`, `/watch`,
-`/onboarding`, `/chat`). Long operations (sync, Gmail OAuth add) use background tasks with
-`/poll/{task_id}` endpoints.
+**Web UI** (`web/server.py`, ~4.9k lines): FastAPI + Jinja2 templates in `web/templates/`,
+HTMX-style partial responses. Routes: `/`, `/stats`, `/triage`, `/agent`, `/sync`, `/undo`,
+`/settings`, `/accounts`, `/agents`, `/watch`, `/onboarding`, `/chat`, `/brief`. Long
+operations (sync, Gmail OAuth add) use background tasks with `/poll/{task_id}` endpoints.
+Inline actions (triage swipe, brief trash/archive) POST to small JSON endpoints
+(`/triage/trash`, `/brief/action`) and remove rows client-side on success.
+
+**Daily Brief** (`core/daily_brief.py`): `DailyBriefGenerator.get_or_generate()` caches one
+brief per calendar day (UTC) in `daily_briefs` table. Re-generates automatically if the
+cached brief is older than 1 hour. On generation: (1) classifies up to 9 unclassified unread
+emails on-demand (3-email batches for local LLMs), (2) builds `high_priority_items` from the
+classification cache, (3) adds `recent_unclassified` — the 20 most-recent unread emails from
+the last 7 days with no cache entry, deduped by sender name — so new arrivals always surface
+even with a large classification backlog. Both lists are merged into `items_json` (cap 50)
+and rendered as actionable deep-links by `_render_brief_links` in `server.py`.
 
 **Heartbeat daemon** (`core/daemon.py`): APScheduler-based per-account background watcher
 that periodically fetches new mail, classifies, and applies rules/follow-ups. Feature
@@ -95,6 +108,12 @@ the `Agent` record. Controlled from CLI (`postmind agents …`) or the `/watch` 
 **Sender scoring** (`core/sender_stats.py`, largest core module): aggregates cached email
 into per-sender stats ranked by storage impact, with confidence scoring and risk flags
 (sensitive senders like banks/legal/health are flagged; protected senders are skipped).
+
+**Cleanup feedback loop** (`CleanupFeedbackRecord` in `core/storage.py`): every approve/skip
+decision in the cleanup flow is recorded via `CleanupFeedbackRepo.record_many()`. These
+priors are loaded back at session start (`sender_priors()`) and fed to `AIEngine` so the
+classifier can bias toward the user's past decisions. This is the existing hook for
+learning from user behavior — extend here for new signal types.
 
 ## Conventions
 
