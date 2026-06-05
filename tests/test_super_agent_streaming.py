@@ -252,3 +252,141 @@ def test_agent_stream_route_registered():
     paths = {getattr(r, "path", None) for r in server.app.routes}
     assert "/agent/stream" in paths
     assert "/agent" in paths
+
+
+# ── Deep task mode tests ──────────────────────────────────────────────────────
+
+
+def test_chat_stream_deep_runs_more_iterations():
+    """chat_stream_deep should allow more than the default 6 iterations."""
+
+    def tool_round():
+        events = [
+            _block_start(0, SimpleNamespace(type="tool_use", name="search_senders", id="tu")),
+            _json_delta(0, "{}"),
+        ]
+        final = SimpleNamespace(
+            stop_reason="tool_use",
+            content=[SimpleNamespace(type="tool_use", name="search_senders", id="tu", input={})],
+        )
+        return (events, final)
+
+    # Provide 15 tool rounds — more than the normal 12 cap in _produce().
+    # chat_stream_deep allows up to 30, so all 15 should run.
+    text_events = [
+        _block_start(0, SimpleNamespace(type="text")),
+        _text_delta(0, "Done."),
+    ]
+    text_final = SimpleNamespace(stop_reason="end_turn", content=[])
+    eng = _make_engine([tool_round() for _ in range(15)] + [(text_events, text_final)])
+
+    out = list(
+        eng.chat_stream_deep(
+            [{"role": "user", "content": "complex task"}],
+            system="sys",
+            tools=[{"name": "search_senders", "description": "x", "input_schema": {"type": "object"}}],
+            tool_executor=lambda n, i: "ok",
+        )
+    )
+    assert out[-1]["type"] == "done"
+    # All 15 tool rounds + final text = 16 stream calls.
+    assert len(eng._anthropic.messages.calls) == 16
+
+
+def test_chat_stream_deep_same_event_protocol():
+    """chat_stream_deep yields the same event types as chat_stream."""
+    tool_block = SimpleNamespace(type="tool_use", name="get_inbox_overview", id="tu_deep")
+    round1_events = [
+        _block_start(0, tool_block),
+        _json_delta(0, "{}"),
+    ]
+    round1_final = SimpleNamespace(
+        stop_reason="tool_use",
+        content=[SimpleNamespace(type="tool_use", name="get_inbox_overview", id="tu_deep", input={})],
+    )
+    text_events = [
+        _block_start(0, SimpleNamespace(type="text")),
+        _text_delta(0, "Summary ready."),
+    ]
+    text_final = SimpleNamespace(stop_reason="end_turn", content=[])
+
+    eng = _make_engine([(round1_events, round1_final), (text_events, text_final)])
+    out = list(
+        eng.chat_stream_deep(
+            [{"role": "user", "content": "summarize all email"}],
+            system="sys",
+            tools=[{"name": "get_inbox_overview", "description": "x", "input_schema": {"type": "object"}}],
+            tool_executor=lambda n, i: "overview result",
+        )
+    )
+    types = [e["type"] for e in out]
+    assert "tool_start" in types
+    assert "tool_result" in types
+    assert "text_delta" in types
+    assert out[-1]["type"] == "done"
+
+
+def test_is_deep_task_detects_chained_intent():
+    from postmind.web.server import _is_deep_task
+
+    positives = [
+        [{"role": "user", "content": "find every vendor thread that went silent and draft follow-ups"}],
+        [{"role": "user", "content": "for each email from acme.com, write a reply"}],
+        [{"role": "user", "content": "scan my inbox for newsletters and then archive them"}],
+        [{"role": "user", "content": "find all threads with no reply and draft responses"}],
+        [{"role": "user", "content": "summarize all emails from last month"}],
+    ]
+    negatives = [
+        [{"role": "user", "content": "find newsletters older than 2 years"}],
+        [{"role": "user", "content": "delete emails from promo@example.com"}],
+        [{"role": "user", "content": "what is eating my storage?"}],
+        [],
+    ]
+    for msgs in positives:
+        assert _is_deep_task(msgs), f"expected deep task for: {msgs[-1]['content'] if msgs else '(empty)'}"
+    for msgs in negatives:
+        assert not _is_deep_task(msgs), f"expected NOT deep task for: {msgs[-1]['content'] if msgs else '(empty)'}"
+
+
+def test_is_deep_task_off_mode_skips_deep(monkeypatch):
+    """When deep_task_mode='off', _produce() should use the normal 12-iteration path."""
+    monkeypatch.setenv("POSTMIND_AI_MODE", "cloud")
+    monkeypatch.setenv("POSTMIND_CHAT_AI_MODE", "cloud")
+    monkeypatch.setenv("POSTMIND_DEEP_TASK_MODE", "off")
+    import postmind.config as config
+    config._settings = None
+
+    import postmind.core.ai_engine as ai_mod
+    from postmind.web import server
+
+    monkeypatch.setattr(server, "_get_web_account", lambda: "user@example.com")
+
+    captured = {}
+
+    class FakeAI:
+        def __init__(self, *a, **k):
+            pass
+
+        def chat_stream(self, messages, system=None, tools=None, tool_executor=None,
+                        max_tool_iterations=6, max_tokens=1024, **kw):
+            captured["iterations"] = max_tool_iterations
+            captured["tokens"] = max_tokens
+            yield {"type": "text_delta", "text": "done"}
+            yield {"type": "done"}
+
+        def chat_stream_deep(self, *a, **k):
+            raise AssertionError("chat_stream_deep should NOT be called when mode is off")
+
+    monkeypatch.setattr(ai_mod, "AIEngine", FakeAI)
+
+    from fastapi.testclient import TestClient
+    client = TestClient(server.app)
+    # A message that would trigger deep task heuristic if mode weren't off
+    resp = client.post(
+        "/agent/stream",
+        json={"messages": [{"role": "user", "content": "find every vendor thread and draft follow-ups"}]},
+        headers={"Accept": "text/event-stream"},
+    )
+    assert resp.status_code == 200
+    assert captured.get("iterations") == 12  # normal cap, not 30
+    config._settings = None

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -162,7 +163,7 @@ _oauth_tasks: dict[str, dict] = {}  # task_id → {status, email, error}
 
 _active_web_account: str | None = None  # email override set by the web UI switcher
 
-_executor = ThreadPoolExecutor(max_workers=4)
+_executor = ThreadPoolExecutor(max_workers=6)
 
 
 def _maybe_synthesize_rules(account_email: str) -> None:
@@ -794,7 +795,8 @@ def _render_brief_links(brief, account_email: str) -> str:
 
             rows.append(
                 f'<div class="brief-item group flex items-start gap-2.5 -mx-2 px-2 py-1.5 rounded-button '
-                f'hover:bg-surface-2 transition-colors" data-gmail-id="{gid}">'
+                f'hover:bg-surface-2 transition-colors cursor-pointer" data-gmail-id="{gid}" '
+                f'onclick="if(!event.target.closest(\'button,a\'))_briefPreview(\'{gid}\')">'
                 f"{unread_dot}{score_badge or _icon_external}{text_content}{actions}"
                 f"</div>"
             )
@@ -1706,6 +1708,8 @@ async def settings_page(request: Request):
                 "chat_cloud_model": s.chat_cloud_model or s.ai_model,
                 "chat_ollama_model": s.chat_ollama_model or s.ollama_model,
                 "agent_autopilot": s.agent_autopilot,
+                "deep_task_mode": s.deep_task_mode,
+                "deep_task_model": s.deep_task_model,
                 "auto_start_daemon": s.auto_start_daemon,
                 "daemon_interval_minutes": s.daemon_interval_minutes,
                 "auto_sync_on_first_run": s.auto_sync_on_first_run,
@@ -1728,6 +1732,8 @@ async def settings_page(request: Request):
                 "chat_cloud_model": "claude-sonnet-4-6",
                 "chat_ollama_model": "qwen2.5:32b",
                 "agent_autopilot": False,
+                "deep_task_mode": "cloud",
+                "deep_task_model": "",
                 "auto_start_daemon": True,
                 "daemon_interval_minutes": 30,
                 "auto_sync_on_first_run": True,
@@ -2474,6 +2480,18 @@ async def update_agent_settings(request: Request):
     on = form.get("agent_autopilot") == "on"
     _write_env({"POSTMIND_AGENT_AUTOPILOT": "true" if on else "false"})
     return RedirectResponse("/settings?success=agent", status_code=303)
+
+
+@app.post("/settings/deep-task")
+async def update_deep_task_settings(request: Request):
+    """Configure the Super Agent deep task backend (used for complex multi-step requests)."""
+    form = await request.form()
+    mode = (form.get("deep_task_mode") or "cloud").strip()
+    if mode not in ("cloud", "local", "off"):
+        raise HTTPException(status_code=400, detail="Invalid deep task mode")
+    model = (form.get("deep_task_model") or "").strip()
+    _write_env({"POSTMIND_DEEP_TASK_MODE": mode, "POSTMIND_DEEP_TASK_MODEL": model})
+    return RedirectResponse("/settings?success=deep_task", status_code=303)
 
 
 @app.post("/settings/daemon")
@@ -3518,6 +3536,53 @@ async def brief_deal_open(gid: str = ""):
     return RedirectResponse(gmail_url, status_code=302)
 
 
+@app.get("/email/preview/{gmail_id}")
+async def email_preview(gmail_id: str):
+    """Return subject, sender, and body text for a single email (used by brief preview modal)."""
+    if not gmail_id:
+        return JSONResponse({"ok": False, "error": "No message ID"}, status_code=400)
+
+    account_email = _get_web_account() or ""
+
+    def _fetch():
+        from postmind.core.storage import EmailRecord, get_session
+
+        # Attempt fast path: snippet from local cache
+        session = get_session()
+        rec = session.query(EmailRecord).filter_by(gmail_id=gmail_id).first()
+        snippet = rec.snippet if rec else ""
+
+        provider = _build_provider()
+        from postmind.core.providers.gmail import GmailProvider
+
+        if not isinstance(provider, GmailProvider):
+            # IMAP — no per-message body fetch; return snippet only
+            return {
+                "ok": True,
+                "subject": rec.subject if rec else "",
+                "sender": rec.sender_name or rec.sender_email if rec else "",
+                "body_text": snippet,
+                "is_snippet": True,
+            }
+
+        msg = provider.gmail_client.get_message(gmail_id)
+        return {
+            "ok": True,
+            "subject": msg.headers.subject or (rec.subject if rec else ""),
+            "sender": msg.sender_name or msg.sender_email or (rec.sender_name if rec else ""),
+            "body_text": msg.body_text or snippet,
+            "is_snippet": not msg.body_text,
+        }
+
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(_executor, _fetch)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+    return JSONResponse(result)
+
+
 # ── Rule proposals ────────────────────────────────────────────────────────────
 
 @app.get("/rules/proposals", response_class=HTMLResponse)
@@ -4083,6 +4148,11 @@ for find_largest_messages — it catches promotions, newsletters, and updates ac
 tabs. Avoid date filters unless the user asked; they drastically narrow results. \
 If that also returns nothing, tell the user and suggest checking the Sync page to pull in \
 more mail.
+- When stage_trash_query returns nothing: do NOT give up. Try a shorter time window \
+(e.g. older_than:1y if 2y returned nothing), or retry with newsletters_only=false to \
+check if the query itself matches anything. stage_trash_query searches live Gmail — it \
+does NOT depend on local sync. Only tell the user nothing was found after trying at least \
+one fallback.
 - When the user refers to "the Nth one" or "that email" from a prior search result, use \
 the message_id from that prior result directly with read_email or stage_trash. NEVER \
 re-run find_largest_messages or any search tool to re-locate a previously listed email.
@@ -4097,6 +4167,25 @@ Active account: {account_email or "none connected yet"}. AI mode: {mode}.
 
 Live inbox snapshot:
 {overview}"""
+
+
+_DEEP_TASK_RE = re.compile(
+    r"""
+    \b(every|all|each)\b.{0,40}\b(thread|email|sender|vendor)\b
+  | \bfind.{0,60}(and|then).{0,60}(draft|write|send|reply)\b
+  | \bfor\s+each\b
+  | \b(silent|quiet|no\s+response|no\s+reply).{0,60}(follow[- ]?up|draft)\b
+  | \bscan\s+(my|the)\s+(inbox|email).{0,40}(and|then)\b
+  | \bsummariz\w+.{0,40}all\b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _is_deep_task(messages: list[dict]) -> bool:
+    """Return True if the last user message looks like a long multi-step task."""
+    user_msgs = [m["content"] for m in messages if m["role"] == "user"]
+    return bool(user_msgs and _DEEP_TASK_RE.search(user_msgs[-1]))
 
 
 def _parse_agent_messages(body) -> list[dict]:
@@ -4246,7 +4335,28 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
             except Exception as exc:
                 return f"Couldn't resolve that query: {exc}"
             if not emails:
-                return f"Nothing matched '{gmail_query}' — nothing staged."
+                # If newsletters_only filtered everything, check whether the raw query
+                # returns anything so we can give the agent actionable feedback.
+                if newsletters_only:
+                    try:
+                        broader = agent_tools.resolve_trash_query(
+                            provider, gmail_query, newsletters_only=False, limit=10
+                        )
+                    except Exception:
+                        broader = []
+                    if broader:
+                        return (
+                            f"The query '{gmail_query}' returned {len(broader)} email(s) but none "
+                            f"carried a List-Unsubscribe header, so the newsletter filter removed them all. "
+                            f"Try again with newsletters_only=false to review all matching emails, "
+                            f"or pick a shorter time window (e.g. older_than:1y)."
+                        )
+                return (
+                    f"Nothing matched '{gmail_query}' in Gmail. "
+                    f"Suggestions: broaden the time window (e.g. older_than:1y instead of 2y), "
+                    f"remove date filters to check if any matching emails exist at all, "
+                    f"or ask the user to confirm they have emails that old in their account."
+                )
             token = _review_put(account_email, description, emails)
             sender_count = len({e["sender_email"] for e in emails})
             cards.append(
@@ -4591,7 +4701,29 @@ async def agent_stream_endpoint(request: Request):
             ai = AIEngine(**engine_kwargs)
             system = _build_agent_system(account_email, mode)
             executor_tool = _build_agent_tool_executor(account_email, ai, actions, cards)
-            if mode == "cloud":
+
+            # Determine whether to use the deep task path (higher iteration/token ceilings).
+            settings = get_settings()
+            deep_mode = settings.deep_task_mode  # "cloud" | "local" | "off"
+            use_deep = (deep_mode != "off") and (body.get("deep") or _is_deep_task(messages))
+
+            if mode == "cloud" and use_deep and deep_mode == "cloud":
+                deep_kwargs = dict(engine_kwargs)
+                if settings.deep_task_model:
+                    deep_kwargs["cloud_model"] = settings.deep_task_model
+                ai_deep = AIEngine(**deep_kwargs)
+                executor_deep = _build_agent_tool_executor(account_email, ai_deep, actions, cards)
+                _put({"type": "thinking", "text": "Working on it — this may take a moment for a complex task."})
+                stream_iter = ai_deep.chat_stream_deep(
+                    messages, system=system, tools=agent_tools.ALL_TOOLS,
+                    tool_executor=executor_deep,
+                )
+                for event in stream_iter:
+                    if event.get("type") == "tool_start":
+                        _put({"type": "tool_start", "name": event.get("name", "")})
+                    else:
+                        _put(event)
+            elif mode == "cloud":
                 for event in ai.chat_stream(
                     messages,
                     system=system,
@@ -4604,6 +4736,21 @@ async def agent_stream_endpoint(request: Request):
                         _put({"type": "tool_start", "name": event.get("name", "")})
                     else:
                         _put(event)
+            elif use_deep and deep_mode == "local":
+                # Deep local: non-streaming Ollama with higher iteration ceiling.
+                deep_ollama_kwargs = {
+                    "mode": "local",
+                    "ollama_model": settings.deep_task_model or engine_kwargs.get("ollama_model", ""),
+                }
+                ai_deep = AIEngine(**deep_ollama_kwargs)
+                executor_deep = _build_agent_tool_executor(account_email, ai_deep, actions, cards)
+                _put({"type": "thinking", "text": "Working on it — running locally, may take a moment."})
+                reply = ai_deep.chat(
+                    messages, system=system, tools=agent_tools.ALL_TOOLS,
+                    tool_executor=executor_deep, max_tool_iterations=30,
+                )
+                _put({"type": "text_delta", "text": reply})
+                _put({"type": "done"})
             else:
                 # Local: no token streaming (Ollama tool-use isn't reliably
                 # streamable). Run the non-streaming loop and emit the reply once.

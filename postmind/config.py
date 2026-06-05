@@ -120,6 +120,15 @@ class Settings(BaseSettings):
     chat_cloud_model: str = ""  # "" → ai_model
     chat_ollama_model: str = ""  # "" → ollama_model
 
+    # Deep task mode — lets the Super Agent run a higher-iteration loop for
+    # complex multi-step requests (e.g. "find every vendor thread and draft follow-ups").
+    # Uses the same backend as the chat assistant by default.
+    # "cloud" → Anthropic streaming with higher token/iteration ceilings
+    # "local" → Ollama non-streaming with higher iteration ceiling
+    # "off"   → always use the normal 12-iteration loop
+    deep_task_mode: str = "cloud"
+    deep_task_model: str = ""  # "" = inherit chat model; explicit e.g. "llama3"
+
     # Super Agent autopilot — when on, the agent auto-executes ONLY the low-risk,
     # fully-reversible actions (archive, label, mark_read) without a confirm card.
     # Trash, unsubscribe, and send always require explicit confirmation regardless.

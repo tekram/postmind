@@ -284,7 +284,17 @@
         pendingStep = null;
         msgs.scrollTop = msgs.scrollHeight;
       },
+      showThinking(text) {
+        if (this._thinkingEl) return;
+        const el = document.createElement("div");
+        el.className = "flex items-center gap-2 text-xs text-ink-subtle italic mb-1";
+        el.innerHTML = '<span class="inline-block w-1.5 h-1.5 rounded-full bg-ink-tertiary animate-pulse"></span>' + esc(text);
+        this._thinkingEl = el;
+        steps.insertBefore(el, steps.firstChild);
+        msgs.scrollTop = msgs.scrollHeight;
+      },
       appendText(t) {
+        if (this._thinkingEl) { this._thinkingEl.remove(); this._thinkingEl = null; }
         if (this.bub.classList.contains("hidden")) this.bub.classList.remove("hidden");
         this._raw = (this._raw || "") + t;
         this.textEl.innerHTML = fmt(this._raw);
@@ -378,6 +388,7 @@
           if (ev.type === "text_delta") view.appendText(ev.text || "");
           else if (ev.type === "tool_start") view.toolStart(ev.name);
           else if (ev.type === "tool_result") view.toolResult(ev.summary);
+          else if (ev.type === "thinking") view.showThinking(ev.text || "");
           else if (ev.type === "final") { finalActions = ev.actions || []; finalCards = ev.cards || []; }
           else if (ev.type === "guidance") { guidance = ev; }
           // ev.type === "done" → nothing more

@@ -129,6 +129,42 @@
 
 </div>
 
+<!-- Email preview modal -->
+<div id="brief-preview-modal"
+     class="fixed inset-0 z-50 flex items-center justify-center p-4"
+     style="display:none!important"
+     onclick="if(event.target===this)_briefPreviewClose()">
+  <div class="absolute inset-0 bg-ink/40 backdrop-blur-sm"></div>
+  <div class="relative bg-surface rounded-card shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden border border-hairline">
+    <!-- Modal header -->
+    <div class="flex items-start justify-between gap-3 px-5 py-4 border-b border-hairline shrink-0">
+      <div class="min-w-0">
+        <p id="brief-preview-subject" class="font-semibold text-ink text-[15px] leading-snug truncate"></p>
+        <p id="brief-preview-sender" class="text-ink-tertiary text-xs mt-0.5 truncate"></p>
+      </div>
+      <button onclick="_briefPreviewClose()"
+              class="shrink-0 p-1 rounded text-ink-tertiary hover:text-ink hover:bg-surface-2 transition-colors">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <!-- Modal body -->
+    <div class="overflow-y-auto px-5 py-4 flex-1">
+      <div id="brief-preview-loading" class="flex items-center justify-center py-8 gap-2 text-ink-tertiary text-sm">
+        <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+        </svg>
+        Loading…
+      </div>
+      <pre id="brief-preview-body"
+           class="hidden whitespace-pre-wrap font-sans text-sm text-ink leading-relaxed"></pre>
+      <p id="brief-preview-error" class="hidden text-danger text-sm"></p>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -175,6 +211,51 @@ async function _briefAction(btn) {
     btn.innerHTML = orig;
   }
 }
+
+function _briefPreviewClose() {
+  const m = document.getElementById('brief-preview-modal');
+  m.style.setProperty('display', 'none', 'important');
+}
+
+async function _briefPreview(gid) {
+  const modal   = document.getElementById('brief-preview-modal');
+  const loading = document.getElementById('brief-preview-loading');
+  const body    = document.getElementById('brief-preview-body');
+  const err     = document.getElementById('brief-preview-error');
+  const subject = document.getElementById('brief-preview-subject');
+  const sender  = document.getElementById('brief-preview-sender');
+
+  // Reset state and show modal
+  loading.classList.remove('hidden');
+  body.classList.add('hidden');
+  err.classList.add('hidden');
+  subject.textContent = '';
+  sender.textContent = '';
+  modal.style.setProperty('display', 'flex', 'important');
+
+  try {
+    const res  = await fetch(`/email/preview/${encodeURIComponent(gid)}`);
+    const data = await res.json();
+    loading.classList.add('hidden');
+    if (data.ok) {
+      subject.textContent = data.subject || '(no subject)';
+      sender.textContent  = data.sender  || '';
+      body.textContent    = data.body_text || '(No preview available)';
+      body.classList.remove('hidden');
+    } else {
+      err.textContent = data.error || 'Failed to load email.';
+      err.classList.remove('hidden');
+    }
+  } catch (e) {
+    loading.classList.add('hidden');
+    err.textContent = 'Request failed: ' + e;
+    err.classList.remove('hidden');
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') _briefPreviewClose();
+});
 
 async function _briefBulk(action, ids) {
   if (!ids || !ids.length) return;

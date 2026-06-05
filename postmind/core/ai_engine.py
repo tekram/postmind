@@ -972,6 +972,30 @@ then the body. No preamble, no sign-off commentary.
         }
         yield {"type": "done"}
 
+    def chat_stream_deep(
+        self,
+        messages: list[dict],
+        system: str,
+        tools: list[dict] | None = None,
+        tool_executor=None,
+        max_tokens: int = 4096,
+        max_tool_iterations: int = 30,
+    ):
+        """Streaming loop for complex multi-step tasks.
+
+        Same event protocol as :meth:`chat_stream` with higher per-turn token
+        budget (4096 vs 1024) and iteration ceiling (30 vs 6) so the model can
+        reason across long chained tool sequences without truncation.
+        """
+        yield from self.chat_stream(
+            messages,
+            system=system,
+            tools=tools,
+            tool_executor=tool_executor,
+            max_tokens=max_tokens,
+            max_tool_iterations=max_tool_iterations,
+        )
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 

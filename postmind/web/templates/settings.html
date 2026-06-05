@@ -287,6 +287,60 @@
         </label>
         <button type="submit" class="pm-btn mt-3">Save autopilot setting</button>
       </form>
+
+      <div class="border-t border-hairline mt-5 pt-5">
+        <p class="text-sm font-medium text-ink">Deep task mode</p>
+        <p class="text-xs text-ink-subtle mt-0.5 mb-3">For complex multi-step requests (e.g. "find every vendor thread and draft follow-ups"), the agent uses higher token and iteration ceilings. Choose which backend handles those tasks.</p>
+        <form action="/settings/deep-task" method="POST" class="space-y-3">
+          <label class="flex items-start gap-3 p-3 rounded-input border cursor-pointer transition-colors
+                        {% if deep_task_mode == 'cloud' %}border-warning bg-warning-bg{% else %}border-hairline hover:border-hairline-strong{% endif %}">
+            <input type="radio" name="deep_task_mode" value="cloud" {% if deep_task_mode == 'cloud' %}checked{% endif %}
+                   class="mt-0.5 text-warning">
+            <div class="flex-1">
+              <p class="text-sm font-medium text-ink">Cloud <span class="text-ink-tertiary font-normal">(Claude)</span></p>
+              <p class="text-xs text-ink-subtle mt-0.5">Streaming, most capable. Uses your Anthropic API key.</p>
+              {% if deep_task_mode == 'cloud' %}
+              <div class="mt-2 flex items-center gap-2">
+                <label class="text-xs text-ink-subtle w-24 shrink-0">Model</label>
+                <input type="text" name="deep_task_model" value="{{ deep_task_model }}" placeholder="inherit from Chat Assistant"
+                       class="pm-input flex-1 text-xs py-1.5 font-mono">
+              </div>
+              {% endif %}
+            </div>
+          </label>
+
+          <label class="flex items-start gap-3 p-3 rounded-input border cursor-pointer transition-colors
+                        {% if deep_task_mode == 'local' %}border-accent bg-accent-subtle{% else %}border-hairline hover:border-hairline-strong{% endif %}">
+            <input type="radio" name="deep_task_mode" value="local" {% if deep_task_mode == 'local' %}checked{% endif %}
+                   class="mt-0.5 text-accent">
+            <div class="flex-1">
+              <p class="text-sm font-medium text-ink">Local <span class="text-ink-tertiary font-normal">(Ollama)</span></p>
+              <p class="text-xs text-ink-subtle mt-0.5">Private — runs on your machine. Non-streaming; reply appears when the task finishes.</p>
+              {% if deep_task_mode == 'local' %}
+              <div class="mt-2 flex items-center gap-2">
+                <label class="text-xs text-ink-subtle w-24 shrink-0">Model</label>
+                <input type="text" name="deep_task_model" value="{{ deep_task_model }}" placeholder="inherit from Chat Assistant"
+                       class="pm-input flex-1 text-xs py-1.5 font-mono">
+              </div>
+              {% endif %}
+            </div>
+          </label>
+
+          <label class="flex items-start gap-3 p-3 rounded-input border cursor-pointer transition-colors
+                        {% if deep_task_mode == 'off' %}border-ink bg-surface-2{% else %}border-hairline hover:border-hairline-strong{% endif %}">
+            <input type="radio" name="deep_task_mode" value="off" {% if deep_task_mode == 'off' %}checked{% endif %}
+                   class="mt-0.5 text-ink">
+            <div>
+              <p class="text-sm font-medium text-ink">Off</p>
+              <p class="text-xs text-ink-subtle mt-0.5">Always use the standard 12-iteration loop, even for complex tasks.</p>
+            </div>
+          </label>
+
+          <div class="pt-1">
+            <button type="submit" class="pm-btn">Save deep task setting</button>
+          </div>
+        </form>
+      </div>
     </div>
   </div>
 

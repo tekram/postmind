@@ -648,20 +648,36 @@ def _parse_headers(header_list: list[dict]) -> MessageHeader:
     )
 
 
+def _decode_part(data: str, headers: list[dict]) -> str:
+    """Base64-decode a MIME part and apply Content-Transfer-Encoding if needed."""
+    import quopri
+
+    raw = base64.urlsafe_b64decode(data + "==")
+    cte = ""
+    for h in headers:
+        if h.get("name", "").lower() == "content-transfer-encoding":
+            cte = h.get("value", "").lower().strip()
+            break
+    if cte == "quoted-printable":
+        raw = quopri.decodestring(raw)
+    return raw.decode("utf-8", errors="replace")
+
+
 def _extract_body(payload: dict) -> tuple[str, str]:
     """Recursively extract text/plain and text/html from a MIME payload."""
     text = ""
     html = ""
     mime_type = payload.get("mimeType", "")
+    headers = payload.get("headers", [])
 
     if mime_type == "text/plain":
         data = payload.get("body", {}).get("data", "")
         if data:
-            text = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
+            text = _decode_part(data, headers)
     elif mime_type == "text/html":
         data = payload.get("body", {}).get("data", "")
         if data:
-            html = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
+            html = _decode_part(data, headers)
     elif mime_type.startswith("multipart/"):
         for part in payload.get("parts", []):
             t, h = _extract_body(part)
