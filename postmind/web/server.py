@@ -776,13 +776,13 @@ def _render_brief_links(brief, account_email: str) -> str:
 
             archive_btn = (
                 f'<button data-gid="{gid}" data-action="archive" '
-                f'onclick="_briefAction(this)" title="Archive" '
+                f'onclick="event.stopPropagation();_briefAction(this)" title="Archive" '
                 f'class="{btn_base} hover:text-accent hover:bg-accent-subtle">'
                 f"{_icon_archive}</button>"
             )
             trash_btn = (
                 f'<button data-gid="{gid}" data-action="trash" '
-                f'onclick="_briefAction(this)" title="Trash" '
+                f'onclick="event.stopPropagation();_briefAction(this)" title="Trash" '
                 f'class="{btn_base} hover:text-danger hover:bg-danger-bg">'
                 f"{_icon_trash}</button>"
             )
