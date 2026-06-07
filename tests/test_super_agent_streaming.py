@@ -85,6 +85,7 @@ def _make_engine(rounds):
     eng._cloud_model = "fake-model"
     eng._anthropic = _FakeAnthropic(rounds)
     eng._max_batch = 10
+    eng._thinking_budget = 0  # thinking disabled by default in existing tests
     return eng
 
 

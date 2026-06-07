@@ -73,10 +73,17 @@ class AIEngine:
         mode: str | None = None,
         cloud_model: str | None = None,
         ollama_model: str | None = None,
+        thinking_budget: int | None = None,
     ):
         """Construct an engine. ``mode``/``cloud_model``/``ollama_model`` override
         the global settings — used by the chat assistant so it can run on a
-        different backend than the rest of the app."""
+        different backend than the rest of the app.
+
+        ``thinking_budget`` overrides ``settings.thinking_budget_tokens`` and is
+        only honoured in cloud mode.  Pass 0 to force-disable thinking even when
+        ``settings.extended_thinking`` is True.  Pass a positive integer to
+        enable thinking with that token budget regardless of the setting.
+        """
         settings = get_settings()
         self._mode = mode or settings.ai_mode
 
@@ -118,6 +125,30 @@ class AIEngine:
             )
 
         self._max_batch = settings.ai_max_classify_batch
+
+        # Extended thinking budget: explicit arg > setting > 0 (disabled).
+        # Only meaningful for cloud mode; silently ignored otherwise.
+        if thinking_budget is not None:
+            self._thinking_budget = max(0, int(thinking_budget))
+        elif self._mode == "cloud" and settings.extended_thinking:
+            self._thinking_budget = max(1024, int(settings.thinking_budget_tokens))
+        else:
+            self._thinking_budget = 0
+
+    # ── Extended thinking helpers ─────────────────────────────────────────────
+
+    def _thinking_kwargs(self, max_tokens: int) -> tuple[dict, int]:
+        """Return (extra_kwargs, effective_max_tokens) for extended thinking.
+
+        When thinking is disabled returns ({}, max_tokens) unchanged.
+        When enabled: adds ``thinking`` param and bumps max_tokens so the model
+        has at least ``budget + 2048`` tokens for its response after thinking.
+        The Anthropic API requires max_tokens > budget_tokens.
+        """
+        if not self._thinking_budget:
+            return {}, max_tokens
+        effective = max(max_tokens, self._thinking_budget + 2048)
+        return {"thinking": {"type": "enabled", "budget_tokens": self._thinking_budget}}, effective
 
     def _complete(self, system: str, prompt: str, max_tokens: int = 2048) -> str:
         """Send a prompt to the configured backend and return the text response."""
@@ -796,14 +827,16 @@ then the body. No preamble, no sign-off commentary.
             cached_tools = [dict(t) for t in tools]
             cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
 
+        thinking_extra, effective_max_tokens = self._thinking_kwargs(max_tokens)
         convo = [{"role": m["role"], "content": m["content"]} for m in messages]
 
         for _ in range(max_tool_iterations):
-            kwargs = {
+            kwargs: dict = {
                 "model": self._cloud_model,
-                "max_tokens": max_tokens,
+                "max_tokens": effective_max_tokens,
                 "system": system_blocks,
                 "messages": convo,
+                **thinking_extra,
             }
             if cached_tools:
                 kwargs["tools"] = cached_tools
@@ -811,6 +844,8 @@ then the body. No preamble, no sign-off commentary.
             resp = self._anthropic.messages.create(**kwargs)
 
             if resp.stop_reason == "tool_use":
+                # Preserve thinking blocks alongside tool_use blocks so the model
+                # retains its reasoning context across multi-turn tool loops.
                 convo.append({"role": "assistant", "content": resp.content})
                 tool_results = []
                 for block in resp.content:
@@ -882,20 +917,22 @@ then the body. No preamble, no sign-off commentary.
             cached_tools = [dict(t) for t in tools]
             cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
 
+        thinking_extra, effective_max_tokens = self._thinking_kwargs(max_tokens)
         convo = [{"role": m["role"], "content": m["content"]} for m in messages]
 
         for _ in range(max_tool_iterations):
-            kwargs = {
+            kwargs: dict = {
                 "model": self._cloud_model,
-                "max_tokens": max_tokens,
+                "max_tokens": effective_max_tokens,
                 "system": system_blocks,
                 "messages": convo,
+                **thinking_extra,
             }
             if cached_tools:
                 kwargs["tools"] = cached_tools
 
             # Per-iteration accumulation of streamed content blocks.
-            # index -> {"type": "text"|"tool_use", "text": str, "name", "id", "json": str}
+            # index -> {"type": "text"|"tool_use"|"thinking", ...}
             blocks: dict[int, dict] = {}
 
             with self._anthropic.messages.stream(**kwargs) as stream:
@@ -913,6 +950,8 @@ then the body. No preamble, no sign-off commentary.
                                 "id": getattr(block, "id", ""),
                                 "json": "",
                             }
+                        elif btype == "thinking":
+                            blocks[event.index] = {"type": "thinking", "thinking": ""}
                     elif etype == "content_block_delta":
                         delta = event.delta
                         dtype = getattr(delta, "type", None)
@@ -926,6 +965,15 @@ then the body. No preamble, no sign-off commentary.
                                 yield {"type": "text_delta", "text": text}
                         elif dtype == "input_json_delta":
                             cur["json"] += getattr(delta, "partial_json", "") or ""
+                        elif dtype == "thinking_delta" and self._thinking_budget:
+                            # Stream model's internal reasoning to the UI so the user
+                            # can see the agent thinking in real time.  Gate on
+                            # thinking_budget so stray blocks are silently dropped
+                            # when thinking was not requested.
+                            thinking_text = getattr(delta, "thinking", "") or ""
+                            cur["thinking"] += thinking_text
+                            if thinking_text:
+                                yield {"type": "thinking_delta", "text": thinking_text}
 
                 # Final accumulated message (authoritative content + stop_reason).
                 final = stream.get_final_message()
@@ -934,8 +982,8 @@ then the body. No preamble, no sign-off commentary.
                 yield {"type": "done"}
                 return
 
-            # Append the assistant turn verbatim, then run each tool and build the
-            # tool_result user turn — same shape as _chat_cloud.
+            # Preserve the FULL content (including thinking blocks) as the assistant
+            # turn so the model retains its reasoning context across tool-use rounds.
             convo.append({"role": "assistant", "content": final.content})
             tool_results = []
             for block in final.content:
@@ -986,15 +1034,30 @@ then the body. No preamble, no sign-off commentary.
         Same event protocol as :meth:`chat_stream` with higher per-turn token
         budget (4096 vs 1024) and iteration ceiling (30 vs 6) so the model can
         reason across long chained tool sequences without truncation.
+
+        When extended thinking is enabled, deep mode uses a larger thinking
+        budget (16 000 tokens) so the model can reason thoroughly over complex
+        multi-step plans.  The effective budget is max(configured, 16_000) so
+        turning on thinking always gives the deep path the full budget.
         """
-        yield from self.chat_stream(
-            messages,
-            system=system,
-            tools=tools,
-            tool_executor=tool_executor,
-            max_tokens=max_tokens,
-            max_tool_iterations=max_tool_iterations,
-        )
+        # Upgrade the thinking budget for deep mode: ensure at least 16k tokens
+        # of internal reasoning so the model can plan multi-step tool chains.
+        if self._thinking_budget > 0:
+            original_budget = self._thinking_budget
+            self._thinking_budget = max(self._thinking_budget, 16_000)
+
+        try:
+            yield from self.chat_stream(
+                messages,
+                system=system,
+                tools=tools,
+                tool_executor=tool_executor,
+                max_tokens=max_tokens,
+                max_tool_iterations=max_tool_iterations,
+            )
+        finally:
+            if self._thinking_budget > 0:
+                self._thinking_budget = original_budget  # restore for reuse
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

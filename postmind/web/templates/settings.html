@@ -344,6 +344,61 @@
     </div>
   </div>
 
+  <!-- Extended Thinking -->
+  <div class="pm-card mb-5">
+    <div class="px-5 py-4 border-b border-hairline">
+      <div class="flex items-center gap-2.5">
+        <!-- Lucide: brain -->
+        <svg class="w-4 h-4 shrink-0 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9.5 2A2.5 2.5 0 017 4.5v0A2.5 2.5 0 014.5 7H4a2 2 0 00-2 2v0a2 2 0 002 2h.5A2.5 2.5 0 017 13.5v0A2.5 2.5 0 019.5 16v1a2 2 0 002 2h1a2 2 0 002-2v-1a2.5 2.5 0 012.5-2.5h.5a2 2 0 002-2v0a2 2 0 00-2-2h-.5A2.5 2.5 0 0117 7v0a2.5 2.5 0 00-2.5-2.5h-5z"/>
+        </svg>
+        <p class="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-tertiary">Intelligence</p>
+      </div>
+      <h2 class="font-semibold text-ink mt-2">Extended Thinking</h2>
+      <p class="text-ink-subtle text-xs mt-0.5">Let the model reason internally before answering — improves accuracy on complex planning tasks. Cloud only.</p>
+    </div>
+    <div class="p-5">
+      <form action="/settings/thinking" method="POST" class="space-y-4">
+        <label class="flex items-start gap-3 cursor-pointer">
+          <input type="checkbox" name="extended_thinking" {% if extended_thinking %}checked{% endif %}
+                 class="mt-0.5 rounded text-accent" id="thinking-toggle">
+          <div>
+            <p class="text-sm font-medium text-ink">Enable extended thinking</p>
+            <p class="text-xs text-ink-subtle mt-0.5">
+              The model spends up to <strong>budget_tokens</strong> on internal reasoning before each response.
+              Thinking content streams live in the Super Agent so you can watch the model plan in real time.
+              Works best with <strong>Deep Task mode</strong> on — the deep path automatically gets a 16k token budget.
+            </p>
+          </div>
+        </label>
+
+        <div id="thinking-budget-row" class="{% if not extended_thinking %}opacity-50 pointer-events-none{% endif %} flex items-center gap-3 pl-6">
+          <label class="text-xs text-ink-subtle w-28 shrink-0">Budget tokens</label>
+          <input type="number" name="thinking_budget_tokens" value="{{ thinking_budget_tokens }}"
+                 min="1024" max="100000" step="1024"
+                 class="pm-input w-36 text-sm font-mono">
+          <span class="text-xs text-ink-tertiary">min 1 024 · default 8 000 · deep mode upgrades to 16 000</span>
+        </div>
+
+        <div class="pt-1">
+          <button type="submit" class="pm-btn">Save thinking settings</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <script>
+  (function() {
+    var toggle = document.getElementById('thinking-toggle');
+    var row = document.getElementById('thinking-budget-row');
+    if (toggle && row) {
+      toggle.addEventListener('change', function() {
+        row.classList.toggle('opacity-50', !this.checked);
+        row.classList.toggle('pointer-events-none', !this.checked);
+      });
+    }
+  })();
+  </script>
+
   <!-- Background sync -->
   <div class="pm-card mb-5">
     <div class="px-5 py-4 border-b border-hairline">

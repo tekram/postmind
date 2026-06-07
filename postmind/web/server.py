@@ -1740,6 +1740,8 @@ async def settings_page(request: Request):
                 "agent_autopilot": s.agent_autopilot,
                 "deep_task_mode": s.deep_task_mode,
                 "deep_task_model": s.deep_task_model,
+                "extended_thinking": s.extended_thinking,
+                "thinking_budget_tokens": s.thinking_budget_tokens,
                 "auto_start_daemon": s.auto_start_daemon,
                 "daemon_interval_minutes": s.daemon_interval_minutes,
                 "auto_sync_on_first_run": s.auto_sync_on_first_run,
@@ -1764,6 +1766,8 @@ async def settings_page(request: Request):
                 "agent_autopilot": False,
                 "deep_task_mode": "cloud",
                 "deep_task_model": "",
+                "extended_thinking": False,
+                "thinking_budget_tokens": 8000,
                 "auto_start_daemon": True,
                 "daemon_interval_minutes": 30,
                 "auto_sync_on_first_run": True,
@@ -2600,6 +2604,25 @@ async def update_deep_task_settings(request: Request):
     model = (form.get("deep_task_model") or "").strip()
     _write_env({"POSTMIND_DEEP_TASK_MODE": mode, "POSTMIND_DEEP_TASK_MODEL": model})
     return RedirectResponse("/settings?success=deep_task", status_code=303)
+
+
+@app.post("/settings/thinking")
+async def update_thinking_settings(request: Request):
+    """Toggle extended thinking and configure the token budget."""
+    form = await request.form()
+    enabled = form.get("extended_thinking") == "on"
+    raw_budget = form.get("thinking_budget_tokens") or "8000"
+    try:
+        budget = max(1024, min(int(raw_budget), 100_000))
+    except (ValueError, TypeError):
+        budget = 8000
+    _write_env(
+        {
+            "POSTMIND_EXTENDED_THINKING": "true" if enabled else "false",
+            "POSTMIND_THINKING_BUDGET_TOKENS": str(budget),
+        }
+    )
+    return RedirectResponse("/settings?success=thinking", status_code=303)
 
 
 @app.post("/settings/daemon")
@@ -4752,7 +4775,11 @@ async def agent_endpoint(request: Request):
         from postmind.core import agent_tools
         from postmind.core.ai_engine import AIEngine
 
-        ai = AIEngine(**engine_kwargs)
+        kwargs = dict(engine_kwargs)
+        settings = get_settings()
+        if mode == "cloud" and settings.extended_thinking:
+            kwargs["thinking_budget"] = settings.thinking_budget_tokens
+        ai = AIEngine(**kwargs)
         system = _build_agent_system(account_email, mode)
         executor_tool = _build_agent_tool_executor(account_email, ai, actions, cards)
         return ai.chat(
@@ -4857,15 +4884,22 @@ async def agent_stream_endpoint(request: Request):
                 deep_kwargs = dict(engine_kwargs)
                 if settings.deep_task_model:
                     deep_kwargs["cloud_model"] = settings.deep_task_model
+                # Extended thinking: pass the configured budget so the deep
+                # engine automatically upgrades to 16k for this path.
+                if settings.extended_thinking:
+                    deep_kwargs["thinking_budget"] = settings.thinking_budget_tokens
                 ai_deep = AIEngine(**deep_kwargs)
                 executor_deep = _build_agent_tool_executor(account_email, ai_deep, actions, cards)
-                _put({"type": "thinking", "text": "Working on it — this may take a moment for a complex task."})
+                if not settings.extended_thinking:
+                    # Static "working…" hint only when thinking isn't streaming live
+                    _put({"type": "thinking", "text": "Working on it — this may take a moment for a complex task."})
                 stream_iter = ai_deep.chat_stream_deep(
-                    messages, system=system, tools=agent_tools.ALL_TOOLS,
+                    messages, system=system, tools=_all_tools,
                     tool_executor=executor_deep,
                 )
                 for event in stream_iter:
-                    if event.get("type") == "tool_start":
+                    etype = event.get("type")
+                    if etype == "tool_start":
                         _put({"type": "tool_start", "name": event.get("name", "")})
                     else:
                         _put(event)

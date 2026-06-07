@@ -135,6 +135,17 @@ class Settings(BaseSettings):
     # Off by default; everything stays undoable from /undo.
     agent_autopilot: bool = False
 
+    # Extended thinking — lets the model reason internally before responding.
+    # Only applies to cloud (Anthropic) mode; ignored in local/off mode.
+    # When enabled, the model emits a <thinking> block before each reply, which
+    # is streamed to the UI and preserved in multi-turn conversations so reasoning
+    # context carries across tool-use rounds.
+    # budget_tokens controls how many tokens the model can spend on internal
+    # reasoning per turn. Must be ≥ 1024; max_tokens is auto-bumped to
+    # budget + 2048 so the model has room to respond after thinking.
+    extended_thinking: bool = False
+    thinking_budget_tokens: int = 8000
+
     # Background sync / daemon
     auto_start_daemon: bool = True  # Start heartbeat daemon automatically on `postmind serve`
     daemon_interval_minutes: int = 30  # How often the daemon polls for new mail
