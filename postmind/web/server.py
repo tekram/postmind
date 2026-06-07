@@ -617,19 +617,21 @@ def _render_brief_links(brief, account_email: str) -> str:
     is_gmail = load_account_config(account_email).get("provider", "gmail") == "gmail"
 
     # Bulk action bar
-    all_ids_js = _json.dumps([str(item.get("gmail_id") or "") for item in items if item.get("gmail_id")])
+    all_ids_js = _json.dumps(
+        [str(item.get("gmail_id") or "") for item in items if item.get("gmail_id")]
+    )
     bulk_bar = (
         '<div class="flex items-center justify-between mb-2">'
         '<p class="text-ink-subtle text-[11px] font-semibold uppercase tracking-[0.06em]">What needs attention</p>'
         '<div class="flex gap-1.5">'
-        f'<button onclick="_briefBulk(\'archive\', {_html.escape(all_ids_js)})" '
+        f"<button onclick=\"_briefBulk('archive', {_html.escape(all_ids_js)})\" "
         'title="Archive all" '
         'class="flex items-center gap-1 text-[11px] text-ink-tertiary hover:text-accent border border-hairline hover:border-accent-border bg-transparent hover:bg-accent-subtle rounded px-2 py-0.5 transition-colors">'
-        f'{_icon_archive}<span>Archive all</span></button>'
-        f'<button onclick="_briefBulk(\'trash\', {_html.escape(all_ids_js)})" '
+        f"{_icon_archive}<span>Archive all</span></button>"
+        f"<button onclick=\"_briefBulk('trash', {_html.escape(all_ids_js)})\" "
         'title="Trash all" '
         'class="flex items-center gap-1 text-[11px] text-ink-tertiary hover:text-danger border border-hairline hover:border-danger-border bg-transparent hover:bg-danger-bg rounded px-2 py-0.5 transition-colors">'
-        f'{_icon_trash}<span>Trash all</span></button>'
+        f"{_icon_trash}<span>Trash all</span></button>"
         "</div></div>"
     )
 
@@ -668,12 +670,13 @@ def _render_brief_links(brief, account_email: str) -> str:
 
             unread_dot = (
                 '<span class="shrink-0 w-1.5 h-1.5 rounded-full bg-accent mt-1.5" title="Unread"></span>'
-                if is_unread else
-                '<span class="shrink-0 w-1.5 h-1.5 mt-1.5"></span>'
+                if is_unread
+                else '<span class="shrink-0 w-1.5 h-1.5 mt-1.5"></span>'
             )
             sent_span = (
                 f'<span class="text-ink-tertiary text-[11px] tabular-nums whitespace-nowrap">{sent_label}</span>'
-                if sent_label else ""
+                if sent_label
+                else ""
             )
             score_badge = _DEAL_SCORE_BADGE.get(deal_score, "") if deal_score else ""
 
@@ -683,8 +686,8 @@ def _render_brief_links(brief, account_email: str) -> str:
                 f'<span class="block text-ink text-sm {subject_weight} truncate">{subject}</span>'
                 f'<span class="flex items-center gap-1.5 text-ink-tertiary text-xs truncate">'
                 f'<span class="truncate">{sender}</span>'
-                f'{("<span>·</span>" + sent_span) if sent_span else ""}'
-                f'</span>'
+                f"{('<span>·</span>' + sent_span) if sent_span else ''}"
+                f"</span>"
                 f"</span>"
             )
 
@@ -692,7 +695,9 @@ def _render_brief_links(brief, account_email: str) -> str:
             if is_gmail and gid:
                 if show_deal_score:
                     # Route deal opens through tracking endpoint
-                    open_url = f"/brief/deal-open?gid={_quote(str(item.get('gmail_id') or ''), safe='')}"
+                    open_url = (
+                        f"/brief/deal-open?gid={_quote(str(item.get('gmail_id') or ''), safe='')}"
+                    )
                 else:
                     open_url = (
                         "https://mail.google.com/mail/u/0/"
@@ -738,7 +743,9 @@ def _render_brief_links(brief, account_email: str) -> str:
     if items:
         inbox_pane = bulk_bar + _build_rows(items, "brief-items-list", show_deal_score=False)
     else:
-        inbox_pane = '<p class="text-ink-tertiary text-sm">Nothing needs your attention right now.</p>'
+        inbox_pane = (
+            '<p class="text-ink-tertiary text-sm">Nothing needs your attention right now.</p>'
+        )
 
     # Deals pane — sorted by deal_score desc (already sorted by generator)
     if deals:
@@ -746,7 +753,9 @@ def _render_brief_links(brief, account_email: str) -> str:
     else:
         deals_pane = '<p class="text-ink-tertiary text-sm">No deals or offers found in your recent emails.</p>'
 
-    deals_badge = f'<span class="ml-1 text-[10px] text-ink-tertiary">({len(deals)})</span>' if deals else ""
+    deals_badge = (
+        f'<span class="ml-1 text-[10px] text-ink-tertiary">({len(deals)})</span>' if deals else ""
+    )
 
     tab_bar = (
         '<div class="flex gap-0 mb-3 border-b border-hairline">'
@@ -1640,6 +1649,7 @@ async def settings_page(request: Request):
                 "chat_cloud_model": s.chat_cloud_model or s.ai_model,
                 "chat_ollama_model": s.chat_ollama_model or s.ollama_model,
                 "agent_autopilot": s.agent_autopilot,
+                "agent_power_mode": s.agent_power_mode,
             }
         )
     except Exception:
@@ -1659,6 +1669,7 @@ async def settings_page(request: Request):
                 "chat_cloud_model": "claude-sonnet-4-6",
                 "chat_ollama_model": "qwen2.5:32b",
                 "agent_autopilot": False,
+                "agent_power_mode": False,
             }
         )
 
@@ -2397,10 +2408,16 @@ async def update_chat_settings(request: Request):
 
 @app.post("/settings/agent")
 async def update_agent_settings(request: Request):
-    """Toggle Super Agent autopilot (auto-execute reversible actions, opt-in)."""
+    """Toggle Super Agent autopilot and power mode settings."""
     form = await request.form()
     on = form.get("agent_autopilot") == "on"
-    _write_env({"POSTMIND_AGENT_AUTOPILOT": "true" if on else "false"})
+    power_mode = form.get("agent_power_mode") == "on"
+    _write_env(
+        {
+            "POSTMIND_AGENT_AUTOPILOT": "true" if on else "false",
+            "POSTMIND_AGENT_POWER_MODE": "true" if power_mode else "false",
+        }
+    )
     return RedirectResponse("/settings?success=agent", status_code=303)
 
 
@@ -3162,6 +3179,7 @@ async def triage_classify_stream(request: Request):
 
             # Load behavioral priors once per classify session
             from postmind.core.storage import UserActionRepo
+
             _acct = _get_web_account() or ""
             _priors = UserActionRepo(get_session()).sender_action_counts(_acct) if _acct else {}
 
@@ -3314,7 +3332,7 @@ async def triage_trash(request: Request):
 async def brief_action(request: Request):
     """Trash or archive one or many emails directly from the Daily Brief page."""
     form = await request.form()
-    action = (form.get("action") or "").strip()          # trash | archive | bulk_trash | bulk_archive
+    action = (form.get("action") or "").strip()  # trash | archive | bulk_trash | bulk_archive
     gmail_id = (form.get("gmail_id") or "").strip()
     gmail_ids_raw = form.getlist("gmail_ids[]")
 
@@ -3322,7 +3340,7 @@ async def brief_action(request: Request):
     if not ids:
         return JSONResponse({"ok": False, "error": "No message IDs"}, status_code=400)
 
-    base_action = action.removeprefix("bulk_")           # "trash" or "archive"
+    base_action = action.removeprefix("bulk_")  # "trash" or "archive"
     if base_action not in ("trash", "archive"):
         return JSONResponse({"ok": False, "error": f"Unknown action: {action}"}, status_code=400)
 
@@ -3356,9 +3374,7 @@ async def brief_action(request: Request):
         # Record behavioral signals (batch lookup to avoid N+1)
         email_recs = {
             r.gmail_id: r
-            for r in session.query(EmailRecord)
-            .filter(EmailRecord.gmail_id.in_(ids))
-            .all()
+            for r in session.query(EmailRecord).filter(EmailRecord.gmail_id.in_(ids)).all()
         }
         cls_map = ClassificationCacheRepo(session).get_many(ids)
         repo = UserActionRepo(session)
@@ -3424,6 +3440,7 @@ async def brief_deal_open(gid: str = ""):
         pass
 
     from urllib.parse import quote as _q
+
     gmail_url = (
         "https://mail.google.com/mail/u/0/"
         f"?authuser={_q(account_email, safe='@')}#all/{_q(gid, safe='')}"
@@ -3432,6 +3449,7 @@ async def brief_deal_open(gid: str = ""):
 
 
 # ── Rule proposals ────────────────────────────────────────────────────────────
+
 
 @app.get("/rules/proposals", response_class=HTMLResponse)
 async def rules_proposals_fragment(request: Request):
@@ -3458,13 +3476,13 @@ async def rules_proposals_fragment(request: Request):
             f'<div class="min-w-0 flex-1">'
             f'<p class="text-sm font-medium text-ink truncate">{name}</p>'
             f'<p class="text-xs text-ink-subtle mt-0.5">{explanation}</p>'
-            f'</div>'
+            f"</div>"
             f'<div class="shrink-0 flex gap-1.5">'
             f'<button hx-post="/rules/proposals/{p.id}/confirm" hx-target="#proposal-{p.id}" hx-swap="outerHTML" '
             f'class="pm-btn text-xs py-1 px-2.5">Create rule</button>'
             f'<button hx-post="/rules/proposals/{p.id}/dismiss" hx-target="#proposal-{p.id}" hx-swap="outerHTML" '
             f'class="pm-btn-secondary text-xs py-1 px-2.5">Dismiss</button>'
-            f'</div></div>'
+            f"</div></div>"
         )
 
     inner = "".join(cards)
@@ -3474,9 +3492,9 @@ async def rules_proposals_fragment(request: Request):
         f'<svg class="w-4 h-4 text-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">'
         f'<path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>'
         f'<p class="text-sm font-semibold text-ink">Suggested automations based on your actions</p>'
-        f'</div>'
-        f'{inner}'
-        f'</div>'
+        f"</div>"
+        f"{inner}"
+        f"</div>"
     )
 
 
@@ -3485,9 +3503,7 @@ async def rule_proposal_confirm(rule_id: int, request: Request):
     from postmind.core.storage import RuleRepo, get_session
 
     RuleRepo(get_session()).confirm_proposal(rule_id)
-    return HTMLResponse(
-        '<div class="py-2 text-xs text-success">✓ Rule created and active.</div>'
-    )
+    return HTMLResponse('<div class="py-2 text-xs text-success">✓ Rule created and active.</div>')
 
 
 @app.post("/rules/proposals/{rule_id}/dismiss", response_class=HTMLResponse)
@@ -4039,6 +4055,16 @@ def _agent_mode_guidance(mode: str) -> dict | None:
     return None
 
 
+def _agent_tools_for(account_email: str) -> list[dict]:
+    """Return the tool list for the Super Agent, including optional power tools."""
+    from postmind.core import agent_tools
+
+    tools = list(agent_tools.ALL_TOOLS)
+    if get_settings().agent_power_mode:
+        tools.append(agent_tools.RUN_SQL_TOOL)
+    return tools
+
+
 def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], cards: list[dict]):
     """Build the Super Agent tool-executor closure.
 
@@ -4090,6 +4116,28 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                 return agent_tools.read_email(provider, tool_input.get("message_id", ""))
             except Exception as exc:
                 return f"Couldn't fetch email: {exc}"
+        if name == "get_thread":
+            try:
+                provider = _build_provider()
+                return agent_tools.get_thread(provider, tool_input.get("thread_id", ""))
+            except Exception as exc:
+                return f"Couldn't fetch thread: {exc}"
+        if name == "find_emails_by_topic":
+            try:
+                provider = _build_provider()
+                return agent_tools.find_emails_by_topic(
+                    provider,
+                    tool_input.get("topic", ""),
+                    int(tool_input.get("limit", 10) or 10),
+                )
+            except Exception as exc:
+                return f"Couldn't search emails: {exc}"
+        if name == "summarize_thread":
+            try:
+                provider = _build_provider()
+                return agent_tools.summarize_thread(provider, ai, tool_input.get("thread_id", ""))
+            except Exception as exc:
+                return f"Couldn't summarize thread: {exc}"
         if name == "find_unopened_subscriptions":
             from postmind.core.storage import get_session
 
@@ -4141,7 +4189,9 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
             return f"Staged {len(matched)} sender(s) — {total} emails, ~{mb:.0f} MB ({names}). The user must confirm in the preview before anything moves to Trash."
         if name == "stage_trash_query":
             gmail_query = (tool_input.get("gmail_query") or "").strip()
-            description = (tool_input.get("description") or gmail_query or "matching emails").strip()
+            description = (
+                tool_input.get("description") or gmail_query or "matching emails"
+            ).strip()
             newsletters_only = bool(tool_input.get("newsletters_only"))
             if not gmail_query:
                 return "I need a search query (e.g. 'older_than:2y') to find emails to trash."
@@ -4155,7 +4205,9 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                     "For other accounts, name the senders and I'll stage a sender-level trash instead."
                 )
             try:
-                emails = agent_tools.resolve_trash_query(provider, gmail_query, newsletters_only, limit=200)
+                emails = agent_tools.resolve_trash_query(
+                    provider, gmail_query, newsletters_only, limit=200
+                )
             except Exception as exc:
                 return f"Couldn't resolve that query: {exc}"
             if not emails:
@@ -4385,6 +4437,11 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                 }
             )
             return f"Staged a rule: {nl_rule.explanation} (query: {nl_rule.gmail_query}, action: {nl_rule.action}). Showed the user a confirmation card."
+        if name == "run_sql":
+            from postmind.core.agent_service import AgentService
+
+            svc = AgentService(account_email=account_email)
+            return svc.run_sql(tool_input.get("query", ""))
         return f"Unknown tool: {name}"
 
     return _executor_tool
@@ -4415,7 +4472,6 @@ async def agent_endpoint(request: Request):
     engine_kwargs = _chat_engine_kwargs()
 
     def _run():
-        from postmind.core import agent_tools
         from postmind.core.ai_engine import AIEngine
 
         ai = AIEngine(**engine_kwargs)
@@ -4424,7 +4480,7 @@ async def agent_endpoint(request: Request):
         return ai.chat(
             messages,
             system=system,
-            tools=agent_tools.ALL_TOOLS,
+            tools=_agent_tools_for(account_email),
             tool_executor=executor_tool,
             max_tool_iterations=12,
         )
@@ -4494,7 +4550,6 @@ async def agent_stream_endpoint(request: Request):
     _SENTINEL = object()
 
     def _produce():
-        from postmind.core import agent_tools
         from postmind.core.ai_engine import AIEngine
 
         def _put(item):
@@ -4508,7 +4563,7 @@ async def agent_stream_endpoint(request: Request):
                 for event in ai.chat_stream(
                     messages,
                     system=system,
-                    tools=agent_tools.ALL_TOOLS,
+                    tools=_agent_tools_for(account_email),
                     tool_executor=executor_tool,
                     max_tool_iterations=12,
                 ):
@@ -4523,7 +4578,7 @@ async def agent_stream_endpoint(request: Request):
                 reply = ai.chat(
                     messages,
                     system=system,
-                    tools=agent_tools.ALL_TOOLS,
+                    tools=_agent_tools_for(account_email),
                     tool_executor=executor_tool,
                     max_tool_iterations=12,
                 )

@@ -28,7 +28,9 @@ def token_path_for(email: str) -> Path:
 
 def get_active_account() -> str | None:
     """Return the active account email. Env var override takes precedence (for --account flag)."""
-    override = os.environ.get("_POSTMIND_OVERRIDE_ACCOUNT") or os.environ.get("_MAILTRIM_OVERRIDE_ACCOUNT")
+    override = os.environ.get("_POSTMIND_OVERRIDE_ACCOUNT") or os.environ.get(
+        "_MAILTRIM_OVERRIDE_ACCOUNT"
+    )
     if override:
         return override.strip() or None
     try:
@@ -49,6 +51,7 @@ def load_account_config(email: str) -> dict:
     if not p.exists():
         return {"provider": "gmail"}
     import json as _json
+
     return _json.loads(p.read_text())
 
 
@@ -59,6 +62,7 @@ def save_account_config(email: str, config: dict) -> None:
     safe = email.lower().replace("/", "_")
     p = ACCOUNTS_DIR / f"{safe}.json"
     import json as _json
+
     p.write_text(_json.dumps(config, indent=2))
     p.chmod(0o600)
 
@@ -125,6 +129,11 @@ class Settings(BaseSettings):
     # Trash, unsubscribe, and send always require explicit confirmation regardless.
     # Off by default; everything stays undoable from /undo.
     agent_autopilot: bool = False
+
+    # Power mode — exposes run_sql in the web Super Agent so advanced users
+    # can run read-only SELECT queries over the local email cache.
+    # Off by default; not needed for everyday use.
+    agent_power_mode: bool = False
 
     # Rate limiting
     gmail_batch_size: int = 50  # Max messages per Gmail batch request
