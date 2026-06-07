@@ -285,6 +285,17 @@
             </p>
           </div>
         </label>
+        <label class="flex items-start gap-3 cursor-pointer mt-3">
+          <input type="checkbox" name="agent_power_mode" {% if agent_power_mode %}checked{% endif %}
+                 class="mt-0.5 rounded text-accent">
+          <div>
+            <p class="text-sm font-medium text-ink">Power mode (run_sql tool)</p>
+            <p class="text-xs text-ink-subtle mt-0.5">
+              Exposes a <code>run_sql</code> tool so the agent can run read-only SELECT queries over the local email cache.
+              Useful for analytics questions like "how many emails from Google?" or "what's my oldest unread?".
+            </p>
+          </div>
+        </label>
         <button type="submit" class="pm-btn mt-3">Save autopilot setting</button>
       </form>
 
