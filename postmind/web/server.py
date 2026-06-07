@@ -4264,6 +4264,105 @@ async def agent_page(request: Request):
     return _resp(request, "agent.html", ctx)
 
 
+@app.get("/agent/history")
+async def agent_history(request: Request):
+    """Return recent conversation turns for the active account."""
+    from postmind.core.storage import AgentConversationRepo, get_session
+
+    account_email = _get_web_account() or ""
+    if not account_email:
+        return {"turns": []}
+    repo = AgentConversationRepo(get_session())
+    rows = repo.get_recent(account_email, hours=24, limit=48)
+    return {
+        "turns": [
+            {
+                "role": r.role,
+                "content": r.content,
+                "actions": json.loads(r.actions_json) if r.actions_json else [],
+                "cards": json.loads(r.cards_json) if r.cards_json else [],
+                "ts": r.created_at,
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.delete("/agent/history")
+async def agent_history_clear(request: Request):
+    """Clear conversation history for the active account."""
+    from postmind.core.storage import AgentConversationRepo, get_session
+
+    account_email = _get_web_account() or ""
+    if not account_email:
+        return {"ok": True, "cleared": 0}
+    cleared = AgentConversationRepo(get_session()).clear(account_email)
+    return {"ok": True, "cleared": cleared}
+
+
+@app.get("/agent/suggestions")
+async def agent_suggestions(request: Request):
+    """Return context-aware example prompt chips based on current inbox state."""
+    from postmind.core.sender_stats import fetch_sender_groups_from_db
+    from postmind.core.storage import EmailRepo, get_session
+
+    account_email = _get_web_account() or ""
+    defaults = [
+        "What's eating my storage?",
+        "Find my largest emails",
+        "Show me newsletters I never open",
+        "Find newsletters older than 2 years and let me review them",
+        "Create an agent that archives newsletters weekly",
+    ]
+    if not account_email:
+        return {"chips": defaults}
+    try:
+        session = get_session()
+        has_data = bool(EmailRepo(session).get_inbox(account_email, limit=1))
+        if not has_data:
+            return {"chips": defaults}
+
+        groups = fetch_sender_groups_from_db(
+            account_email=account_email, scope="inbox", min_count=1, top_n=50, sort_by="score"
+        )
+        if not groups:
+            return {"chips": defaults}
+
+        chips = []
+        total_mb = sum(g.total_size_bytes for g in groups) / (1024 * 1024)
+
+        # Chip 1: storage if significant
+        if total_mb > 100:
+            chips.append(f"What's eating my {total_mb:.0f} MB of storage?")
+        else:
+            chips.append("What's eating my storage?")
+
+        # Chip 2: biggest sender
+        top = groups[0]
+        chips.append(
+            f"Show me emails from {top.display_name} ({top.count} emails, {top.total_size_mb:.0f} MB)"
+        )
+
+        # Chip 3: subscription count
+        from postmind.core import agent_tools as _at
+
+        unsub_rows = _at.find_unopened_subscriptions(session, account_email, min_count=3, limit=5)
+        if len(unsub_rows) >= 3:
+            chips.append(f"Unsubscribe me from {len(unsub_rows)} newsletters I never open")
+        else:
+            chips.append("Show me newsletters I never open")
+
+        # Chip 4: always-useful
+        chips.append("Find newsletters older than 2 years and let me review them")
+
+        # Chip 5: automation
+        chips.append("Create an agent that archives newsletters weekly")
+
+        return {"chips": chips[:5]}
+    except Exception:
+        return {"chips": defaults}
+
+
 def _build_agent_system(account_email: str, mode: str) -> str:
     overview = _chat_overview_text(account_email)
     autopilot = "ON" if _autopilot_on() else "OFF"
@@ -4837,6 +4936,24 @@ async def agent_endpoint(request: Request):
     except Exception as exc:
         return {"reply": f"Sorry — I hit an error: {exc}", "actions": [], "cards": []}
 
+    # Best-effort history save — never breaks the main response.
+    try:
+        import secrets as _secrets
+
+        from postmind.core.storage import AgentConversationRepo, get_session
+
+        _hist_repo = AgentConversationRepo(get_session())
+        _session_id = body.get("session_id") or _secrets.token_hex(8)
+        _last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
+        if _last_user:
+            _hist_repo.save_turn(account_email, _session_id, "user", _last_user)
+        if reply:
+            _hist_repo.save_turn(
+                account_email, _session_id, "assistant", reply, actions=actions, cards=cards
+            )
+    except Exception:
+        pass
+
     return {"reply": reply, "actions": actions, "cards": cards}
 
 
@@ -5001,6 +5118,22 @@ async def agent_stream_endpoint(request: Request):
             if not await request.is_disconnected():
                 yield _sse({"type": "final", "actions": actions, "cards": cards})
                 yield _sse({"type": "done"})
+            # Best-effort: save the user turn to server-side history.
+            try:
+                import secrets as _secrets
+
+                from postmind.core.storage import AgentConversationRepo, get_session
+
+                _session_id = body.get("session_id") or _secrets.token_hex(8)
+                _last_user = next(
+                    (m["content"] for m in reversed(messages) if m["role"] == "user"), ""
+                )
+                if _last_user:
+                    AgentConversationRepo(get_session()).save_turn(
+                        account_email, _session_id, "user", _last_user
+                    )
+            except Exception:
+                pass
         finally:
             # On client disconnect we may break before the sentinel; ensure the
             # producer task is awaited so its thread isn't orphaned.
