@@ -9,6 +9,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Float,
     Integer,
     String,
     Text,
@@ -274,6 +275,21 @@ class UserActionRecord(Base):
     ai_category = Column(String, default="")  # classification at time of action
     ai_priority = Column(String, default="")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class AgentConversation(Base):
+    """Server-side store for Super Agent conversation turns."""
+
+    __tablename__ = "agent_conversations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_email = Column(String(255), nullable=False, index=True)
+    session_id = Column(String(64), nullable=False, index=True)
+    role = Column(String(16), nullable=False)  # "user" | "assistant"
+    content = Column(Text, nullable=False)
+    actions_json = Column(Text, nullable=True)  # JSON array of action links
+    cards_json = Column(Text, nullable=True)  # JSON array of cards
+    created_at = Column(Float, nullable=False, default=lambda: __import__("time").time())
 
 
 # ── Engine / session factory ─────────────────────────────────────────────────
@@ -1366,3 +1382,60 @@ class AccountRepo:
 
     def count(self) -> int:
         return self.s.query(Account).count()
+
+
+class AgentConversationRepo:
+    """Records and retrieves Super Agent conversation turns."""
+
+    def __init__(self, session: Session):
+        self._s = session
+
+    def save_turn(
+        self,
+        account_email: str,
+        session_id: str,
+        role: str,
+        content: str,
+        actions: list | None = None,
+        cards: list | None = None,
+    ) -> AgentConversation:
+        import time as _time
+
+        row = AgentConversation(
+            account_email=account_email,
+            session_id=session_id,
+            role=role,
+            content=content,
+            actions_json=json.dumps(actions) if actions else None,
+            cards_json=json.dumps(cards) if cards else None,
+            created_at=_time.time(),
+        )
+        self._s.add(row)
+        self._s.commit()
+        return row
+
+    def get_recent(
+        self, account_email: str, hours: int = 24, limit: int = 50
+    ) -> list[AgentConversation]:
+        import time as _time
+
+        cutoff = _time.time() - hours * 3600
+        return (
+            self._s.query(AgentConversation)
+            .filter(
+                AgentConversation.account_email == account_email,
+                AgentConversation.created_at >= cutoff,
+            )
+            .order_by(AgentConversation.created_at.asc())
+            .limit(limit)
+            .all()
+        )
+
+    def clear(self, account_email: str) -> int:
+        deleted = (
+            self._s.query(AgentConversation)
+            .filter(AgentConversation.account_email == account_email)
+            .delete()
+        )
+        self._s.commit()
+        return deleted
