@@ -194,6 +194,22 @@ def build_server(account_email: str | None = None):
         """Stage a recurring rule from plain English. Returns a confirm token + warnings."""
         return _dump(svc.stage_create_rule(natural_language))
 
+    @mcp.tool()
+    def stage_trash_query(
+        gmail_query: str,
+        description: str,
+        newsletters_only: bool = False,
+        limit: int = 200,
+    ) -> str:
+        """Stage a query-based trash review. Resolves a Gmail search query to a list
+        of matching emails and returns a confirm token. The host should present the
+        email list from the 'emails' field in the response to the user for approval,
+        then call confirm_action(token) to trash them (undoable for 30 days).
+        Use for 'newsletters older than 2 years', 'promotions from last year', etc."""
+        return _dump(
+            svc.stage_trash_query(gmail_query, description, newsletters_only, int(limit or 200))
+        )
+
     # ── Confirm / cancel ──────────────────────────────────────────────────────
 
     @mcp.tool()
