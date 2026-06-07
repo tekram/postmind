@@ -501,6 +501,169 @@
     </div>
   </div>
 
+  <!-- Connected MCP Servers -->
+  <div class="pm-card mb-5" id="mcp-servers">
+    <div class="px-5 py-4 border-b border-hairline">
+      <div class="flex items-center gap-2.5">
+        <!-- Lucide: plug -->
+        <svg class="w-4 h-4 shrink-0 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 5.636a9 9 0 010 12.728M15.536 8.464a5 5 0 010 7.072M6.343 17.657a9 9 0 010-12.728M9.172 14.828a5 5 0 010-7.072M12 12v.01"/>
+        </svg>
+        <p class="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-tertiary">Integrations</p>
+      </div>
+      <h2 class="font-semibold text-ink mt-2">Connected MCP Servers</h2>
+      <p class="text-sm text-secondary mt-1">Connect external tools (Calendar, Slack, Linear, etc.) so the Super Agent can query them during a turn.</p>
+    </div>
+    <div class="p-5">
+      <div id="mcp-list" class="space-y-2 mb-4"></div>
+      <button type="button" id="mcp-add-btn" class="pm-btn pm-btn-secondary text-sm">+ Add server</button>
+      <div id="mcp-add-form" class="hidden mt-4 border border-hairline rounded-lg p-4 space-y-3">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="text-xs text-secondary mb-1 block">Name (slug, no spaces)</label>
+            <input id="mcp-name" type="text" placeholder="calendar" class="pm-input w-full text-sm">
+          </div>
+          <div>
+            <label class="text-xs text-secondary mb-1 block">Transport</label>
+            <select id="mcp-transport" class="pm-input w-full text-sm">
+              <option value="stdio">stdio (subprocess)</option>
+              <option value="http">HTTP / SSE</option>
+            </select>
+          </div>
+        </div>
+        <div id="mcp-stdio-fields">
+          <label class="text-xs text-secondary mb-1 block">Command</label>
+          <input id="mcp-command" type="text" placeholder="npx" class="pm-input w-full text-sm mb-2">
+          <label class="text-xs text-secondary mb-1 block">Args (space-separated)</label>
+          <input id="mcp-args" type="text" placeholder="-y @modelcontextprotocol/server-google-calendar" class="pm-input w-full text-sm">
+        </div>
+        <div id="mcp-http-fields" class="hidden">
+          <label class="text-xs text-secondary mb-1 block">URL</label>
+          <input id="mcp-url" type="text" placeholder="http://localhost:3333/mcp" class="pm-input w-full text-sm">
+        </div>
+        <div class="flex gap-2">
+          <button type="button" id="mcp-save-btn" class="pm-btn pm-btn-primary text-sm">Save</button>
+          <button type="button" id="mcp-test-btn" class="pm-btn pm-btn-secondary text-sm">Test connection</button>
+          <button type="button" id="mcp-cancel-btn" class="pm-btn pm-btn-secondary text-sm">Cancel</button>
+        </div>
+        <div id="mcp-test-result" class="text-sm hidden"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function() {
+    let servers = [];
+
+    async function loadServers() {
+      try {
+        const r = await fetch('/settings/mcp-servers');
+        const d = await r.json();
+        servers = d.servers || [];
+        renderList();
+      } catch(e) {}
+    }
+
+    function renderList() {
+      const el = document.getElementById('mcp-list');
+      if (!servers.length) {
+        el.innerHTML = '<p class="text-sm text-secondary">No MCP servers configured.</p>';
+        return;
+      }
+      el.innerHTML = servers.map((s, i) => `
+        <div class="flex items-center justify-between p-3 border border-hairline rounded-lg text-sm">
+          <div>
+            <span class="font-medium">${s.name}</span>
+            <span class="text-secondary ml-2">${s.command ? 'stdio: ' + s.command : 'http: ' + s.url}</span>
+            <span class="ml-2 inline-flex items-center gap-1">
+              <span class="w-2 h-2 rounded-full ${s.connected ? 'bg-green-500' : 'bg-gray-300'}"></span>
+              <span class="text-secondary">${s.connected ? s.tool_count + ' tools' : 'not connected'}</span>
+            </span>
+          </div>
+          <button type="button" onclick="removeMCPServer(${i})" class="text-secondary hover:text-destructive text-xs">Remove</button>
+        </div>
+      `).join('');
+    }
+
+    window.removeMCPServer = async function(i) {
+      servers.splice(i, 1);
+      await saveServers();
+      renderList();
+    };
+
+    async function saveServers() {
+      await fetch('/settings/mcp-servers', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({servers})
+      });
+    }
+
+    document.getElementById('mcp-add-btn').addEventListener('click', () => {
+      document.getElementById('mcp-add-form').classList.remove('hidden');
+      document.getElementById('mcp-add-btn').classList.add('hidden');
+    });
+    document.getElementById('mcp-cancel-btn').addEventListener('click', () => {
+      document.getElementById('mcp-add-form').classList.add('hidden');
+      document.getElementById('mcp-add-btn').classList.remove('hidden');
+      document.getElementById('mcp-test-result').classList.add('hidden');
+    });
+    document.getElementById('mcp-transport').addEventListener('change', function() {
+      const isHttp = this.value === 'http';
+      document.getElementById('mcp-stdio-fields').classList.toggle('hidden', isHttp);
+      document.getElementById('mcp-http-fields').classList.toggle('hidden', !isHttp);
+    });
+
+    function buildEntry() {
+      const name = document.getElementById('mcp-name').value.trim().replace(/\s+/g, '_');
+      const transport = document.getElementById('mcp-transport').value;
+      if (!name) return null;
+      if (transport === 'stdio') {
+        const cmd = document.getElementById('mcp-command').value.trim();
+        const args = document.getElementById('mcp-args').value.trim().split(/\s+/).filter(Boolean);
+        if (!cmd) return null;
+        return {name, command: cmd, args};
+      } else {
+        const url = document.getElementById('mcp-url').value.trim();
+        if (!url) return null;
+        return {name, url};
+      }
+    }
+
+    document.getElementById('mcp-test-btn').addEventListener('click', async () => {
+      const entry = buildEntry();
+      const res = document.getElementById('mcp-test-result');
+      if (!entry) { res.textContent = 'Fill in name and command/URL first.'; res.classList.remove('hidden'); return; }
+      res.textContent = 'Testing…'; res.classList.remove('hidden');
+      try {
+        const r = await fetch('/settings/mcp-servers/test', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(entry)});
+        const d = await r.json();
+        if (d.connected) {
+          res.textContent = 'Connected — ' + d.tool_count + ' tool(s): ' + (d.tools||[]).slice(0,5).join(', ') + (d.tool_count>5?'…':'');
+          res.className = 'text-sm text-green-600';
+        } else {
+          res.textContent = d.error || 'Could not connect.';
+          res.className = 'text-sm text-red-600';
+        }
+      } catch(e) { res.textContent = 'Test failed: ' + e; res.className = 'text-sm text-red-600'; }
+      res.classList.remove('hidden');
+    });
+
+    document.getElementById('mcp-save-btn').addEventListener('click', async () => {
+      const entry = buildEntry();
+      if (!entry) return;
+      servers.push(entry);
+      await saveServers();
+      document.getElementById('mcp-add-form').classList.add('hidden');
+      document.getElementById('mcp-add-btn').classList.remove('hidden');
+      document.getElementById('mcp-test-result').classList.add('hidden');
+      renderList();
+    });
+
+    loadServers();
+  })();
+  </script>
+
   <!-- Clear local cache -->
   <div class="pm-card">
     <div class="px-5 py-4 border-b border-hairline">
