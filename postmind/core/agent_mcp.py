@@ -121,6 +121,30 @@ def build_server(account_email: str | None = None):
         return svc.run_sql(query)
 
     @mcp.tool()
+    def read_email(message_id: str) -> str:
+        """Fetch the full content of a specific email by its message_id."""
+        try:
+            return svc.read_email(message_id)
+        except Exception as exc:
+            return f"Couldn't fetch email: {exc}"
+
+    @mcp.tool()
+    def get_thread(thread_id: str) -> str:
+        """Fetch all messages in a thread in chronological order."""
+        try:
+            return svc.get_thread(thread_id)
+        except Exception as exc:
+            return f"Couldn't fetch thread: {exc}"
+
+    @mcp.tool()
+    def find_emails_by_topic(topic: str, limit: int = 10) -> str:
+        """Search for emails matching a topic or keyword."""
+        try:
+            return svc.find_emails_by_topic(topic, int(limit or 10))
+        except Exception as exc:
+            return f"Search failed: {exc}"
+
+    @mcp.tool()
     def draft_email(intent: str, recipient_context: str = "", thread_snippet: str = "") -> str:
         """Draft an email in the user's voice (text only; sends nothing). To send,
         follow up with stage_send and confirm_action."""

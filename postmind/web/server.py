@@ -9,6 +9,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 from fastapi import FastAPI, Form, HTTPException, Request
@@ -97,6 +98,35 @@ _oauth_tasks: dict[str, dict] = {}  # task_id → {status, email, error}
 _active_web_account: str | None = None  # email override set by the web UI switcher
 
 _executor = ThreadPoolExecutor(max_workers=4)
+
+# Per-account MCP client pools — lazily initialized when the agent runs
+_mcp_pools: dict[str, Any] = {}  # account_email → MCPClientPool
+_main_event_loop: asyncio.AbstractEventLoop | None = None
+
+
+@app.on_event("startup")
+async def _startup():
+    global _main_event_loop
+    _main_event_loop = asyncio.get_event_loop()
+
+
+class _NullPool:
+    def get_tools(self) -> list[dict]:
+        return []
+
+
+async def _get_mcp_pool(account_email: str):
+    """Return (or lazily build) the MCP pool for account_email."""
+    from postmind.config import load_account_config
+    from postmind.core.mcp_client import build_pool_for_account
+
+    if account_email not in _mcp_pools:
+        cfg = load_account_config(account_email) if account_email else {}
+        if cfg.get("mcp_servers"):
+            _mcp_pools[account_email] = await build_pool_for_account(account_email)
+        else:
+            _mcp_pools[account_email] = None
+    return _mcp_pools.get(account_email)
 
 
 def _maybe_synthesize_rules(account_email: str) -> None:
@@ -1672,6 +1702,84 @@ async def settings_page(request: Request):
         }
     )
     return _resp(request, "settings.html", ctx)
+
+
+@app.get("/settings/mcp-servers")
+async def settings_mcp_servers_get(request: Request):
+    """Return the MCP servers config for the active account as JSON."""
+    from postmind.config import load_account_config
+
+    email = _get_web_account() or ""
+    cfg = load_account_config(email) if email else {}
+    servers = cfg.get("mcp_servers") or []
+    pool = _mcp_pools.get(email)
+    status = pool.status() if pool else []
+    status_map = {s["name"]: s for s in status}
+    enriched = []
+    for s in servers:
+        name = s.get("name", "")
+        enriched.append({
+            **s,
+            "connected": status_map.get(name, {}).get("connected", False),
+            "tool_count": status_map.get(name, {}).get("tool_count", 0),
+        })
+    return {"servers": enriched}
+
+
+@app.post("/settings/mcp-servers")
+async def settings_mcp_servers_post(request: Request):
+    """Save (replace) the full mcp_servers list for the active account."""
+    from postmind.config import load_account_config, save_account_config
+
+    email = _get_web_account() or ""
+    if not email:
+        return JSONResponse({"error": "No active account."}, status_code=400)
+    try:
+        body = await request.json()
+        servers = body.get("servers") or []
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON."}, status_code=400)
+    # Validate each entry
+    for s in servers:
+        if not s.get("name"):
+            return JSONResponse({"error": "Each server must have a 'name'."}, status_code=400)
+        if not s.get("command") and not s.get("url"):
+            return JSONResponse(
+                {"error": f"Server '{s['name']}' needs 'command' or 'url'."}, status_code=400
+            )
+    cfg = load_account_config(email)
+    cfg["mcp_servers"] = servers
+    save_account_config(email, cfg)
+    # Reset the pool so it reconnects on next agent request
+    _mcp_pools.pop(email, None)
+    return {"ok": True, "count": len(servers)}
+
+
+@app.post("/settings/mcp-servers/test")
+async def settings_mcp_servers_test(request: Request):
+    """Test-connect a single MCP server config and return its tool list."""
+    from postmind.core.mcp_client import MCPClientSession, _parse_config
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON."}, status_code=400)
+    cfg = _parse_config(body)
+    if not cfg.name:
+        return JSONResponse({"error": "Missing 'name'."}, status_code=400)
+    if not cfg.command and not cfg.url:
+        return JSONResponse({"error": "Need 'command' or 'url'."}, status_code=400)
+    sess = MCPClientSession(cfg)
+    await sess.connect()
+    if not sess.connected:
+        return {
+            "connected": False,
+            "tools": [],
+            "error": "Could not connect — check the command/URL and try again.",
+        }
+    tools = [t["name"].removeprefix(f"mcp_{cfg.name}_") for t in sess.tools]
+    await sess.close()
+    return {"connected": True, "tool_count": len(tools), "tools": tools[:20]}
 
 
 @app.post("/settings/clear-data")
@@ -4090,6 +4198,22 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                 return agent_tools.read_email(provider, tool_input.get("message_id", ""))
             except Exception as exc:
                 return f"Couldn't fetch email: {exc}"
+        if name == "get_thread":
+            try:
+                provider = _build_provider()
+                return agent_tools.get_thread(provider, tool_input.get("thread_id", ""))
+            except Exception as exc:
+                return f"Couldn't fetch thread: {exc}"
+        if name == "find_emails_by_topic":
+            try:
+                provider = _build_provider()
+                return agent_tools.find_emails_by_topic(
+                    provider,
+                    tool_input.get("topic", ""),
+                    int(tool_input.get("limit", 10) or 10),
+                )
+            except Exception as exc:
+                return f"Search failed: {exc}"
         if name == "find_unopened_subscriptions":
             from postmind.core.storage import get_session
 
@@ -4385,6 +4509,12 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                 }
             )
             return f"Staged a rule: {nl_rule.explanation} (query: {nl_rule.gmail_query}, action: {nl_rule.action}). Showed the user a confirmation card."
+        # MCP consumer — route to an external server
+        if name.startswith("mcp_") and _main_event_loop is not None:
+            pool = _mcp_pools.get(account_email)
+            if pool is not None:
+                return pool.dispatch_sync(name, tool_input, _main_event_loop)
+            return f"No MCP pool available for '{name}'."
         return f"Unknown tool: {name}"
 
     return _executor_tool
@@ -4414,6 +4544,13 @@ async def agent_endpoint(request: Request):
     cards: list[dict] = []
     engine_kwargs = _chat_engine_kwargs()
 
+    # Lazy-build MCP pool for this account (no-op if no mcp_servers configured)
+    if account_email and account_email not in _mcp_pools:
+        try:
+            _mcp_pools[account_email] = await _get_mcp_pool(account_email)
+        except Exception:
+            _mcp_pools[account_email] = None
+
     def _run():
         from postmind.core import agent_tools
         from postmind.core.ai_engine import AIEngine
@@ -4424,7 +4561,7 @@ async def agent_endpoint(request: Request):
         return ai.chat(
             messages,
             system=system,
-            tools=agent_tools.ALL_TOOLS,
+            tools=agent_tools.ALL_TOOLS + (_mcp_pools.get(account_email) or _NullPool()).get_tools(),
             tool_executor=executor_tool,
             max_tool_iterations=12,
         )
@@ -4487,6 +4624,13 @@ async def agent_stream_endpoint(request: Request):
     cards: list[dict] = []
     engine_kwargs = _chat_engine_kwargs()
 
+    # Lazy-build MCP pool for this account (no-op if no mcp_servers configured)
+    if account_email and account_email not in _mcp_pools:
+        try:
+            _mcp_pools[account_email] = await _get_mcp_pool(account_email)
+        except Exception:
+            _mcp_pools[account_email] = None
+
     # Bridge the sync chat_stream generator (run in the thread pool) to the async
     # SSE response via a queue. A sentinel marks completion.
     loop = asyncio.get_event_loop()
@@ -4500,6 +4644,8 @@ async def agent_stream_endpoint(request: Request):
         def _put(item):
             loop.call_soon_threadsafe(queue.put_nowait, item)
 
+        _all_tools = agent_tools.ALL_TOOLS + (_mcp_pools.get(account_email) or _NullPool()).get_tools()
+
         try:
             ai = AIEngine(**engine_kwargs)
             system = _build_agent_system(account_email, mode)
@@ -4508,7 +4654,7 @@ async def agent_stream_endpoint(request: Request):
                 for event in ai.chat_stream(
                     messages,
                     system=system,
-                    tools=agent_tools.ALL_TOOLS,
+                    tools=_all_tools,
                     tool_executor=executor_tool,
                     max_tool_iterations=12,
                 ):
@@ -4523,7 +4669,7 @@ async def agent_stream_endpoint(request: Request):
                 reply = ai.chat(
                     messages,
                     system=system,
-                    tools=agent_tools.ALL_TOOLS,
+                    tools=_all_tools,
                     tool_executor=executor_tool,
                     max_tool_iterations=12,
                 )
