@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from postmind.config import get_active_account, get_settings, load_account_config
 
 # Reversible actions that record an undo log and are restorable from /undo.
-_REVERSIBLE = ("archive", "label", "mark_read", "trash")
+_REVERSIBLE = ("archive", "label", "mark_read", "trash", "trash_query")
 # Token lifetime — a staged action the user never confirms expires quietly.
 _TOKEN_TTL_SECONDS = 60 * 60
 
@@ -639,6 +639,58 @@ class AgentService:
             )
         )
 
+    def stage_trash_query(
+        self,
+        gmail_query: str,
+        description: str,
+        newsletters_only: bool = False,
+        limit: int = 200,
+    ) -> dict:
+        """Resolve a Gmail query to a per-email review list and stage it.
+
+        Returns a confirm token and the list of emails to review. The MCP host
+        should present the list to the user and call confirm_action(token) with
+        the message IDs the user selected to trash.
+        """
+        from postmind.core import agent_tools
+
+        gmail_query = (gmail_query or "").strip()
+        if not gmail_query:
+            return {"error": "A Gmail search query is required."}
+        description = (description or gmail_query).strip()
+        try:
+            emails = agent_tools.resolve_trash_query(
+                self.provider(),
+                gmail_query,
+                bool(newsletters_only),
+                max(1, min(int(limit or 200), 500)),
+            )
+        except Exception as exc:
+            return {"error": f"Couldn't resolve that query: {exc}"}
+        if not emails:
+            return {"error": f"No emails matched '{gmail_query}'."}
+
+        ids = [e["id"] for e in emails]
+        summary = f"review {len(emails)} emails matching '{gmail_query}' for trash" + (
+            " (newsletters only)" if newsletters_only else ""
+        )
+        return self._stage(
+            StagedAction(
+                token=self._new_token(),
+                kind="trash_query",
+                summary=summary,
+                message_ids=ids,
+                senders=list({e["sender_email"] for e in emails}),
+                params={
+                    "gmail_query": gmail_query,
+                    "description": description,
+                    "newsletters_only": bool(newsletters_only),
+                    "emails": emails,  # full list for display
+                },
+                undoable=True,
+            )
+        )
+
     def stage_create_rule(self, natural_language: str) -> dict:
         nl = (natural_language or "").strip()
         if not nl:
@@ -695,6 +747,8 @@ class AgentService:
     def _execute(self, a: StagedAction) -> dict:
         if a.kind in ("trash", "archive", "label", "mark_read"):
             return self._exec_reversible(a)
+        if a.kind == "trash_query":
+            return self._exec_trash_query(a)
         if a.kind == "unsubscribe":
             return self._exec_unsubscribe(a)
         if a.kind == "send":
@@ -746,6 +800,36 @@ class AgentService:
             "undo_id": entry.id,
             "undoable": True,
             "message": f"{action.replace('_', ' ')} done for {len(ids)} emails — undoable for 30 days.",
+        }
+
+    def _exec_trash_query(self, a: StagedAction) -> dict:
+        from postmind.core.storage import UndoLogRepo, get_session
+
+        ids = a.message_ids
+        if not ids:
+            return {
+                "ok": True,
+                "action": "trash_query",
+                "affected": 0,
+                "message": "Nothing to trash.",
+            }
+        entry = UndoLogRepo(get_session()).record(
+            account_email=self.account_email,
+            operation="trash",
+            message_ids=ids,
+            description=(
+                f"Trash {len(ids)} emails matching '{a.params.get('gmail_query', '')}' via query review"
+            ),
+            metadata={"senders": a.senders, "gmail_query": a.params.get("gmail_query")},
+        )
+        self.provider().batch_trash(ids)
+        return {
+            "ok": True,
+            "action": "trash_query",
+            "affected": len(ids),
+            "undo_id": entry.id,
+            "undoable": True,
+            "message": f"Trashed {len(ids)} emails — undoable for 30 days.",
         }
 
     def _exec_unsubscribe(self, a: StagedAction) -> dict:
