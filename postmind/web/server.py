@@ -124,6 +124,9 @@ _CACHE_TTL = 300  # 5 minutes
 _REVIEW_CACHE: dict[str, dict] = {}  # token -> {account_email, description, emails, expires}
 _REVIEW_TTL = 1800  # seconds
 
+# MCP pool cache — keyed by account_email; invalidated when mcp_servers config changes
+_mcp_pools: dict[str, Any] = {}
+
 
 def _review_put(account_email: str, description: str, emails: list[dict]) -> str:
     import secrets
@@ -1842,7 +1845,6 @@ async def settings_mcp_servers_post(request: Request):
         servers = body.get("servers") or []
     except Exception:
         return JSONResponse({"error": "Invalid JSON."}, status_code=400)
-    # Validate each entry
     for s in servers:
         if not s.get("name"):
             return JSONResponse({"error": "Each server must have a 'name'."}, status_code=400)
@@ -1853,7 +1855,6 @@ async def settings_mcp_servers_post(request: Request):
     cfg = load_account_config(email)
     cfg["mcp_servers"] = servers
     save_account_config(email, cfg)
-    # Reset the pool so it reconnects on next agent request
     _mcp_pools.pop(email, None)
     return {"ok": True, "count": len(servers)}
 
@@ -1875,14 +1876,172 @@ async def settings_mcp_servers_test(request: Request):
     sess = MCPClientSession(cfg)
     await sess.connect()
     if not sess.connected:
-        return {
-            "connected": False,
-            "tools": [],
-            "error": "Could not connect — check the command/URL and try again.",
-        }
+        return {"connected": False, "tools": [], "error": "Could not connect — check the command/URL and try again."}
     tools = [t["name"].removeprefix(f"mcp_{cfg.name}_") for t in sess.tools]
     await sess.close()
     return {"connected": True, "tool_count": len(tools), "tools": tools[:20]}
+
+
+_MCP_TEMPLATES = [
+    {
+        "id": "memory",
+        "name": "Memory",
+        "icon": "brain",
+        "tagline": "Persistent contact knowledge across sessions",
+        "description": "Remembers facts about senders so the agent personalizes replies and recalls context automatically. Local file — nothing leaves your machine.",
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-memory"],
+        "env_vars": [],
+        "setup_steps": ["Requires Node.js (npx). Run: npx -y @modelcontextprotocol/server-memory to verify."],
+        "free": True,
+        "requires_auth": False,
+    },
+    {
+        "id": "google-calendar",
+        "name": "Google Calendar",
+        "icon": "calendar",
+        "tagline": "Email → calendar events, free/busy lookup",
+        "description": "Create events from meeting-request emails, check availability before scheduling, draft confirmation replies.",
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["-y", "@cocal/google-calendar-mcp"],
+        "env_vars": ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"],
+        "setup_steps": [
+            "Create a Google OAuth app at console.cloud.google.com with Calendar API enabled.",
+            "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET as environment variables.",
+            "Run the server once to complete OAuth: npx -y @cocal/google-calendar-mcp",
+        ],
+        "free": True,
+        "requires_auth": True,
+    },
+    {
+        "id": "linear",
+        "name": "Linear",
+        "icon": "layers",
+        "tagline": "Turn emails into Linear issues in one command",
+        "description": "Create issues, search projects, update statuses directly from email context. Uses Linear's official OAuth — no API key needed.",
+        "transport": "http",
+        "url": "https://mcp.linear.app/mcp",
+        "env_vars": ["LINEAR_ACCESS_TOKEN"],
+        "setup_steps": [
+            "Go to linear.app → Settings → API → Personal API Keys.",
+            "Create a key and set it as LINEAR_ACCESS_TOKEN in your environment.",
+        ],
+        "free": True,
+        "requires_auth": True,
+    },
+    {
+        "id": "brave-search",
+        "name": "Brave Search",
+        "icon": "search",
+        "tagline": "Research senders and topics before replying",
+        "description": "Web, news, and image search. Agent uses it to research unfamiliar senders, verify claims, and pull live context before drafting replies. 2,000 free queries/month.",
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["-y", "@brave/brave-search-mcp-server"],
+        "env_vars": ["BRAVE_API_KEY"],
+        "setup_steps": [
+            "Get a free API key at brave.com/search/api (2,000 queries/month free).",
+            "Set BRAVE_API_KEY as an environment variable.",
+        ],
+        "free": True,
+        "requires_auth": True,
+    },
+    {
+        "id": "hubspot",
+        "name": "HubSpot",
+        "icon": "users",
+        "tagline": "Email → CRM contacts, deals, and activity notes",
+        "description": "Look up senders in HubSpot, create contacts, log email activity, update deal stages — all from the agent.",
+        "transport": "http",
+        "url": "https://mcp.hubspot.com",
+        "env_vars": ["HUBSPOT_ACCESS_TOKEN"],
+        "setup_steps": [
+            "Go to HubSpot → Settings → Integrations → Private Apps.",
+            "Create a private app with CRM read/write scopes.",
+            "Copy the access token and set it as HUBSPOT_ACCESS_TOKEN.",
+        ],
+        "free": False,
+        "requires_auth": True,
+    },
+    {
+        "id": "slack",
+        "name": "Slack",
+        "icon": "message-square",
+        "tagline": "Post summaries, search threads, send DM alerts",
+        "description": "Summarize email threads and post to Slack channels. Search Slack for context. Send DM alerts for high-priority emails.",
+        "transport": "http",
+        "url": "https://slack.com/api/mcp",
+        "env_vars": ["SLACK_USER_TOKEN"],
+        "setup_steps": [
+            "Create a Slack app at api.slack.com/apps with scopes: channels:read, chat:write, search:read.",
+            "Install to your workspace and copy the user OAuth token.",
+            "Set it as SLACK_USER_TOKEN.",
+        ],
+        "free": True,
+        "requires_auth": True,
+    },
+]
+
+
+@app.get("/settings/mcp-templates")
+async def mcp_templates(request: Request):
+    """Return the curated list of MCP server templates."""
+    from postmind.config import load_account_config
+
+    email = _get_web_account() or ""
+    configured_names = set()
+    if email:
+        cfg = load_account_config(email)
+        configured_names = {s.get("name") for s in (cfg.get("mcp_servers") or [])}
+    return {
+        "templates": [
+            {**t, "configured": t["id"] in configured_names}
+            for t in _MCP_TEMPLATES
+        ]
+    }
+
+
+@app.post("/settings/mcp-servers/from-template/{template_id}")
+async def mcp_add_from_template(template_id: str, request: Request):
+    """Add a server from a template. For stdio servers, adds the config directly.
+    For HTTP servers, requires the user to have set env vars first."""
+    from postmind.config import load_account_config, save_account_config
+
+    email = _get_web_account() or ""
+    if not email:
+        return JSONResponse({"error": "No active account."}, status_code=400)
+
+    tmpl = next((t for t in _MCP_TEMPLATES if t["id"] == template_id), None)
+    if not tmpl:
+        return JSONResponse({"error": f"Unknown template '{template_id}'."}, status_code=404)
+
+    cfg = load_account_config(email)
+    servers = cfg.get("mcp_servers") or []
+    if any(s.get("name") == tmpl["id"] for s in servers):
+        return {"ok": True, "already_configured": True}
+
+    # Build the server entry
+    entry: dict = {"name": tmpl["id"]}
+    if tmpl["transport"] == "stdio":
+        entry["command"] = tmpl["command"]
+        entry["args"] = tmpl["args"]
+        # Pass env vars from the process environment if they're set
+        import os
+
+        env = {k: os.environ.get(k, "") for k in tmpl.get("env_vars", [])}
+        env = {k: v for k, v in env.items() if v}  # drop unset vars
+        if env:
+            entry["env"] = env
+    else:
+        entry["url"] = tmpl["url"]
+
+    servers.append(entry)
+    cfg["mcp_servers"] = servers
+    save_account_config(email, cfg)
+    _mcp_pools.pop(email, None)  # invalidate pool so it reconnects
+    return {"ok": True, "added": entry}
 
 
 @app.post("/settings/clear-data")

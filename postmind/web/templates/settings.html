@@ -567,6 +567,22 @@
     </div>
   </div>
 
+  <!-- Quick Connect -->
+  <div class="pm-card mb-5" id="mcp-quick-connect">
+    <div class="px-5 py-4 border-b border-hairline">
+      <div class="flex items-center gap-2.5">
+        <svg class="w-4 h-4 shrink-0 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+          <polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+        </svg>
+        <h2 class="font-semibold text-[15px]">Quick Connect</h2>
+      </div>
+      <p class="text-sm text-secondary mt-1">Add popular MCP servers to unlock new agent capabilities. Click Add to configure, then the agent can use those tools immediately.</p>
+    </div>
+    <div class="p-5">
+      <div id="mcp-templates-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+    </div>
+  </div>
+
   <!-- Connected MCP Servers -->
   <div class="pm-card mb-5" id="mcp-servers">
     <div class="px-5 py-4 border-b border-hairline">
@@ -618,6 +634,59 @@
   </div>
 
   <script>
+  // ── Quick Connect templates ─────────────────────────────────────────────────
+  (function() {
+    async function loadTemplates() {
+      try {
+        const r = await fetch('/settings/mcp-templates');
+        const d = await r.json();
+        const grid = document.getElementById('mcp-templates-grid');
+        if (!grid) return;
+        grid.innerHTML = (d.templates || []).map(t => templateCard(t)).join('');
+      } catch(e) {}
+    }
+
+    function templateCard(t) {
+      const setupHtml = t.setup_steps && t.setup_steps.length
+        ? `<div id="setup-${t.id}" class="hidden mt-2 text-xs text-secondary space-y-1 border-t border-hairline pt-2">
+             ${t.setup_steps.map((s,i) => `<p class="flex gap-1.5"><span class="shrink-0 font-medium text-ink-muted">${i+1}.</span><span>${s}</span></p>`).join('')}
+           </div>` : '';
+      return `<div class="border border-hairline rounded-lg p-3 flex flex-col gap-2">
+        <div class="flex items-start justify-between gap-2">
+          <div><p class="text-sm font-semibold text-ink">${t.name}</p><p class="text-xs text-secondary mt-0.5">${t.tagline}</p></div>
+          ${t.configured
+            ? `<span class="shrink-0 inline-flex items-center gap-1 text-xs text-green-600 bg-green-50 border border-green-200 rounded-full px-2 py-0.5"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>Connected</span>`
+            : `<button type="button" onclick="addTemplate('${t.id}',${t.requires_auth})" class="shrink-0 pm-btn pm-btn-secondary text-xs px-2.5 py-1">Add</button>`}
+        </div>
+        <p class="text-xs text-ink-tertiary">${t.description}</p>
+        ${t.setup_steps && t.setup_steps.length ? `<button type="button" class="text-xs text-accent hover:underline text-left" onclick="toggleSetup('${t.id}')">Setup instructions ↓</button>${setupHtml}` : ''}
+      </div>`;
+    }
+
+    window.toggleSetup = function(id) {
+      const el = document.getElementById('setup-' + id);
+      if (el) el.classList.toggle('hidden');
+    };
+
+    window.addTemplate = async function(id, requiresAuth) {
+      try {
+        const r = await fetch('/settings/mcp-servers/from-template/' + id, {method: 'POST'});
+        const d = await r.json();
+        if (d.error) { alert(d.error); return; }
+        if (requiresAuth && !d.already_configured) {
+          const el = document.getElementById('setup-' + id);
+          if (el) el.classList.remove('hidden');
+          alert('Server added! Check the setup instructions to configure required credentials.');
+        }
+        loadTemplates();
+        if (typeof loadServers === 'function') loadServers();
+      } catch(e) { alert('Failed: ' + e); }
+    };
+
+    loadTemplates();
+  })();
+
+  // ── Connected MCP Servers ───────────────────────────────────────────────────
   (function() {
     let servers = [];
 
@@ -792,6 +861,166 @@
   document.getElementById('keep-auth-cb').addEventListener('change', function() {
     document.getElementById('keep-auth-hidden').value = this.checked ? '1' : '0';
   });
+
+  // ── Quick Connect ──────────────────────────────────────────────────────────
+  (function() {
+    async function loadTemplates() {
+      try {
+        const r = await fetch('/settings/mcp-templates');
+        const d = await r.json();
+        const grid = document.getElementById('mcp-templates-grid');
+        if (!grid) return;
+        grid.innerHTML = (d.templates || []).map(t => templateCard(t)).join('');
+      } catch(e) {}
+    }
+
+    function templateCard(t) {
+      const configured = t.configured;
+      const setupHtml = t.setup_steps && t.setup_steps.length
+        ? `<div id="setup-${t.id}" class="hidden mt-2 text-xs text-secondary space-y-1 border-t border-hairline pt-2">
+             ${t.setup_steps.map((s,i) => `<p class="flex gap-1.5"><span class="shrink-0 font-medium text-ink-muted">${i+1}.</span><span>${s}</span></p>`).join('')}
+           </div>`
+        : '';
+
+      return `<div class="border border-hairline rounded-lg p-3 flex flex-col gap-2">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <p class="text-sm font-semibold text-ink">${t.name}</p>
+            <p class="text-xs text-secondary mt-0.5">${t.tagline}</p>
+          </div>
+          ${configured
+            ? `<span class="shrink-0 inline-flex items-center gap-1 text-xs text-green-600 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
+                 <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>Connected
+               </span>`
+            : `<button type="button" onclick="addTemplate('${t.id}', ${t.requires_auth})"
+                 class="shrink-0 pm-btn pm-btn-secondary text-xs px-2.5 py-1">Add</button>`
+          }
+        </div>
+        <p class="text-xs text-ink-tertiary">${t.description}</p>
+        ${t.setup_steps && t.setup_steps.length ? `
+          <button type="button" class="text-xs text-accent hover:underline text-left" onclick="toggleSetup('${t.id}')">
+            Setup instructions ↓
+          </button>
+          ${setupHtml}` : ''}
+      </div>`;
+    }
+
+    window.toggleSetup = function(id) {
+      const el = document.getElementById('setup-' + id);
+      if (el) el.classList.toggle('hidden');
+    };
+
+    window.addTemplate = async function(id, requiresAuth) {
+      try {
+        const r = await fetch('/settings/mcp-servers/from-template/' + id, {method: 'POST'});
+        const d = await r.json();
+        if (d.error) { alert(d.error); return; }
+        if (requiresAuth && !d.already_configured) {
+          const setupEl = document.getElementById('setup-' + id);
+          if (setupEl) { setupEl.classList.remove('hidden'); }
+          alert('Server added! Check the setup instructions to configure required credentials.');
+        }
+        loadTemplates();
+        if (typeof loadServers === 'function') loadServers();
+      } catch(e) { alert('Failed: ' + e); }
+    };
+
+    loadTemplates();
+  })();
+
+  // ── Connected MCP Servers ──────────────────────────────────────────────────
+  async function loadServers() {
+    const r = await fetch('/settings/mcp-servers');
+    const d = await r.json();
+    const list = document.getElementById('mcp-list');
+    if (!list) return;
+    if (!d.servers || d.servers.length === 0) {
+      list.innerHTML = '<p class="text-sm text-secondary">No servers configured.</p>';
+      return;
+    }
+    list.innerHTML = d.servers.map((s, i) => `
+      <div class="flex items-center justify-between border border-hairline rounded-lg px-3 py-2">
+        <div>
+          <p class="text-sm font-medium text-ink">${s.name}</p>
+          <p class="text-xs text-secondary">${s.command ? s.command + ' ' + (s.args||[]).join(' ') : s.url || ''}</p>
+        </div>
+        <button type="button" onclick="removeServer(${i})" class="pm-btn pm-btn-secondary text-xs px-2 py-1">Remove</button>
+      </div>`).join('');
+  }
+
+  window.removeServer = async function(idx) {
+    const r = await fetch('/settings/mcp-servers');
+    const d = await r.json();
+    const servers = (d.servers || []).filter((_, i) => i !== idx);
+    await fetch('/settings/mcp-servers', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({servers})
+    });
+    loadServers();
+  };
+
+  document.getElementById('mcp-add-btn').addEventListener('click', function() {
+    document.getElementById('mcp-add-form').classList.remove('hidden');
+    this.classList.add('hidden');
+  });
+
+  document.getElementById('mcp-cancel-btn').addEventListener('click', function() {
+    document.getElementById('mcp-add-form').classList.add('hidden');
+    document.getElementById('mcp-add-btn').classList.remove('hidden');
+  });
+
+  document.getElementById('mcp-transport').addEventListener('change', function() {
+    document.getElementById('mcp-stdio-fields').classList.toggle('hidden', this.value !== 'stdio');
+    document.getElementById('mcp-http-fields').classList.toggle('hidden', this.value !== 'http');
+  });
+
+  document.getElementById('mcp-save-btn').addEventListener('click', async function() {
+    const transport = document.getElementById('mcp-transport').value;
+    const entry = {name: document.getElementById('mcp-name').value.trim()};
+    if (transport === 'stdio') {
+      entry.command = document.getElementById('mcp-command').value.trim();
+      entry.args = document.getElementById('mcp-args').value.trim().split(/\s+/).filter(Boolean);
+    } else {
+      entry.url = document.getElementById('mcp-url').value.trim();
+    }
+    const r = await fetch('/settings/mcp-servers');
+    const d = await r.json();
+    const servers = [...(d.servers || []), entry];
+    await fetch('/settings/mcp-servers', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({servers})
+    });
+    document.getElementById('mcp-add-form').classList.add('hidden');
+    document.getElementById('mcp-add-btn').classList.remove('hidden');
+    loadServers();
+  });
+
+  document.getElementById('mcp-test-btn').addEventListener('click', async function() {
+    const transport = document.getElementById('mcp-transport').value;
+    const entry = {name: document.getElementById('mcp-name').value.trim()};
+    if (transport === 'stdio') {
+      entry.command = document.getElementById('mcp-command').value.trim();
+      entry.args = document.getElementById('mcp-args').value.trim().split(/\s+/).filter(Boolean);
+    } else {
+      entry.url = document.getElementById('mcp-url').value.trim();
+    }
+    const resultEl = document.getElementById('mcp-test-result');
+    resultEl.classList.remove('hidden');
+    resultEl.textContent = 'Testing…';
+    const r = await fetch('/settings/mcp-servers/test', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(entry)});
+    const d = await r.json();
+    if (d.connected) {
+      resultEl.textContent = `Connected — ${d.tool_count} tool(s): ${(d.tools||[]).join(', ')}`;
+      resultEl.className = 'text-sm text-green-600';
+    } else {
+      resultEl.textContent = d.error || 'Connection failed.';
+      resultEl.className = 'text-sm text-danger';
+    }
+  });
+
+  loadServers();
 
   function confirmClear() {
     var keepAuth = document.getElementById('keep-auth-cb').checked;
