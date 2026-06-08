@@ -4440,9 +4440,21 @@ async def chat_endpoint(request: Request):
 async def agent_page(request: Request):
     ctx = _base()
     ctx["active"] = "agent"
+    # Add connected MCP server names for the header status display
+    try:
+        from postmind.config import load_account_config
+
+        email = _get_web_account() or ""
+        cfg = load_account_config(email) if email else {}
+        ctx["mcp_server_names"] = [
+            s.get("name") for s in (cfg.get("mcp_servers") or []) if s.get("name")
+        ]
+    except Exception:
+        ctx["mcp_server_names"] = []
     return _resp(request, "agent.html", ctx)
 
 
+<<<<<<< HEAD
 @app.get("/agent/history")
 async def agent_history(request: Request):
     """Return recent conversation turns for the active account."""
@@ -4572,10 +4584,105 @@ async def agent_suggestions(request: Request):
         return {"chips": defaults}
 
 
+def _mcp_guidance_for(account_email: str) -> str:
+    """Build MCP-specific usage guidance based on which servers are configured.
+
+    Returns an empty string if no MCP servers are configured, or a multi-line
+    block describing each connected server and how to use it proactively.
+    """
+    if not account_email:
+        return ""
+    try:
+        from postmind.config import load_account_config
+
+        cfg = load_account_config(account_email)
+        servers = cfg.get("mcp_servers") or []
+        if not servers:
+            return ""
+    except Exception:
+        return ""
+
+    parts = []
+    server_names = {s.get("name", "") for s in servers}
+
+    if "memory" in server_names:
+        parts.append(
+            "Memory (mcp_memory_*): You have persistent memory across sessions.\n"
+            "- BEFORE composing any reply: call mcp_memory_search_nodes with the sender's name/email to recall prior context.\n"
+            "- AFTER a useful interaction: call mcp_memory_create_entities or mcp_memory_add_observations to store:\n"
+            "  sender's role/company, communication preferences, ongoing topics, action items.\n"
+            "- Use mcp_memory_create_relations to link people to their organizations.\n"
+            "- Example entity: {name: 'Alice Chen', type: 'Person', observations: ['VP of Eng at Acme', 'prefers bullet points', 'timezone: PST']}"
+        )
+
+    if "google-calendar" in server_names or "calendar" in server_names:
+        parts.append(
+            "Calendar (mcp_google-calendar_* or mcp_calendar_*): You have Google Calendar access.\n"
+            "- For meeting-request emails: extract date/time/attendees, call mcp_*_create_event, draft a confirmation reply.\n"
+            "- Before scheduling: call mcp_*_list_events or mcp_*_get_free_busy to check availability.\n"
+            "- Proactively offer to create calendar events when an email contains a date+time+purpose."
+        )
+
+    if "linear" in server_names:
+        parts.append(
+            "Linear (mcp_linear_*): You can create and search Linear issues.\n"
+            "- For support/bug/feature-request emails: offer to create a Linear issue with title + description extracted from the thread.\n"
+            "- Use mcp_linear_search_issues to check if a duplicate already exists before creating.\n"
+            "- Always show the user the issue title and description and confirm before calling mcp_linear_create_issue (it's a write)."
+        )
+
+    if "brave-search" in server_names or "search" in server_names:
+        parts.append(
+            "Web search (mcp_brave-search_* or mcp_search_*): You can search the web.\n"
+            "- Before replying to an email from an unfamiliar company/person: call mcp_*_web_search to research them.\n"
+            "- When an email references a product, news event, or technical claim: verify it with a search.\n"
+            "- Use search results to enrich replies with accurate, current information."
+        )
+
+    if "hubspot" in server_names:
+        parts.append(
+            "HubSpot CRM (mcp_hubspot_*): You have CRM access.\n"
+            "- For inbound emails: call mcp_hubspot_search_contacts to look up the sender before replying.\n"
+            "- For sales/deal emails: offer to log the interaction as a CRM note (confirm first — it's a write).\n"
+            "- Use CRM context (company, deal stage, last contact) to personalize replies."
+        )
+
+    if "slack" in server_names:
+        parts.append(
+            "Slack (mcp_slack_*): You can search and post to Slack.\n"
+            "- To notify a team: summarize the email thread and offer to post it to a channel (confirm first).\n"
+            "- Use mcp_slack_search_messages to find Slack context about a topic mentioned in an email.\n"
+            "- For high-priority emails: offer to send a Slack DM alert (confirm before sending)."
+        )
+
+    # Any other configured servers — generic guidance
+    other = server_names - {
+        "memory",
+        "google-calendar",
+        "calendar",
+        "linear",
+        "brave-search",
+        "search",
+        "hubspot",
+        "slack",
+    }
+    for name in sorted(other):
+        parts.append(
+            f"{name} (mcp_{name}_*): External tools are available. "
+            "Use them proactively when relevant to the user's email task."
+        )
+
+    if not parts:
+        return ""
+
+    header = "\nConnected external tools — use these proactively:"
+    return header + "\n" + "\n\n".join(parts)
+
+
 def _build_agent_system(account_email: str, mode: str) -> str:
     overview = _chat_overview_text(account_email)
     autopilot = "ON" if _autopilot_on() else "OFF"
-    return f"""\
+    system_prompt = f"""\
 You are the postmind Super Agent — an autonomous but careful email assistant. The user \
 describes an outcome in plain English and you use tools to achieve it: analyze storage, \
 search senders, find large emails, clean up the inbox, and create automation (heartbeat \
@@ -4630,6 +4737,10 @@ Active account: {account_email or "none connected yet"}. AI mode: {mode}.
 
 Live inbox snapshot:
 {overview}"""
+    mcp_block = _mcp_guidance_for(account_email)
+    if mcp_block:
+        system_prompt += "\n" + mcp_block
+    return system_prompt
 
 
 _DEEP_TASK_RE = re.compile(
