@@ -620,40 +620,69 @@ def read_email(provider, message_id: str) -> str:
 
 
 def get_thread(provider, thread_id: str) -> str:
-    """Fetch all messages in a thread, sorted chronologically."""
+    """Fetch all messages in a thread, sorted chronologically.
+
+    Uses thread:ID Gmail search to reliably fetch all messages regardless of
+    whether the provider exposes a dedicated get_thread_messages() method.
+    Falls back to a direct batch fetch if the search returns nothing.
+    """
     if not thread_id or not thread_id.strip():
         return "No thread_id provided."
-    if not provider.supports("threads"):
-        # Fallback: fetch the single message with that ID
+    tid = thread_id.strip()
+
+    # Try provider's native thread method first (if available)
+    if hasattr(provider, "get_thread_messages"):
         try:
-            messages = provider.get_messages_batch([thread_id.strip()])
-            if not messages:
-                return f"No message found with id '{thread_id}'."
-            m = messages[0]
-            return (
-                f"[Single message — thread grouping not supported]\n"
-                f"Subject: {m.headers.subject}\n"
-                f"From: {m.headers.from_}\n"
-                f"Date: {m.headers.date}\n\n"
-                f"{(m.body_text or m.snippet or '')[:2000]}"
-            )
-        except Exception as exc:
-            return f"Couldn't fetch thread: {exc}"
+            messages = provider.get_thread_messages(tid)
+            if messages:
+                lines = [f"Thread ({len(messages)} messages):"]
+                for i, m in enumerate(messages, 1):
+                    snippet = (m.snippet or "")[:200]
+                    lines.append(
+                        f"\n[{i}] {m.headers.date or ''} — From: {m.headers.from_ or ''}\n"
+                        f"    Subject: {m.headers.subject or '(no subject)'}\n"
+                        f"    {snippet}"
+                    )
+                return "\n".join(lines)
+        except Exception:
+            pass  # fall through to search-based approach
+
+    # Universal fallback: search "thread:ID" (works on Gmail; falls back to
+    # single-message fetch for IMAP which doesn't support thread search).
     try:
-        messages = provider.get_thread_messages(thread_id.strip())
-    except Exception as exc:
-        return f"Couldn't fetch thread: {exc}"
-    if not messages:
-        return f"No messages found in thread '{thread_id}'."
-    lines = [f"Thread ({len(messages)} messages):"]
-    for i, m in enumerate(messages, 1):
-        snippet = (m.snippet or "")[:200]
-        lines.append(
-            f"\n[{i}] {m.headers.date or ''} — From: {m.headers.from_ or ''}\n"
-            f"    Subject: {m.headers.subject or '(no subject)'}\n"
-            f"    {snippet}"
+        ids = provider.list_message_ids(query=f"thread:{tid}", max_results=50)
+    except Exception:
+        ids = []
+
+    if ids:
+        try:
+            messages = provider.get_messages_metadata(ids)
+            messages.sort(key=lambda m: m.internal_date or 0)
+            lines = [f"Thread ({len(messages)} messages):"]
+            for i, m in enumerate(messages, 1):
+                snippet = (m.snippet or "")[:200]
+                lines.append(
+                    f"\n[{i}] {m.headers.date or ''} — From: {m.headers.from_ or ''}\n"
+                    f"    Subject: {m.headers.subject or '(no subject)'}\n"
+                    f"    {snippet}"
+                )
+            return "\n".join(lines)
+        except Exception as exc:
+            return f"Couldn't fetch thread messages: {exc}"
+
+    # Last resort: try treating the thread_id as a message_id
+    try:
+        messages = provider.get_messages_batch([tid])
+        if not messages:
+            return f"No messages found for thread '{tid}'."
+        m = messages[0]
+        return (
+            f"[Single message]\nSubject: {m.headers.subject or '(no subject)'}\n"
+            f"From: {m.headers.from_}\nDate: {m.headers.date}\n\n"
+            f"{(m.body_text or m.snippet or '')[:2000]}"
         )
-    return "\n".join(lines)
+    except Exception as exc:
+        return f"Couldn't fetch thread '{tid}': {exc}"
 
 
 def find_emails_by_topic(provider, topic: str, limit: int = 10) -> str:
