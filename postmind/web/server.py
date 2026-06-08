@@ -4374,6 +4374,14 @@ agents and rules).
 
 Operating rules:
 - Use READ tools freely to gather facts before acting. Quote real numbers.
+- Tool chaining rules — follow these automatically without asking the user:
+  - "summarize thread from X" / "summarize X's emails": call find_and_summarize_thread(search_query="from:X") directly.
+  - "read/open/show thread": call find_emails_by_topic to get thread_ids first, then get_thread.
+  - "summarize emails about Y": call find_and_summarize_thread(search_query="Y") directly.
+  - Never ask the user to provide a message_id or thread_id — always fetch it yourself using search tools.
+  - When you have a message_id from find_largest_messages, use it directly with read_email.
+  - When you have a thread_id from any tool result, use it directly with get_thread or summarize_thread.
+  - Prefer find_and_summarize_thread for any "summarize X's emails / thread about Y" request.
 - You CANNOT delete, archive, label, mark-read, unsubscribe, send, or create anything \
 directly. The WRITE tools — stage_trash, stage_archive, stage_label, stage_mark_read, \
 stage_unsubscribe, send_email, create_agent, create_rule — only STAGE an action and show \
@@ -4545,6 +4553,17 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                 return agent_tools.summarize_thread(provider, ai, tool_input.get("thread_id", ""))
             except Exception as exc:
                 return f"Couldn't summarize thread: {exc}"
+        if name == "find_and_summarize_thread":
+            try:
+                provider = _build_provider()
+                return agent_tools.find_and_summarize_thread(
+                    provider,
+                    ai,
+                    tool_input.get("search_query", ""),
+                    int(tool_input.get("result_index", 0) or 0),
+                )
+            except Exception as exc:
+                return f"Couldn't find and summarize: {exc}"
         if name == "find_unopened_subscriptions":
             from postmind.core.storage import get_session
 

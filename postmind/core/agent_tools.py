@@ -146,6 +146,85 @@ READ_TOOLS: list[dict] = [
         },
     },
     {
+        "name": "get_thread",
+        "description": (
+            "Fetch all messages in an email thread in chronological order. Returns subject, sender, date, and snippet per message. "
+            "Use when the user wants to read or understand a thread. "
+            "If you don't already have a thread_id, call find_emails_by_topic or search_senders first to get one — "
+            "never ask the user to provide a thread_id."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "thread_id": {"type": "string", "description": "The thread_id to fetch."},
+            },
+            "required": ["thread_id"],
+        },
+    },
+    {
+        "name": "summarize_thread",
+        "description": (
+            "Summarize an email thread in 3 bullet points. "
+            "If you don't already have a thread_id, call find_emails_by_topic or search_senders first — "
+            "never ask the user to provide a thread_id. Chain: find_emails_by_topic → summarize_thread."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "thread_id": {"type": "string", "description": "The thread_id to summarize."},
+            },
+            "required": ["thread_id"],
+        },
+    },
+    {
+        "name": "find_emails_by_topic",
+        "description": (
+            "Search for emails matching a topic or keyword using Gmail full-text search. "
+            "Returns sender, subject, date, and thread_id for each match. "
+            "Use when the user asks to find emails about a topic without knowing Gmail query syntax. "
+            "Returns thread_ids you can pass directly to get_thread or summarize_thread."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": "The topic, keyword, or phrase to search for.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results to return (default 10, max 25).",
+                },
+            },
+            "required": ["topic"],
+        },
+    },
+    {
+        "name": "find_and_summarize_thread",
+        "description": (
+            "Search for emails matching a query, fetch the most relevant thread, and return a 3-bullet summary. "
+            "Use this as the one-shot tool when the user asks to summarize emails about a topic, from a person, "
+            "or on a subject — you don't need a thread_id upfront. "
+            "Examples: 'summarize emails from Alice', 'summarize the AI newsletter thread', "
+            "'what's the latest from bob@example.com'. "
+            "Prefer this over chaining find_emails_by_topic + summarize_thread manually."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "search_query": {
+                    "type": "string",
+                    "description": "Gmail search query or topic to find the thread. E.g. 'from:alice@example.com', 'AI newsletter', 'project update'.",
+                },
+                "result_index": {
+                    "type": "integer",
+                    "description": "Which result to summarize (0 = most recent/first, 1 = second, etc.). Default 0.",
+                },
+            },
+            "required": ["search_query"],
+        },
+    },
+    {
         "name": "list_automation",
         "description": "Show the user's current automation: their heartbeat agent (if any) and active rules. Use before creating new ones or when asked 'what automations do I have'.",
         "input_schema": {"type": "object", "properties": {}},
@@ -627,6 +706,37 @@ def summarize_thread(provider, ai, thread_id: str) -> str:
         )
     except Exception as exc:
         return f"Thread content:\n{thread_text[:2000]}\n\n(Could not summarize: {exc})"
+
+
+def find_and_summarize_thread(provider, ai, search_query: str, result_index: int = 0) -> str:
+    """Search for emails, pick a thread, and return a 3-bullet AI summary."""
+    import re
+
+    if not search_query or not search_query.strip():
+        return "No search query provided."
+    # Step 1: find matching emails
+    results_text = find_emails_by_topic(provider, search_query, limit=10)
+    if (
+        "No emails found" in results_text
+        or results_text.startswith("Search failed")
+        or results_text.startswith("No topic")
+    ):
+        return results_text
+
+    # Step 2: extract thread_ids from the results text
+    thread_ids = re.findall(r"\[thread_id: ([^\]]+)\]", results_text)
+    if not thread_ids:
+        return f"Found emails but couldn't extract thread IDs:\n{results_text}"
+
+    idx = max(0, min(int(result_index or 0), len(thread_ids) - 1))
+    thread_id = thread_ids[idx]
+
+    # Step 3: summarize
+    summary = summarize_thread(provider, ai, thread_id)
+    # Prepend a header showing which thread was summarized
+    lines = results_text.split("\n")
+    target_line = next((line for line in lines[1:] if thread_id in line), "")
+    return f"**Summarizing:** {target_line.strip() or thread_id}\n\n{summary}"
 
 
 def resolve_trash_query(
