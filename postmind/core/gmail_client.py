@@ -215,7 +215,13 @@ def authenticate(
                     credentials_path,
                 )
             flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path), scopes)
-            creds = flow.run_local_server(port=0)
+            creds = flow.run_local_server(
+                port=0,
+                success_message=(
+                    "<script>window.location='http://127.0.0.1:8484/accounts?added=1';</script>"
+                    "<p>Signed in — redirecting you back to postmind…</p>"
+                ),
+            )
 
         token_path.write_text(creds.to_json())
         # Restrict permissions: owner read/write only — tokens are sensitive
