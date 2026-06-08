@@ -351,7 +351,7 @@ def get_engine():
             poolclass=NullPool,
             echo=False,
         )
-        Base.metadata.create_all(_engine)
+        Base.metadata.create_all(_engine, checkfirst=True)
         _run_migrations(_engine)
     return _engine
 
