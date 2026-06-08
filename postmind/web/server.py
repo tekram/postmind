@@ -4712,16 +4712,22 @@ are flagged and pre-unchecked on the card.
 - Be concise. After staging something, tell the user to review and confirm the card. Ask a \
 brief clarifying question only when genuinely ambiguous (e.g. which account, or the label \
 name).
-- For "large non-personal / marketing emails": prefer 'has:list-unsubscribe' as the query \
-for find_largest_messages — it catches promotions, newsletters, and updates across all Gmail \
-tabs. Avoid date filters unless the user asked; they drastically narrow results. \
-If that also returns nothing, tell the user and suggest checking the Sync page to pull in \
-more mail.
+- CRITICAL — Gmail API query rules for newsletters:
+  - NEVER use 'has:list-unsubscribe' in any query — it is a web-UI-only operator that \
+returns 0 results via the Gmail API. The agent has been wrong when it uses this.
+  - For newsletters/subscriptions/promotions use the broad category query: \
+'(category:promotions OR category:updates OR category:forums)'. This is more comprehensive \
+than 'category:promotions' alone — many newsletters land in Updates or Forums tabs.
+  - Correct: stage_trash_query(gmail_query="(category:promotions OR category:updates OR category:forums) older_than:3y") \
+  - Wrong: stage_trash_query(gmail_query="has:list-unsubscribe older_than:3y") \
+  - Note: stage_trash_query auto-rewrites has:list-unsubscribe for you, but always use the category form directly.
+  - For "newsletters I never opened": call find_unopened_subscriptions (local DB, high unread \
+ratio senders), then offer stage_trash or stage_unsubscribe on those senders.
+  - For "find large marketing emails": use 'category:promotions' or 'has:attachment larger:5M'.
 - When stage_trash_query returns nothing: do NOT give up. Try a shorter time window \
-(e.g. older_than:1y if 2y returned nothing), or retry with newsletters_only=false to \
-check if the query itself matches anything. stage_trash_query searches live Gmail — it \
-does NOT depend on local sync. Only tell the user nothing was found after trying at least \
-one fallback.
+(e.g. older_than:1y if 3y returned nothing), or widen the query. stage_trash_query \
+searches live Gmail — it does NOT depend on local sync. Only tell the user nothing was \
+found after trying at least one fallback with a shorter window.
 - When the user refers to "the Nth one" or "that email" from a prior search result, use \
 the message_id from that prior result directly with read_email or stage_trash. NEVER \
 re-run find_largest_messages or any search tool to re-locate a previously listed email.

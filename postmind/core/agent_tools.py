@@ -133,7 +133,14 @@ READ_TOOLS: list[dict] = [
     },
     {
         "name": "find_unopened_subscriptions",
-        "description": "Find newsletters/subscriptions the user almost never opens — senders that have a List-Unsubscribe header and a high unread ratio. Use for 'unsubscribe me from newsletters I never open' / 'what subscriptions do I ignore'. Requires locally synced data.",
+        "description": (
+            "Find newsletters/subscriptions the user almost never opens — senders with a "
+            "List-Unsubscribe header AND ≥60% unread ratio in the locally synced data. "
+            "Use for 'unsubscribe me from newsletters I never open' / 'what subscriptions do I ignore'. "
+            "Only looks at locally synced emails (not all of Gmail). "
+            "For finding OLD newsletters to delete (e.g. 'older than 3 years'), use "
+            "stage_trash_query with gmail_query='category:promotions older_than:3y' instead."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -329,17 +336,31 @@ WRITE_TOOLS: list[dict] = [
     },
     {
         "name": "stage_trash_query",
-        "description": "Stage an email-level trash REVIEW. Use when the user wants to delete a CLASS of mail described by criteria (e.g. 'newsletters older than 2 years', 'promotions from last year'). You do NOT delete — you compose a Gmail search query and the server resolves the matching emails into a review drawer the user approves message-by-message. Deletes go to Trash and are undoable for 30 days. Prefer this over stage_trash when the target is a query/time-range rather than named senders.",
+        "description": (
+            "Stage an email-level trash REVIEW. Use when the user wants to delete a CLASS of mail "
+            "described by criteria (e.g. 'newsletters older than 2 years', 'promotions from last year'). "
+            "You do NOT delete — you compose a Gmail search query and the server resolves the matching "
+            "emails into a review drawer the user approves message-by-message. Deletes go to Trash and "
+            "are undoable for 30 days. Prefer this over stage_trash when the target is a query/time-range "
+            "rather than named senders.\n\n"
+            "IMPORTANT — Gmail API query rules:\n"
+            "- For newsletters/subscriptions: use 'category:promotions' or 'category:updates' — "
+            "  DO NOT use 'has:list-unsubscribe' (it is a web-UI-only operator that returns 0 results via API).\n"
+            "- Newsletter examples: 'category:promotions older_than:2y', "
+            "  '(category:promotions OR category:updates) older_than:1y'\n"
+            "- Attachment examples: 'has:attachment larger:5M older_than:1y'\n"
+            "- Age operators: older_than:Nd/Nw/Nm/Ny (days/weeks/months/years)"
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "gmail_query": {
                     "type": "string",
-                    "description": "Gmail search operators that select the emails, e.g. 'older_than:2y', 'category:promotions older_than:1y'. A search string only — never message IDs.",
+                    "description": "Gmail API search query. Use 'category:promotions' for newsletters — NOT 'has:list-unsubscribe'. E.g. 'category:promotions older_than:2y'.",
                 },
                 "newsletters_only": {
                     "type": "boolean",
-                    "description": "When true, keep only messages that have a List-Unsubscribe header (true newsletters/subscriptions). Default false.",
+                    "description": "Additional metadata filter for List-Unsubscribe header. Leave false when your query already targets newsletters via category:promotions.",
                 },
                 "description": {
                     "type": "string",
@@ -565,17 +586,18 @@ def find_largest_messages(provider, query: str = "", limit: int = 10) -> str:
 
     fallback_scope = None
     if not ids:
+        # category:promotions/updates/forums return nothing → try the broader
+        # category:promotions OR category:updates combined query.
         _PROMO_TERMS = ("category:promotions", "category:updates", "category:forums")
         if any(t in scope.lower() for t in _PROMO_TERMS):
-            fallback_scope = "has:list-unsubscribe"
+            fallback_scope = "(category:promotions OR category:updates OR category:forums)"
             ids = provider.list_message_ids(query=fallback_scope, max_results=400)
 
     if not ids:
         tried = f"'{scope}'" + (f" and fallback '{fallback_scope}'" if fallback_scope else "")
         return (
             f"No messages found for {tried}. "
-            "Try a broader query such as 'has:list-unsubscribe' to find marketing "
-            "and newsletter emails, or 'has:attachment larger:1M' for large attachments."
+            "Try 'category:promotions' or 'has:attachment larger:1M' for large attachments."
         )
 
     effective_scope = fallback_scope or scope
@@ -777,11 +799,26 @@ def resolve_trash_query(
     When ``newsletters_only`` is set, keep only messages that carry a
     List-Unsubscribe header (true newsletters/subscriptions). Returns dicts the
     panel renders directly.
+
+    Important: ``has:list-unsubscribe`` is NOT supported by the Gmail API — it
+    is a web-UI-only operator that returns 0 results via the API.  This function
+    automatically rewrites it to ``category:promotions OR category:updates``
+    which IS supported and covers the same content.
     """
     from datetime import datetime, timezone
 
     limit = max(1, min(int(limit or 200), 500))
     scope = (gmail_query or "").strip() or "in:inbox"
+
+    # has:list-unsubscribe is web-UI-only; the API returns 0 for it.
+    # Rewrite it to the equivalent category operators that the API supports.
+    _UNSUB_TOKEN = "has:list-unsubscribe"
+    _API_EQUIV = "(category:promotions OR category:updates OR category:forums)"
+    if _UNSUB_TOKEN in scope.lower():
+        scope = scope.lower().replace(_UNSUB_TOKEN, _API_EQUIV).strip()
+        # The query already selects newsletters — metadata filter would double-filter.
+        newsletters_only = False
+
     ids = provider.list_message_ids(query=scope, max_results=limit)
     if not ids:
         return []
