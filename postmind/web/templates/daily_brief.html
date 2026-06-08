@@ -127,12 +127,332 @@
   </div>
   {% endif %}
 
+  {% if brief %}
+  <!-- Brief Agent Chat Panel -->
+  <div class="mt-8" id="brief-agent-section">
+    <div class="flex items-center gap-2.5 mb-3">
+      <svg class="w-4 h-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9.94 14.06l-1.06 2.32a1 1 0 01-1.82 0l-1.06-2.32a1 1 0 00-.5-.5L3.18 12.5a1 1 0 010-1.82l2.32-1.06a1 1 0 00.5-.5l1.06-2.32a1 1 0 011.82 0l1.06 2.32a1 1 0 00.5.5l2.32 1.06a1 1 0 010 1.82l-2.32 1.06a1 1 0 00-.5.5z"/>
+      </svg>
+      <h2 class="font-semibold text-ink text-[15px]">Ask about your brief</h2>
+    </div>
+
+    <!-- Quick chips -->
+    <div class="flex flex-wrap gap-2 mb-3" id="brief-chips">
+      <button type="button" class="brief-chip pm-pill text-ink-muted bg-surface-2 hover:bg-surface border border-hairline hover:border-hairline-strong transition-colors text-xs">What should I tackle first?</button>
+      <button type="button" class="brief-chip pm-pill text-ink-muted bg-surface-2 hover:bg-surface border border-hairline hover:border-hairline-strong transition-colors text-xs">Summarize the high-priority items</button>
+      <button type="button" class="brief-chip pm-pill text-ink-muted bg-surface-2 hover:bg-surface border border-hairline hover:border-hairline-strong transition-colors text-xs">Draft replies to the urgent emails</button>
+      <button type="button" class="brief-chip pm-pill text-ink-muted bg-surface-2 hover:bg-surface border border-hairline hover:border-hairline-strong transition-colors text-xs">Archive all newsletters in this brief</button>
+    </div>
+
+    <!-- Messages area -->
+    <div id="brief-messages" class="space-y-3 mb-3 min-h-0 max-h-[32rem] overflow-y-auto"></div>
+
+    <!-- Input -->
+    <form id="brief-form" class="flex items-end gap-2">
+      <textarea id="brief-input" rows="1" placeholder="Ask about your brief…"
+                class="pm-input flex-1 resize-none max-h-28 text-sm"></textarea>
+      <button type="submit" id="brief-send" class="pm-btn shrink-0 h-10 gap-1.5 text-sm">
+        Ask
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </button>
+    </form>
+  </div>
+  {% endif %}
+
 </div>
 
 {% endblock %}
 
 {% block extra_js %}
 <script>
+// ── Brief Agent Chat ──────────────────────────────────────────────────────────
+// Global so onclick="briefAskAgent(...)" on item rows can call it.
+function briefAskAgent(question) {
+  const input = document.getElementById("brief-input");
+  const form = document.getElementById("brief-form");
+  if (!input || !form) return;
+  input.value = question;
+  input.style.height = "auto";
+  input.style.height = Math.min(input.scrollHeight, 112) + "px";
+  form.requestSubmit();
+}
+
+(function () {
+  const msgs = document.getElementById("brief-messages");
+  const form = document.getElementById("brief-form");
+  const input = document.getElementById("brief-input");
+  const sendBtn = document.getElementById("brief-send");
+  if (!msgs || !form || !input || !sendBtn) return; // brief panel not rendered
+
+  let history = [];
+
+  // ── Helpers (inlined from agent.html) ──────────────────────────────────────
+  function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+  function fmt(s) {
+    return esc(s)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/`(.+?)`/g, '<code class="bg-surface-2 rounded px-1 text-[12px]">$1</code>')
+      .replace(/\n/g, "<br>");
+  }
+
+  const CARD_SPARK = '<svg class="w-4 h-4 shrink-0 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M9.94 14.06l-1.06 2.32a1 1 0 01-1.82 0l-1.06-2.32a1 1 0 00-.5-.5L3.18 12.5a1 1 0 010-1.82l2.32-1.06a1 1 0 00.5-.5l1.06-2.32a1 1 0 011.82 0l1.06 2.32a1 1 0 00.5.5l2.32 1.06a1 1 0 010 1.82l-2.32 1.06a1 1 0 00-.5.5z"/><path stroke-linecap="round" stroke-linejoin="round" d="M18 4v4M20 6h-4M18 16v3M19.5 17.5h-3"/></svg>';
+
+  function actionsHtml(actions) {
+    if (!actions || !actions.length) return "";
+    let h = '<div class="flex flex-wrap gap-2 mt-2">';
+    for (const a of actions) {
+      h += '<a href="' + esc(a.href) + '" class="inline-flex items-center gap-1 text-sm font-medium text-accent bg-accent-subtle border border-accent-border hover:bg-accent-subtle/70 px-3 py-1.5 rounded-button transition-colors">' + esc(a.label) + ' &rarr;</a>';
+    }
+    return h + "</div>";
+  }
+
+  function cardHtml(card) {
+    const f = card.fields || {};
+    if (card.type === "create_agent") {
+      const cb = (name, on) => '<label class="flex items-center gap-1.5 text-xs text-ink-muted"><input type="checkbox" name="' + name + '" ' + (on ? "checked" : "") + ' class="rounded text-accent"> ' + name.replace("run_", "") + "</label>";
+      return '<form method="POST" action="/agent/create-agent" class="mt-2 border border-accent-border bg-surface rounded-card p-4 shadow-whisper max-w-md">' +
+        '<p class="flex items-center gap-1.5 text-sm font-semibold text-ink mb-2">' + CARD_SPARK + esc(card.title) + '</p>' +
+        '<input type="hidden" name="email" value="' + esc(f.email) + '">' +
+        '<div class="space-y-2 text-sm">' +
+          '<div class="flex items-center gap-2"><span class="text-ink-tertiary w-20 text-xs">Name</span><input name="name" value="' + esc(f.name) + '" class="pm-input flex-1 px-2 py-1 text-sm"></div>' +
+          '<div class="flex items-center gap-2"><span class="text-ink-tertiary w-20 text-xs">Every (min)</span><input name="interval_minutes" type="number" value="' + esc(f.interval_minutes) + '" class="pm-input w-24 px-2 py-1 text-sm"></div>' +
+          '<div class="flex items-center gap-2"><span class="text-ink-tertiary w-20 text-xs">Account</span><span class="text-ink-muted text-xs">' + esc(f.email) + '</span></div>' +
+          '<div class="flex flex-wrap gap-3 pt-1">' + cb("run_rules", f.run_rules) + cb("run_followups", f.run_followups) + cb("run_avoidance", f.run_avoidance) + '</div>' +
+        '</div>' +
+        '<button type="submit" class="pm-btn mt-3 px-4 py-1.5">Create agent</button>' +
+      '</form>';
+    }
+    if (card.type === "bulk_action") {
+      const verb = { archive: "Archive", label: "Apply label", mark_read: "Mark read" }[f.action] || "Confirm";
+      let rows = (f.targets || []).map(t =>
+        '<label class="flex items-center justify-between gap-2 py-1.5 cursor-pointer">' +
+          '<span class="flex items-center gap-2 min-w-0">' +
+            '<input type="checkbox" name="senders" value="' + esc(t.sender_email) + '" ' + (t.sensitive ? "" : "checked") + ' class="rounded text-accent">' +
+            '<span class="text-xs text-ink-muted truncate">' + esc(t.sender_email) +
+              (t.sensitive ? ' <span class="text-[10px] text-warning bg-warning-bg border border-warning-border rounded px-1">sensitive</span>' : "") +
+            '</span>' +
+          '</span>' +
+          '<span class="text-[11px] text-ink-tertiary shrink-0 tabular">' + esc(t.count) + ' · ' + esc(t.size_str) + '</span>' +
+        '</label>'
+      ).join("");
+      let blocked = (f.blocked && f.blocked.length) ? '<p class="text-[11px] text-ink-tertiary mt-1">Skipped ' + f.blocked.length + ' protected sender(s).</p>' : "";
+      return '<form method="POST" action="/agent/action/confirm" class="mt-2 border border-accent-border bg-surface rounded-card p-4 shadow-whisper max-w-md">' +
+        '<p class="flex items-center gap-1.5 text-sm font-semibold text-ink mb-1">' + CARD_SPARK + esc(card.title) + '</p>' +
+        '<p class="text-xs text-ink-subtle mb-2">' + esc(f.total_count) + ' emails · reversible, undoable for 30 days.</p>' +
+        '<input type="hidden" name="action" value="' + esc(f.action) + '">' +
+        (f.action === "label" ? '<input type="hidden" name="label_name" value="' + esc(f.label_name) + '">' : "") +
+        '<div class="max-h-44 overflow-y-auto border-y border-hairline py-1">' + rows + '</div>' + blocked +
+        '<button type="submit" class="pm-btn mt-3 px-4 py-1.5">' + verb + ' selected</button>' +
+      '</form>';
+    }
+    if (card.type === "send_email") {
+      return '<form method="POST" action="/agent/send" class="mt-2 border border-accent-border bg-surface rounded-card p-4 shadow-whisper max-w-md">' +
+        '<p class="flex items-center gap-1.5 text-sm font-semibold text-ink mb-2">' + CARD_SPARK + esc(card.title) + '</p>' +
+        '<div class="space-y-2 text-sm">' +
+          '<div class="flex items-center gap-2"><span class="text-ink-tertiary w-16 text-xs">To</span><input name="to" value="' + esc(f.to || "") + '" placeholder="recipient@example.com" class="pm-input flex-1 px-2 py-1 text-sm"></div>' +
+          '<div class="flex items-center gap-2"><span class="text-ink-tertiary w-16 text-xs">Subject</span><input name="subject" value="' + esc(f.subject || "") + '" class="pm-input flex-1 px-2 py-1 text-sm"></div>' +
+          '<textarea name="body" rows="6" class="pm-input w-full px-2 py-1.5 text-sm">' + esc(f.body || "") + '</textarea>' +
+        '</div>' +
+        '<p class="text-[11px] text-ink-tertiary mt-2">Nothing is sent until you click Send. Review the recipient and content first.</p>' +
+        '<button type="submit" class="pm-btn mt-2 px-4 py-1.5">Send</button>' +
+      '</form>';
+    }
+    if (card.type === "trash_review") {
+      return '<div class="mt-2 border border-accent-border bg-surface rounded-card p-4 shadow-whisper max-w-md">' +
+        '<p class="flex items-center gap-1.5 text-sm font-semibold text-ink mb-1">' + CARD_SPARK + esc(card.title || "Review emails") + '</p>' +
+        '<p class="text-xs text-ink-subtle mb-3">' + esc(f.total_count) + ' emails · ' + esc(f.sender_count) + ' sender(s) · reversible, undoable for 30 days.</p>' +
+        '<a href="/agent" class="pm-btn px-4 py-1.5 inline-flex items-center gap-1">Open in Super Agent &rarr;</a>' +
+      '</div>';
+    }
+    return "";
+  }
+
+  const TOOL_ICON = (d) => '<svg class="w-3.5 h-3.5 shrink-0 text-ink-subtle" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">' + d + '</svg>';
+  const TOOL_META = {
+    get_inbox_overview: { icon: TOOL_ICON('<path stroke-linecap="round" stroke-linejoin="round" d="M3 12h5l1.5 3h5L16 12h5M5 5h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z"/>'), label: "Reading inbox overview" },
+    search_senders: { icon: TOOL_ICON('<path stroke-linecap="round" stroke-linejoin="round" d="M11 19a8 8 0 100-16 8 8 0 000 16zM21 21l-4.35-4.35"/>'), label: "Searching senders" },
+    analyze_storage: { icon: TOOL_ICON('<ellipse cx="12" cy="5" rx="8" ry="3"/><path stroke-linecap="round" stroke-linejoin="round" d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/>'), label: "Analyzing storage" },
+    find_largest_messages: { icon: TOOL_ICON('<path stroke-linecap="round" stroke-linejoin="round" d="M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8"/>'), label: "Finding largest emails" },
+    summarize_thread: { icon: TOOL_ICON('<path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h7"/>'), label: "Summarizing thread" },
+    find_emails_by_topic: { icon: TOOL_ICON('<path stroke-linecap="round" stroke-linejoin="round" d="M11 19a8 8 0 100-16 8 8 0 000 16zM21 21l-4.35-4.35"/>'), label: "Finding emails" },
+    draft_email: { icon: TOOL_ICON('<path stroke-linecap="round" stroke-linejoin="round" d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>'), label: "Drafting email" },
+    stage_trash: { icon: TOOL_ICON('<path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>'), label: "Staging trash" },
+    stage_archive: { icon: TOOL_ICON('<rect x="3" y="4" width="18" height="4" rx="1"/><path stroke-linecap="round" stroke-linejoin="round" d="M5 8v11a1 1 0 001 1h12a1 1 0 001-1V8M10 12h4"/>'), label: "Staging archive" },
+  };
+
+  function streamBubble() {
+    const wrap = document.createElement("div");
+    wrap.className = "flex flex-col items-start gap-1 max-w-[85%]";
+    const steps = document.createElement("div");
+    steps.className = "flex flex-col gap-1 w-full";
+    const bub = document.createElement("div");
+    bub.className = "bg-surface border border-hairline text-ink text-sm rounded-2xl rounded-bl-md px-4 py-2.5 shadow-whisper hidden";
+    const textEl = document.createElement("div");
+    bub.appendChild(textEl);
+    wrap.appendChild(steps);
+    wrap.appendChild(bub);
+    msgs.appendChild(wrap);
+    msgs.scrollTop = msgs.scrollHeight;
+
+    let pendingStep = null;
+    return {
+      wrap, steps, bub, textEl,
+      toolStart(name) {
+        const meta = TOOL_META[name] || { icon: TOOL_ICON('<circle cx="12" cy="12" r="2"/>'), label: name };
+        const step = document.createElement("div");
+        step.className = "flex items-center gap-2 text-xs text-ink-subtle bg-surface border border-hairline rounded-button px-3 py-1.5 shadow-whisper";
+        step.innerHTML =
+          '<span class="flex items-center">' + meta.icon + '</span>' +
+          '<span class="font-medium text-ink-muted">' + esc(meta.label) + '</span>' +
+          '<span class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-accent animate-pulse step-spinner"></span>' +
+          '<span class="text-ink-tertiary step-result"></span>';
+        steps.appendChild(step);
+        msgs.scrollTop = msgs.scrollHeight;
+        pendingStep = step;
+      },
+      toolResult(summary) {
+        if (!pendingStep) return;
+        const sp = pendingStep.querySelector(".step-spinner");
+        if (sp) sp.remove();
+        const oneLine = String(summary || "").split("\n")[0].slice(0, 120);
+        const res = pendingStep.querySelector(".step-result");
+        if (res) res.textContent = oneLine ? "→ " + oneLine : "→ done";
+        const check = document.createElement("span");
+        check.className = "text-accent flex items-center";
+        check.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>';
+        pendingStep.insertBefore(check, res);
+        pendingStep = null;
+        msgs.scrollTop = msgs.scrollHeight;
+      },
+      appendText(t) {
+        if (this.bub.classList.contains("hidden")) this.bub.classList.remove("hidden");
+        this._raw = (this._raw || "") + t;
+        this.textEl.innerHTML = fmt(this._raw);
+        msgs.scrollTop = msgs.scrollHeight;
+      },
+      finalize(actions, cards) {
+        let extra = actionsHtml(actions);
+        if (cards && cards.length) extra += cards.map(cardHtml).join("");
+        if (extra) {
+          const div = document.createElement("div");
+          div.innerHTML = extra;
+          while (div.firstChild) this.wrap.appendChild(div.firstChild);
+        }
+        msgs.scrollTop = msgs.scrollHeight;
+      },
+      remove() { this.wrap.remove(); },
+      text() { return this._raw || ""; },
+    };
+  }
+
+  function addBubble(role, content, actions, cards) {
+    const wrap = document.createElement("div");
+    if (role === "user") {
+      wrap.className = "flex justify-end";
+      wrap.innerHTML = '<div class="bg-accent text-white text-sm rounded-2xl rounded-br-md px-4 py-2.5 max-w-[85%] whitespace-pre-wrap">' + fmt(content) + "</div>";
+    } else {
+      wrap.className = "flex flex-col items-start gap-1 max-w-[85%]";
+      let html = '<div class="bg-surface border border-hairline text-ink text-sm rounded-2xl rounded-bl-md px-4 py-2.5 shadow-whisper">' + fmt(content) + "</div>";
+      html += actionsHtml(actions);
+      if (cards && cards.length) html += cards.map(cardHtml).join("");
+      wrap.innerHTML = html;
+    }
+    msgs.appendChild(wrap);
+    msgs.scrollTop = msgs.scrollHeight;
+    return wrap;
+  }
+
+  // ── Chip handling ───────────────────────────────────────────────────────────
+  document.querySelectorAll(".brief-chip").forEach(b => b.addEventListener("click", () => {
+    input.value = b.textContent.trim();
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 112) + "px";
+    form.requestSubmit();
+  }));
+
+  // ── Input auto-resize ───────────────────────────────────────────────────────
+  input.addEventListener("input", () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 112) + "px"; });
+  input.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
+
+  // ── Streaming send ──────────────────────────────────────────────────────────
+  async function sendStream(text) {
+    history.push({ role: "user", content: text });
+    addBubble("user", text);
+    sendBtn.disabled = true;
+
+    const view = streamBubble();
+    let finalActions = [], finalCards = [];
+    let guidance = null;
+    let buf = "";
+    let receivedAny = false;
+    try {
+      const res = await fetch("/agent/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
+        body: JSON.stringify({
+          messages: history.map(m => ({ role: m.role, content: m.content })),
+          brief_mode: true,
+        }),
+      });
+      if (!res.ok || !res.body || typeof ReadableStream === "undefined") throw new Error("no-stream");
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) !== -1) {
+          const frame = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const line = frame.split("\n").find(l => l.startsWith("data:"));
+          if (!line) continue;
+          let ev;
+          try { ev = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
+          receivedAny = true;
+          if (ev.type === "text_delta") view.appendText(ev.text || "");
+          else if (ev.type === "tool_start") view.toolStart(ev.name);
+          else if (ev.type === "tool_result") view.toolResult(ev.summary);
+          else if (ev.type === "final") { finalActions = ev.actions || []; finalCards = ev.cards || []; }
+          else if (ev.type === "guidance") { guidance = ev; }
+        }
+      }
+    } catch (e) {
+      if (!receivedAny) {
+        view.remove();
+        addBubble("assistant", "Sorry — I couldn't reach the agent. Is the server still running?");
+        sendBtn.disabled = false;
+        input.focus();
+        return;
+      }
+      view.appendText("\n\n(connection interrupted)");
+    }
+
+    if (guidance) {
+      view.remove();
+      addBubble("assistant", guidance.reply, guidance.actions, guidance.cards);
+      history.push({ role: "assistant", content: guidance.reply, actions: guidance.actions || [], cards: guidance.cards || [] });
+      sendBtn.disabled = false;
+      input.focus();
+      return;
+    }
+
+    view.finalize(finalActions, finalCards);
+    history.push({ role: "assistant", content: view.text(), actions: finalActions, cards: finalCards });
+    sendBtn.disabled = false;
+    input.focus();
+  }
+
+  form.addEventListener("submit", e => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = ""; input.style.height = "auto";
+    sendStream(text);
+  });
+})();
+
 const _briefSpinSvg = '<svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>';
 
 function _briefTab(tab) {

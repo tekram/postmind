@@ -720,9 +720,24 @@ def _render_brief_links(brief, account_email: str) -> str:
                 f"{_icon_trash}</button>"
             )
 
+            subject_short = _html.escape(str(item.get("subject") or "(no subject)")[:40])
+            ask_btn = (
+                f'<button type="button" '
+                f'class="brief-agent-chip inline-flex items-center gap-1 text-[10px] text-ink-tertiary '
+                f'hover:text-accent px-1.5 py-0.5 rounded transition-colors" '
+                f'data-subject="{subject}" '
+                f'data-sender="{sender}" '
+                f'data-gmail-id="{gid}" '
+                f"onclick=\"briefAskAgent('Summarize the thread from {sender} about {subject_short}')\">"
+                f'<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">'
+                f'<path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>'
+                f"</svg>"
+                f"Ask"
+                f"</button>"
+            )
             actions = (
                 f'<span class="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">'
-                f"{open_btn}{archive_btn}{trash_btn}"
+                f"{open_btn}{archive_btn}{trash_btn}{ask_btn}"
                 f"</span>"
             )
 
@@ -805,6 +820,36 @@ async def brief_page(request: Request):
         }
     )
     return _resp(request, "daily_brief.html", ctx)
+
+
+@app.get("/brief/context")
+async def brief_context(request: Request):
+    """Return today's brief items as agent-consumable context."""
+    import json as _json
+
+    from postmind.core.daily_brief import DailyBriefGenerator
+
+    account_email = _get_web_account() or ""
+    if not account_email:
+        return {"items": [], "summary": ""}
+    try:
+        loop = asyncio.get_event_loop()
+        brief = await loop.run_in_executor(
+            _executor, lambda: DailyBriefGenerator(account_email).get_or_generate(force=False)
+        )
+        if not brief:
+            return {"items": [], "summary": ""}
+        items = []
+        if brief.items_json:
+            items = [i for i in _json.loads(brief.items_json) if isinstance(i, dict)]
+        return {
+            "items": items[:20],
+            "summary": brief.content or "",
+            "unread_count": brief.unread_count or 0,
+            "high_priority_count": brief.high_priority_count or 0,
+        }
+    except Exception:
+        return {"items": [], "summary": ""}
 
 
 @app.post("/brief/generate", response_class=HTMLResponse)
@@ -3965,10 +4010,19 @@ async def agent_page(request: Request):
     return _resp(request, "agent.html", ctx)
 
 
-def _build_agent_system(account_email: str, mode: str) -> str:
+def _build_agent_system(account_email: str, mode: str, brief_context: str = "") -> str:
     overview = _chat_overview_text(account_email)
     autopilot = "ON" if _autopilot_on() else "OFF"
-    return f"""\
+    brief_block = ""
+    if brief_context:
+        brief_block = f"""You are acting as the Super Agent embedded in the user's Daily Brief page.
+Today's brief context:
+{brief_context}
+
+Use this context to answer questions about today's brief. When the user asks about "the emails in my brief" or "the top items", refer to the above. You still have access to all tools — use them to read threads, draft replies, and take actions.
+
+"""
+    return brief_block + f"""\
 You are the postmind Super Agent — an autonomous but careful email assistant. The user \
 describes an outcome in plain English and you use tools to achieve it: analyze storage, \
 search senders, find large emails, clean up the inbox, and create automation (heartbeat \
@@ -4503,6 +4557,30 @@ async def agent_stream_endpoint(request: Request):
         try:
             ai = AIEngine(**engine_kwargs)
             system = _build_agent_system(account_email, mode)
+            if body.get("brief_mode"):
+                try:
+                    import json as _json
+
+                    from postmind.core.daily_brief import DailyBriefGenerator
+
+                    brief = DailyBriefGenerator(account_email).get_or_generate(force=False)
+                    if brief:
+                        items = []
+                        if brief.items_json:
+                            items = _json.loads(brief.items_json)
+                        brief_ctx_lines = [
+                            f"Today's brief: {brief.unread_count} unread, {brief.high_priority_count} high priority."
+                        ]
+                        for item in items[:15]:
+                            brief_ctx_lines.append(
+                                f"- {item.get('priority', '?').upper()} | {item.get('sender', '')} | "
+                                f"{item.get('subject', '')[:60]} | action: {item.get('suggested_action', '')} | "
+                                f"gmail_id: {item.get('gmail_id', '')}"
+                            )
+                        brief_ctx = "\n".join(brief_ctx_lines)
+                        system = _build_agent_system(account_email, mode, brief_context=brief_ctx)
+                except Exception:
+                    pass  # best-effort; system prompt already built without brief
             executor_tool = _build_agent_tool_executor(account_email, ai, actions, cards)
             if mode == "cloud":
                 for event in ai.chat_stream(
