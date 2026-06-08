@@ -238,3 +238,47 @@ async def build_pool_for_account(account_email: str) -> MCPClientPool:
     if servers:
         await pool.connect_all(servers)
     return pool
+
+
+# ── Memory server bootstrap ────────────────────────────────────────────────────
+
+
+def ensure_memory_server(account_email: str) -> dict | None:
+    """Return a config dict for the per-account memory server, or None if npx is unavailable."""
+    import shutil
+
+    from postmind.config import memory_dir_for
+
+    if not shutil.which("npx"):
+        return None
+    mem_dir = memory_dir_for(account_email)
+    return {
+        "name": "memory",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-memory"],
+        "env": {"MEMORY_FILE_PATH": str(mem_dir / "memory.json")},
+    }
+
+
+def bootstrap_memory_for_account(account_email: str) -> bool:
+    """Idempotently add the memory server to an account's mcp_servers config.
+
+    Returns True if the config was updated, False if already configured or npx unavailable.
+    Always best-effort — never raises.
+    """
+    try:
+        from postmind.config import load_account_config, save_account_config
+
+        cfg = load_account_config(account_email)
+        servers = cfg.get("mcp_servers") or []
+        if any(s.get("name") == "memory" for s in servers):
+            return False
+        entry = ensure_memory_server(account_email)
+        if entry is None:
+            return False
+        servers.append(entry)
+        cfg["mcp_servers"] = servers
+        save_account_config(account_email, cfg)
+        return True
+    except Exception:
+        return False

@@ -18,12 +18,22 @@ UNDO_LOG_DIR = DATA_DIR / "undo_logs"
 TOKENS_DIR = DATA_DIR / "tokens"
 ACCOUNTS_DIR = DATA_DIR / "accounts"
 ACTIVE_ACCOUNT_PATH = DATA_DIR / "active_account"
+MEMORY_DIR = DATA_DIR / "memory"
 
 
 def token_path_for(email: str) -> Path:
     """Return the per-account OAuth token path."""
     safe = email.lower().replace("/", "_")
     return TOKENS_DIR / f"{safe}.json"
+
+
+def memory_dir_for(email: str) -> Path:
+    """Return (and create) the per-account memory directory for the memory MCP server."""
+    safe = email.lower().replace("/", "_").replace("@", "_at_")
+    d = MEMORY_DIR / safe
+    d.mkdir(parents=True, exist_ok=True)
+    d.chmod(0o700)
+    return d
 
 
 def get_active_account() -> str | None:

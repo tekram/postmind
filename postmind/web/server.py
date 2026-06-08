@@ -175,6 +175,16 @@ _main_event_loop: asyncio.AbstractEventLoop | None = None
 async def _startup():
     global _main_event_loop
     _main_event_loop = asyncio.get_event_loop()
+    # Best-effort: provision memory MCP server for the active account on startup
+    try:
+        from postmind.config import get_active_account
+        from postmind.core.mcp_client import bootstrap_memory_for_account
+
+        active = get_active_account()
+        if active:
+            bootstrap_memory_for_account(active)
+    except Exception:
+        pass
 
 
 class _NullPool:
@@ -2031,6 +2041,11 @@ async def gmail_add_start(request: Request):
             set_active_account(email)
             state["status"] = "done"
             state["email"] = email
+            try:
+                from postmind.core.mcp_client import bootstrap_memory_for_account
+                bootstrap_memory_for_account(email)
+            except Exception:
+                pass
         except Exception as exc:
             state["status"] = "error"
             state["error"] = str(exc)
@@ -2084,6 +2099,11 @@ def _test_and_register_imap(server, user, password, port, folder, display_name):
     provider.get_profile()
     register_imap(user, server, user, port, folder, display_name or user)
     set_active_account(user)
+    try:
+        from postmind.core.mcp_client import bootstrap_memory_for_account
+        bootstrap_memory_for_account(user)
+    except Exception:
+        pass
 
 
 @app.post("/accounts/add/imap", response_class=HTMLResponse)
@@ -4298,6 +4318,36 @@ async def agent_history_clear(request: Request):
         return {"ok": True, "cleared": 0}
     cleared = AgentConversationRepo(get_session()).clear(account_email)
     return {"ok": True, "cleared": cleared}
+
+
+@app.get("/agent/memory")
+async def agent_memory_status(request: Request):
+    """Return the memory server status and known entity count for the active account."""
+    import json as _json
+
+    from postmind.config import memory_dir_for
+
+    account_email = _get_web_account() or ""
+    if not account_email:
+        return {"configured": False, "entity_count": 0, "entities": []}
+    try:
+        mem_dir = memory_dir_for(account_email)
+        mem_file = mem_dir / "memory.json"
+        if not mem_file.exists():
+            return {"configured": True, "entity_count": 0, "entities": [], "file": str(mem_file)}
+        data = _json.loads(mem_file.read_text())
+        entities = data.get("entities") or []
+        return {
+            "configured": True,
+            "entity_count": len(entities),
+            "entities": [
+                {"name": e.get("name"), "type": e.get("entityType"), "observations": len(e.get("observations", []))}
+                for e in entities[:20]
+            ],
+            "file": str(mem_file),
+        }
+    except Exception as exc:
+        return {"configured": False, "entity_count": 0, "error": str(exc)}
 
 
 @app.get("/agent/suggestions")
