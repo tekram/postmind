@@ -4454,7 +4454,6 @@ async def agent_page(request: Request):
     return _resp(request, "agent.html", ctx)
 
 
-<<<<<<< HEAD
 @app.get("/agent/history")
 async def agent_history(request: Request):
     """Return recent conversation turns for the active account."""
