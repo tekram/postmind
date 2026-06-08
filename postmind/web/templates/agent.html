@@ -19,6 +19,15 @@
       {% else %}
       <span class="pm-pill text-ink-subtle bg-surface-2 border border-hairline">AI off</span>
       {% endif %}
+      {% if mcp_server_names %}
+      <div class="flex items-center gap-1 ml-2">
+        {% for name in mcp_server_names %}
+        <span class="inline-flex items-center gap-1 text-[10px] font-medium text-ink-tertiary bg-surface-2 border border-hairline rounded-full px-2 py-0.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-green-400"></span>{{ name }}
+        </span>
+        {% endfor %}
+      </div>
+      {% endif %}
     </div>
     <p class="text-ink-subtle text-sm mt-1">Describe what you want — I'll analyze, clean up, and automate your inbox. Nothing destructive happens without your confirmation.</p>
   </div>
