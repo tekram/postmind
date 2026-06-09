@@ -653,8 +653,8 @@ Output format: ["bullet 1", "bullet 2", "bullet 3"]
                     return [str(b) for b in bullets[:3]]
             except Exception:
                 pass
-        lines = [l.lstrip("•-123456789. ").strip() for l in raw.splitlines() if l.strip()]
-        lines = [l for l in lines if l]
+        lines = [ln.lstrip("•-123456789. ").strip() for ln in raw.splitlines() if ln.strip()]
+        lines = [ln for ln in lines if ln]
         while len(lines) < 3:
             lines.append("(no summary)")
         return lines[:3]
