@@ -318,6 +318,9 @@ def _run_migrations(engine) -> None:
         "daily_briefs": [
             ("items_json", "TEXT"),
             ("deals_json", "TEXT"),
+            ("newsletters_json", "TEXT"),
+            ("promotions_json", "TEXT"),
+            ("digest_trash_after", "DATETIME"),
         ],
         "draft_records": [
             ("draft_type", "TEXT DEFAULT 'gmail'"),
@@ -948,7 +951,21 @@ class DailyBrief(Base):
     # subject}, so the UI can render clickable "open in Gmail" deep links.
     items_json = Column(Text, nullable=True)
     deals_json = Column(Text, nullable=True)  # JSON list of deal/offer emails, same shape as items_json
+    newsletters_json = Column(Text, nullable=True)   # JSON list of newsletter digest items
+    promotions_json = Column(Text, nullable=True)    # JSON list of promo digest items
+    digest_trash_after = Column(DateTime, nullable=True)  # UTC: trash non-exempted items after this
     generated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class DigestExemption(Base):
+    """Senders permanently exempted from digest auto-trash."""
+
+    __tablename__ = "digest_exemptions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_email = Column(String, nullable=False)
+    sender_email = Column(String, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class Agent(Base):
@@ -1184,6 +1201,9 @@ class DailyBriefRepo:
                 "avoided_count",
                 "items_json",
                 "deals_json",
+                "newsletters_json",
+                "promotions_json",
+                "digest_trash_after",
             ):
                 setattr(existing, col, getattr(brief, col))
             existing.generated_at = datetime.now(timezone.utc)
@@ -1201,6 +1221,41 @@ class DailyBriefRepo:
             .limit(limit)
             .all()
         )
+
+
+class DigestExemptionRepo:
+    """Manages senders permanently exempted from digest auto-trash."""
+
+    def __init__(self, session: Session):
+        self.s = session
+
+    def add(self, account_email: str, sender_email: str) -> None:
+        key = sender_email.lower()
+        existing = (
+            self.s.query(DigestExemption)
+            .filter_by(account_email=account_email, sender_email=key)
+            .first()
+        )
+        if not existing:
+            self.s.add(DigestExemption(account_email=account_email, sender_email=key))
+            self.s.commit()
+
+    def remove(self, account_email: str, sender_email: str) -> None:
+        self.s.query(DigestExemption).filter_by(
+            account_email=account_email, sender_email=sender_email.lower()
+        ).delete()
+        self.s.commit()
+
+    def get_set(self, account_email: str) -> set[str]:
+        rows = (
+            self.s.query(DigestExemption.sender_email)
+            .filter_by(account_email=account_email)
+            .all()
+        )
+        return {r.sender_email for r in rows}
+
+    def is_exempted(self, account_email: str, sender_email: str) -> bool:
+        return sender_email.lower() in self.get_set(account_email)
 
 
 class AgentRepo:
