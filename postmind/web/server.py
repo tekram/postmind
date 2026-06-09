@@ -5197,55 +5197,48 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
     from postmind.core import agent_tools
 
     def _executor_tool(name: str, tool_input: dict) -> str:
-        if name == "get_inbox_overview":
-            return _chat_overview_text(account_email)
-        if name == "search_senders":
-            return _chat_search_senders(tool_input.get("query", ""), account_email)
-        if name == "analyze_storage":
-            from postmind.core.sender_stats import fetch_sender_groups_from_db
-            from postmind.core.storage import EmailRepo, get_session
+        from postmind.core.agent_service import AgentService
 
+        # Build once per executor call; provider + groups are lazy so this is cheap.
+        svc = AgentService(account_email=account_email, ai=ai)
+        try:
+            svc._provider = _build_provider()
+        except Exception:
+            pass  # provider will be built lazily by svc if needed
+
+        if name == "get_inbox_overview":
+            return svc.inbox_overview()
+        if name == "search_senders":
+            return svc.search_senders(tool_input.get("query", ""))
+        if name == "analyze_storage":
             cached = _cache_get()
             if cached:
-                groups = cached["groups"]
-            elif account_email and EmailRepo(get_session()).get_inbox(account_email, limit=1):
-                groups = fetch_sender_groups_from_db(
-                    account_email=account_email,
-                    scope="inbox",
-                    min_count=1,
-                    top_n=500,
-                    sort_by="size",
-                )
-            else:
-                return "No scan data available — ask the user to open Stats or run a Sync first."
-            return agent_tools.summarize_storage(
-                groups, tool_input.get("group_by", "sender"), int(tool_input.get("top_n", 10) or 10)
+                svc._groups_cache = cached["groups"]
+            return svc.analyze_storage(
+                tool_input.get("group_by", "sender"),
+                int(tool_input.get("top_n", 10) or 10),
             )
         if name == "find_largest_messages":
             try:
-                provider = _build_provider()
-                return agent_tools.find_largest_messages(
-                    provider, tool_input.get("query", ""), int(tool_input.get("limit", 10) or 10)
+                return svc.find_largest_messages(
+                    tool_input.get("query", ""),
+                    int(tool_input.get("limit", 10) or 10),
                 )
             except Exception as exc:
                 return f"Couldn't fetch message sizes: {exc}"
         if name == "read_email":
             try:
-                provider = _build_provider()
-                return agent_tools.read_email(provider, tool_input.get("message_id", ""))
+                return svc.read_email(tool_input.get("message_id", ""))
             except Exception as exc:
                 return f"Couldn't fetch email: {exc}"
         if name == "get_thread":
             try:
-                provider = _build_provider()
-                return agent_tools.get_thread(provider, tool_input.get("thread_id", ""))
+                return svc.get_thread(tool_input.get("thread_id", ""))
             except Exception as exc:
                 return f"Couldn't fetch thread: {exc}"
         if name == "find_emails_by_topic":
             try:
-                provider = _build_provider()
-                return agent_tools.find_emails_by_topic(
-                    provider,
+                return svc.find_emails_by_topic(
                     tool_input.get("topic", ""),
                     int(tool_input.get("limit", 10) or 10),
                 )
@@ -5253,53 +5246,26 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                 return f"Search failed: {exc}"
         if name == "summarize_thread":
             try:
-                provider = _build_provider()
-                return agent_tools.summarize_thread(provider, ai, tool_input.get("thread_id", ""))
+                return svc.summarize_thread(tool_input.get("thread_id", ""))
             except Exception as exc:
                 return f"Couldn't summarize thread: {exc}"
         if name == "find_and_summarize_thread":
             try:
-                provider = _build_provider()
-                return agent_tools.find_and_summarize_thread(
-                    provider,
-                    ai,
+                return svc.find_and_summarize_thread(
                     tool_input.get("search_query", ""),
                     int(tool_input.get("result_index", 0) or 0),
                 )
             except Exception as exc:
                 return f"Couldn't find and summarize: {exc}"
         if name == "find_unopened_subscriptions":
-            from postmind.core.storage import get_session
-
-            if not account_email:
-                return "No active account."
-            rows = agent_tools.find_unopened_subscriptions(
-                get_session(),
-                account_email,
+            return svc.find_unopened_subscriptions(
                 int(tool_input.get("min_count", 3) or 3),
                 int(tool_input.get("limit", 15) or 15),
             )
-            return agent_tools.format_unopened(rows)
         if name == "list_automation":
-            from postmind.core.storage import AgentRepo, RuleRepo, get_session
-
-            session = get_session()
-            agent = AgentRepo(session).get_by_email(account_email) if account_email else None
-            rules = RuleRepo(session).list_active(account_email) if account_email else []
-            parts = []
-            if agent:
-                parts.append(
-                    f"Heartbeat agent '{agent.name}' every {agent.interval_minutes}m (active={agent.is_active}, rules={agent.run_rules})."
-                )
-            else:
-                parts.append("No heartbeat agent yet.")
-            if rules:
-                parts.append(
-                    "Active rules: " + "; ".join(f"{r.name} → {r.action}" for r in rules[:5])
-                )
-            else:
-                parts.append("No active rules.")
-            return " ".join(parts)
+            return svc.list_automation()
+        if name == "run_sql":
+            return svc.run_sql(tool_input.get("query", ""))
         if name == "stage_trash":
             matched, err = _chat_resolve_senders(
                 tool_input.get("senders") or [], tool_input.get("query", ""), account_email
