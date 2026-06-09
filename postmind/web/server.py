@@ -1765,16 +1765,38 @@ def _render_purge_preview(
         action = "trash"
 
     cached = _cache_get()
-    if not cached:
-        return _resp(request, "error.html", {"error": "Scan data expired. Please re-run Stats."})
+    if cached:
+        groups = cached["groups"]
+    else:
+        # Cache expired or was never populated (common when request comes from the
+        # Super Agent without a prior Stats scan). Fall back to the local DB — same
+        # data, just fetched on-demand rather than from the in-memory cache.
+        from postmind.core.sender_stats import fetch_sender_groups_from_db
+        from postmind.core.storage import EmailRepo, get_session
 
-    groups = cached["groups"]
-    selected_groups = [g for g in groups if g.sender_email in senders]
+        account_email = _get_web_account() or ""
+        if account_email and EmailRepo(get_session()).get_inbox(account_email, limit=1):
+            groups = fetch_sender_groups_from_db(
+                account_email=account_email,
+                scope="inbox",
+                min_count=1,
+                top_n=500,
+                sort_by="score",
+            )
+        else:
+            return _resp(
+                request,
+                "error.html",
+                {"error": "No inbox data found. Please run a Sync first."},
+            )
+
+    sender_set = set(senders)
+    selected_groups = [g for g in groups if g.sender_email in sender_set]
     if not selected_groups:
         return _resp(
             request,
             "error.html",
-            {"error": "None of those senders are in the current scan. Re-run Stats and try again."},
+            {"error": "None of those senders were found in your inbox data. Please run a Sync and try again."},
         )
     total_count = sum(g.count for g in selected_groups)
     total_mb = round(sum(g.total_size_bytes for g in selected_groups) / (1024 * 1024), 1)
