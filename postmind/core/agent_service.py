@@ -237,6 +237,20 @@ class AgentService:
 
         return agent_tools.find_emails_by_topic(self.provider(), topic, int(limit or 10))
 
+    def summarize_thread(self, thread_id: str) -> str:
+        """Fetch a thread and return a 3-bullet AI summary."""
+        from postmind.core import agent_tools
+
+        return agent_tools.summarize_thread(self.provider(), self.ai, thread_id)
+
+    def find_and_summarize_thread(self, search_query: str, result_index: int = 0) -> str:
+        """Search for emails, pick a thread, and return a 3-bullet AI summary."""
+        from postmind.core import agent_tools
+
+        return agent_tools.find_and_summarize_thread(
+            self.provider(), self.ai, search_query, int(result_index or 0)
+        )
+
     def find_unopened_subscriptions(self, min_count: int = 3, limit: int = 15) -> str:
         from postmind.core import agent_tools
         from postmind.core.storage import get_session

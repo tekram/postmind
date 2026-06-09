@@ -97,6 +97,23 @@ def build_server(account_email: str | None = None):
         return svc.find_largest_messages(query, limit)
 
     @mcp.tool()
+    def summarize_thread(thread_id: str) -> str:
+        """Fetch a thread and return a 3-bullet AI summary. Requires cloud AI mode."""
+        try:
+            return svc.summarize_thread(thread_id)
+        except Exception as exc:
+            return f"Couldn't summarize thread: {exc}"
+
+    @mcp.tool()
+    def find_and_summarize_thread(search_query: str, result_index: int = 0) -> str:
+        """Search for emails matching a query, pick the most relevant thread, and summarize it in 3 bullets.
+        Use for 'summarize emails from Alice', 'summarize the AI newsletter thread', etc."""
+        try:
+            return svc.find_and_summarize_thread(search_query, int(result_index or 0))
+        except Exception as exc:
+            return f"Couldn't find and summarize: {exc}"
+
+    @mcp.tool()
     def find_unopened_subscriptions(min_count: int = 3, limit: int = 15) -> str:
         """Newsletters/subscriptions the user rarely opens (unsubscribe candidates)."""
         return svc.find_unopened_subscriptions(min_count, limit)
