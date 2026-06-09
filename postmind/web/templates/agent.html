@@ -449,6 +449,15 @@
           // ev.type === "done" → nothing more
         }
       }
+      // Flush any remaining buffered frames the reader loop didn't process
+      // (the "final" event often arrives in the last chunk just before close)
+      for (const frame of buf.split("\n\n")) {
+        const line = frame.split("\n").find(l => l.startsWith("data:"));
+        if (!line) continue;
+        let ev2; try { ev2 = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
+        if (ev2.type === "final") { finalActions = ev2.actions || []; finalCards = ev2.cards || []; }
+        else if (ev2.type === "guidance") { guidance = ev2; }
+      }
     } catch (e) {
       if (!receivedAny) {
         // Nothing streamed — fall back to the plain endpoint.
