@@ -1,12 +1,8 @@
 {
   "mcpServers": {
     "postmind": {
-      "type": "stdio",
-      "command": "/Users/tashfeenekram/postmind/.venv/bin/postmind",
-      "args": [
-        "mcp"
-      ],
-      "env": {}
+      "type": "sse",
+      "url": "http://127.0.0.1:8484/mcp/sse"
     }
   }
 }

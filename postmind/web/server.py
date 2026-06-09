@@ -92,6 +92,18 @@ async def _lifespan(app: FastAPI):
 app = FastAPI(title="postmind", docs_url=None, redoc_url=None, lifespan=_lifespan)
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
+# ── HTTP MCP endpoint — mount at /mcp so `postmind serve` also acts as an MCP host ──
+# Claude Code / Claude Desktop can connect via: { "url": "http://127.0.0.1:8484/mcp" }
+# This is the easiest on-ramp for users who already run the web UI — no separate
+# subprocess or extra install step needed.
+try:
+    from postmind.core.agent_mcp import build_server as _build_mcp_server
+
+    _mcp_server = _build_mcp_server()          # account_email=None → uses active account
+    app.mount("/mcp", _mcp_server.sse_app())    # SSE transport; broadly supported
+except Exception:
+    pass  # [mcp] extra not installed — web UI still works fine without it
+
 
 @app.middleware("http")
 async def _same_origin_guard(request: Request, call_next):

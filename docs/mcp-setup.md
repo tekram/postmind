@@ -1,55 +1,26 @@
 # Connecting postmind to Claude Code (MCP)
 
-postmind exposes its Super Agent tools over the Model Context Protocol so you can drive your inbox directly from Claude Code or Claude Desktop.
+postmind exposes its Super Agent tools over the Model Context Protocol so you can drive your inbox directly from Claude Code, Claude Desktop, or any MCP-compatible host.
 
-## What you get
+## The easy way — HTTP endpoint (recommended)
 
-Once connected, any Claude session can:
+When `postmind serve` is running, it automatically exposes an MCP server at:
 
-- Analyze your inbox storage by sender, domain, or size
-- Find and summarize email threads (AI-powered, 3-bullet summaries)
-- Stage bulk actions (trash, archive, label, mark-read, unsubscribe) — always confirm-first
-- Send emails via a stage → confirm draft flow
-- Create automation rules and heartbeat background agents
-- Query the local email cache with arbitrary read-only SQL
+```
+http://127.0.0.1:8484/mcp/sse
+```
 
-## Setup — Claude Code CLI
+No subprocess, no extra install. If you're already using the web UI, you're already running the MCP server.
 
-Add postmind to Claude Code's MCP server list. There are two ways:
-
-### Option A: Project-level (only active when working in this repo)
-
-Run from the postmind directory:
+### Claude Code CLI
 
 ```bash
-claude mcp add -s project postmind /Users/tashfeenekram/postmind/.venv/bin/postmind -- mcp
+claude mcp add postmind --transport sse http://127.0.0.1:8484/mcp/sse -s user
 ```
 
-This writes to `.mcp.json` in the repo root. You can also edit that file directly:
+This registers postmind globally — available in every Claude Code session as long as `postmind serve` is running.
 
-```json
-{
-  "mcpServers": {
-    "postmind": {
-      "type": "stdio",
-      "command": "/Users/tashfeenekram/postmind/.venv/bin/postmind",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-### Option B: Global (active in every Claude Code session)
-
-Run in your terminal:
-
-```bash
-claude mcp add -s user postmind /Users/tashfeenekram/postmind/.venv/bin/postmind -- mcp
-```
-
-This writes to `~/.claude.json` (the user-scoped MCP registry). The server becomes available in all Claude Code sessions.
-
-## Setup — Claude Desktop
+### Claude Desktop
 
 Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -57,8 +28,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "postmind": {
-      "command": "/Users/tashfeenekram/postmind/.venv/bin/postmind",
-      "args": ["mcp"]
+      "url": "http://127.0.0.1:8484/mcp/sse"
     }
   }
 }
@@ -66,84 +36,107 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 Restart Claude Desktop after saving.
 
+### Project-level (this repo)
+
+The `.mcp.json` in this repo already has the HTTP config — just run `postmind serve` and open Claude Code in this directory.
+
+---
+
+## Alternative — stdio (no web server needed)
+
+If you want MCP access without the web server running:
+
+```bash
+claude mcp add postmind /path/to/postmind/.venv/bin/postmind -- mcp -s user
+```
+
+This launches a subprocess on demand. Requires the `[mcp]` extra: `pip install 'postmind[mcp]'`.
+
+---
+
 ## Verifying the connection
 
-In any Claude session type: `list the postmind tools`
+```bash
+claude mcp get postmind
+```
 
-You should see tools like `get_inbox_overview`, `analyze_storage`, `find_emails_by_topic`, `summarize_thread`, `stage_trash`, etc.
+Should show `Status: ✔ Connected`.
 
-## Available tools
+Or in any Claude session: *"list the postmind tools"*
 
-### Read / analysis tools (run immediately, return text)
+---
 
-| Tool | Description |
-|------|-------------|
-| `get_inbox_overview` | Live snapshot: sender count, total emails, reclaimable storage, top senders. |
-| `analyze_storage` | Largest storage consumers. Grouped by sender or domain. |
-| `search_senders` | Search senders by name, email, or domain substring. |
-| `find_largest_messages` | Largest individual emails by message size. Optional Gmail-style scope query. |
-| `summarize_thread` | Fetch a thread and return a 3-bullet AI summary. Requires cloud AI mode. |
-| `find_and_summarize_thread` | Search for emails matching a query, pick the most relevant thread, and summarize it in 3 bullets. |
-| `find_unopened_subscriptions` | Newsletters/subscriptions the user rarely opens (unsubscribe candidates). |
-| `list_automation` | Show the user's heartbeat agent (if any) and active rules. |
-| `run_sql` | Run one read-only SELECT over a snapshot of the local email cache. |
-| `read_email` | Fetch the full content of a specific email by its message_id. |
-| `get_thread` | Fetch all messages in a thread in chronological order. |
-| `find_emails_by_topic` | Search for emails matching a topic or keyword. |
-| `draft_email` | Draft an email in the user's voice (text only; sends nothing). |
+## What you get — 24 tools
 
-### Write tools — stage only, return a confirm token
+### Read tools (run immediately, never mutate)
 
-| Tool | Description |
-|------|-------------|
-| `stage_trash` | Stage moving emails from senders to Trash (undoable). Returns a confirm token. |
-| `stage_archive` | Stage archiving emails from senders (undoable). Returns a confirm token. |
-| `stage_label` | Stage labeling emails from senders (undoable). Returns a confirm token. |
-| `stage_mark_read` | Stage marking emails from senders as read (undoable). Returns a confirm token. |
-| `stage_unsubscribe` | Stage unsubscribing from senders (NOT undoable; optional back-catalog trash IS). Returns a confirm token. |
-| `stage_send` | Stage sending an email (always-confirm; no auto-send). Returns a confirm token. |
-| `stage_create_agent` | Stage creating a background heartbeat agent. Returns a confirm token. |
-| `stage_create_rule` | Stage a recurring rule from plain English. Returns a confirm token + warnings. |
-| `stage_trash_query` | Stage a query-based trash review using a Gmail search query. Returns a confirm token. |
+| Tool | What it does |
+|---|---|
+| `get_inbox_overview` | Sender count, total emails, reclaimable MB, top senders |
+| `analyze_storage` | Largest storage consumers by sender or domain |
+| `search_senders` | Search senders by name/email/domain |
+| `find_largest_messages` | Largest individual emails by size |
+| `read_email` | Full content of a specific email by message_id |
+| `get_thread` | All messages in a thread, chronological |
+| `find_emails_by_topic` | Full-text search across your inbox |
+| `summarize_thread` | 3-bullet AI summary of a thread |
+| `find_and_summarize_thread` | Search + pick thread + summarize in one call |
+| `find_unopened_subscriptions` | Newsletters with ≥60% unread ratio |
+| `list_automation` | Heartbeat agents and active rules |
+| `run_sql` | Read-only SELECT over the local email cache |
+| `draft_email` | Draft in your voice (sends nothing) |
+
+### Write tools — stage only, always confirm-first
+
+| Tool | What it stages |
+|---|---|
+| `stage_trash` | Move-to-trash by sender |
+| `stage_trash_query` | Per-email review drawer from a Gmail search |
+| `stage_archive` | Archive by sender |
+| `stage_label` | Label by sender |
+| `stage_mark_read` | Mark-as-read by sender |
+| `stage_unsubscribe` | Unsubscribe via List-Unsubscribe header |
+| `stage_send` | Send an email |
+| `stage_create_agent` | Create a heartbeat background agent |
+| `stage_create_rule` | Create an automation rule from plain English |
 
 ### Confirm / cancel
 
-| Tool | Description |
-|------|-------------|
-| `list_staged_actions` | List actions staged this session and awaiting confirmation. |
-| `confirm_action` | Execute a staged action by its confirm token. Call ONLY after the user explicitly approves. |
-| `cancel_action` | Discard a staged action without executing it. |
+| Tool | What it does |
+|---|---|
+| `list_staged_actions` | Show pending actions and their tokens |
+| `confirm_action(token)` | Execute a staged action |
+| `cancel_action(token)` | Discard without executing |
+
+---
 
 ## Safety model
 
-All write operations (trash, archive, unsubscribe, send) go through a stage → confirm flow:
+All write operations go through a **stage → confirm** flow:
 
-1. Call the `stage_*` tool — returns a confirm token and a summary of what will happen
-2. Review the staged action via `list_staged_actions`
+1. Call a `stage_*` tool → returns a confirm token and a summary of what will happen
+2. Review via `list_staged_actions`
 3. Call `confirm_action(token)` only after approving
-4. Deletes go to Trash (undoable for 30 days via `postmind undo`), never permanent
+4. Deletes go to Trash (undoable for 30 days), never permanent
+5. Targets are **server-resolved** — Claude can only confirm/cancel what postmind's code resolved, never inject arbitrary addresses
 
-Targets are always **server-resolved** by postmind's code. The MCP host (Claude) can only confirm or cancel what postmind resolved — it cannot name its own targets. This contains prompt injection from untrusted email bodies.
+---
 
-## Binding to a specific account
+## Multi-account
 
-If you have multiple accounts configured, bind the server to one:
+Bind to a specific account:
 
-```json
-{
-  "mcpServers": {
-    "postmind": {
-      "command": "/Users/tashfeenekram/postmind/.venv/bin/postmind",
-      "args": ["mcp", "--account", "you@example.com"]
-    }
-  }
-}
+```bash
+/path/to/.venv/bin/postmind mcp --account you@gmail.com
 ```
+
+The HTTP endpoint uses whichever account is active in the web UI.
+
+---
 
 ## Troubleshooting
 
-- **"command not found"**: use the full path to `.venv/bin/postmind` from the postmind directory
-- **"No active account"**: run `postmind serve` first and connect a Gmail account at http://127.0.0.1:8484
-- **No emails returned**: run a sync first (`postmind sync` or the Sync page in the web UI)
-- **"The MCP server requires the 'mcp' package"**: run `pip install 'postmind[mcp]'` inside the venv
-- **Thread summary fails**: `summarize_thread` requires cloud AI mode — run `postmind config set ai_mode cloud`
+**"Status: disconnected"** — run `postmind serve` first, then retry  
+**"No active account"** — open http://127.0.0.1:8484 and connect a Gmail account  
+**"No inbox data"** — run a Sync first from the web UI or `postmind sync`  
+**stdio: "command not found"** — use the full absolute path to `.venv/bin/postmind`
