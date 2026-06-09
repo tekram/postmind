@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "postmind": {
+      "type": "stdio",
+      "command": "/Users/tashfeenekram/postmind/.venv/bin/postmind",
+      "args": [
+        "mcp"
+      ],
+      "env": {}
+    }
+  }
+}
