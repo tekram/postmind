@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -47,11 +48,51 @@ class DailyBriefGenerator:
         # Persist the emails the brief is about so the UI can render deep links.
         # Deals (is_deal=True) are split into a separate tab; the inbox tab shows
         # AI-classified high-priority items plus unclassified recent arrivals.
-        import json
         deals = stats.get("deals_items", [])
         deals_json = json.dumps(deals[:50]) if deals else None
         identified = stats["high_priority_items"] + stats.get("recent_unclassified", [])
         items_json = json.dumps(identified[:50]) if identified else None
+
+        # ── Newsletter & Promotions digest ─────────────────────────────────
+        newsletters_json = None
+        promotions_json = None
+        digest_trash_after = None
+
+        settings = get_settings()
+        if settings.ai_mode in ("cloud", "local"):
+            try:
+                from postmind.core.ai_engine import AIEngine
+                from postmind.core.storage import DigestExemptionRepo, EmailRepo
+
+                ai_for_digest = AIEngine()
+                cutoff_ms = int(
+                    (datetime.now(timezone.utc) - timedelta(hours=24)).timestamp() * 1000
+                )
+                all_records = EmailRepo(session).get_inbox(self.account_email, limit=500)
+                last24h = [r for r in all_records if (r.internal_date or 0) >= cutoff_ms]
+                exempted = DigestExemptionRepo(session).get_set(self.account_email)
+
+                nl_items = self._generate_newsletter_digest(
+                    session, ai_for_digest, self.account_email, last24h, exempted
+                )
+                newsletter_senders = {item["sender_email"] for item in nl_items}
+                pr_items = self._generate_promo_digest(
+                    session,
+                    ai_for_digest,
+                    self.account_email,
+                    deals,
+                    exempted,
+                    newsletter_senders,
+                )
+
+                if nl_items:
+                    newsletters_json = json.dumps(nl_items)
+                if pr_items:
+                    promotions_json = json.dumps(pr_items)
+                if nl_items or pr_items:
+                    digest_trash_after = datetime.now(timezone.utc) + timedelta(hours=48)
+            except Exception as exc:
+                logger.warning("Digest generation failed: %s", exc)
 
         brief = DailyBrief(
             account_email=self.account_email,
@@ -65,8 +106,104 @@ class DailyBriefGenerator:
             avoided_count=stats["avoided_count"],
             items_json=items_json,
             deals_json=deals_json,
+            newsletters_json=newsletters_json,
+            promotions_json=promotions_json,
+            digest_trash_after=digest_trash_after,
         )
         return repo.save(brief)
+
+    def _generate_newsletter_digest(
+        self,
+        session,
+        ai,
+        account_email: str,
+        last24h_records: list,
+        exempted_senders: set,
+    ) -> list[dict]:
+        """Build newsletter digest items from emails with a List-Unsubscribe header."""
+        from collections import defaultdict
+
+        grouped: dict[str, list] = defaultdict(list)
+        for r in last24h_records:
+            if r.list_unsubscribe and r.list_unsubscribe.strip():
+                key = (r.sender_email or "").lower()
+                if key and key not in exempted_senders:
+                    grouped[key].append(r)
+
+        items = []
+        for sender_email, records in grouped.items():
+            records.sort(key=lambda r: r.internal_date or 0, reverse=True)
+            sender_name = records[0].sender_name or records[0].sender_email or sender_email
+            emails_info = [
+                {"subject": r.subject or "", "snippet": r.snippet or ""}
+                for r in records[:5]
+            ]
+            try:
+                bullets = ai.summarize_newsletter_sender(sender_name, emails_info)
+            except Exception:
+                bullets = ["(Summary unavailable)"] * 3
+            items.append({
+                "sender": sender_name,
+                "sender_email": sender_email,
+                "email_ids": [r.gmail_id for r in records],
+                "summary_bullets": bullets[:3],
+                "exempted": False,
+            })
+
+        items.sort(key=lambda x: x["sender"].lower())
+        return items
+
+    def _generate_promo_digest(
+        self,
+        session,
+        ai,
+        account_email: str,
+        deals_items: list[dict],
+        exempted_senders: set,
+        newsletter_senders: set,
+    ) -> list[dict]:
+        """Build promo digest items from deal-scored emails (excluding newsletters)."""
+        from collections import defaultdict
+
+        from postmind.core.storage import EmailRepo
+
+        email_repo = EmailRepo(session)
+        grouped: dict[str, list] = defaultdict(list)
+        for item in deals_items:
+            sender_email = (item.get("sender_email") or "").lower()
+            if not sender_email:
+                continue
+            if sender_email in exempted_senders or sender_email in newsletter_senders:
+                continue
+            grouped[sender_email].append(item)
+
+        items = []
+        for sender_email, group_items in grouped.items():
+            group_items.sort(key=lambda x: x.get("deal_score", 0), reverse=True)
+            top = group_items[0]
+            sender_name = top.get("sender") or sender_email
+            gmail_id = top.get("gmail_id", "")
+            record = email_repo.get(gmail_id) if gmail_id else None
+            snippet = (record.snippet or "") if record else ""
+            try:
+                offer_line = ai.extract_promo_offer_line(
+                    sender=sender_name,
+                    subject=top.get("subject", ""),
+                    snippet=snippet,
+                )
+            except Exception:
+                offer_line = (top.get("subject", "") or "")[:80]
+            items.append({
+                "sender": sender_name,
+                "sender_email": sender_email,
+                "email_ids": [i.get("gmail_id") for i in group_items if i.get("gmail_id")],
+                "offer_line": offer_line,
+                "deal_score": top.get("deal_score", 1),
+                "exempted": False,
+            })
+
+        items.sort(key=lambda x: x.get("deal_score", 0), reverse=True)
+        return items
 
     def _gather_stats(self) -> dict:
         """Pull all brief data from local DB. Zero API calls."""
