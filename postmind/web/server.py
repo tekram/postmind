@@ -661,6 +661,146 @@ def _render_brief_status(brief) -> str:
     )
 
 
+def _render_digest_panes(brief) -> tuple[str, str, str, str]:
+    """Render Newsletter and Promotions tab panes from brief digest JSON.
+
+    Returns (nl_pane_html, pr_pane_html, nl_badge_html, pr_badge_html).
+    """
+    import html as _html
+    import json as _json
+    from datetime import datetime, timezone
+
+    _icon_keep = (
+        '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">'
+        '<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>'
+    )
+
+    trash_after_iso = ""
+    if brief and brief.digest_trash_after:
+        ta = brief.digest_trash_after
+        if ta.tzinfo is None:
+            ta = ta.replace(tzinfo=timezone.utc)
+        trash_after_iso = _html.escape(ta.isoformat())
+
+    def _countdown_badge(exempted: bool) -> str:
+        if exempted or not trash_after_iso:
+            return (
+                '<span class="pm-badge text-[10px] text-success border-success-border bg-success-subtle">Kept</span>'
+            )
+        return (
+            f'<span class="digest-countdown pm-badge text-[10px] text-ink-tertiary" '
+            f'data-trash-after="{trash_after_iso}">Trashing in 48h</span>'
+        )
+
+    def _keep_btn(sender_email: str, exempted: bool) -> str:
+        se = _html.escape(sender_email)
+        active = "text-success hover:text-ink-tertiary"
+        inactive = "text-ink-tertiary hover:text-success"
+        cls = active if exempted else inactive
+        return (
+            f'<button class="digest-keep-btn p-1 rounded {cls} hover:bg-surface-2 transition-colors" '
+            f'data-sender="{se}" data-exempted="{"1" if exempted else "0"}" '
+            f'title="{"Un-keep this sender" if exempted else "Keep — never auto-trash"}">'
+            f"{_icon_keep}</button>"
+        )
+
+    # ── Newsletters ───────────────────────────────────────────────────────────
+    nl_items: list[dict] = []
+    if brief and brief.newsletters_json:
+        try:
+            nl_items = _json.loads(brief.newsletters_json)
+        except Exception:
+            pass
+
+    if not nl_items:
+        nl_pane = (
+            '<div class="py-8 text-center text-ink-tertiary text-sm">'
+            "No newsletters in the last 24 hours."
+            "</div>"
+        )
+    else:
+        cards = []
+        for item in nl_items:
+            se = (item.get("sender_email") or "").lower()
+            sn = _html.escape(item.get("sender") or se)
+            exempted = item.get("exempted", False)
+            count = len(item.get("email_ids", []))
+            bullets = item.get("summary_bullets") or []
+            bullet_html = "".join(
+                f'<li class="text-ink-subtle text-xs leading-relaxed">{_html.escape(str(b))}</li>'
+                for b in bullets[:3]
+            )
+            cards.append(
+                f'<div class="py-3 border-b border-hairline last:border-0" data-nl-sender="{_html.escape(se)}">'
+                f'<div class="flex items-start justify-between gap-3">'
+                f'  <div class="min-w-0">'
+                f'    <p class="text-sm font-semibold text-ink">{sn}</p>'
+                f'    <p class="text-xs text-ink-tertiary">'
+                f'      {count} email{"s" if count != 1 else ""}'
+                f"    </p>"
+                f"  </div>"
+                f'  <div class="flex items-center gap-1.5 shrink-0">'
+                f"    {_countdown_badge(exempted)}"
+                f"    {_keep_btn(se, exempted)}"
+                f"  </div>"
+                f"</div>"
+                f'<ul class="list-disc pl-4 mt-2 space-y-0.5">{bullet_html}</ul>'
+                f"</div>"
+            )
+        nl_pane = "".join(cards)
+
+    nl_badge = (
+        f'<span class="ml-1 text-[10px] text-ink-tertiary">({len(nl_items)})</span>'
+        if nl_items
+        else ""
+    )
+
+    # ── Promotions ────────────────────────────────────────────────────────────
+    pr_items: list[dict] = []
+    if brief and brief.promotions_json:
+        try:
+            pr_items = _json.loads(brief.promotions_json)
+        except Exception:
+            pass
+
+    if not pr_items:
+        pr_pane = (
+            '<div class="py-8 text-center text-ink-tertiary text-sm">'
+            "No promotional emails in the last 24 hours."
+            "</div>"
+        )
+    else:
+        rows = []
+        for item in pr_items:
+            se = (item.get("sender_email") or "").lower()
+            sn = _html.escape(item.get("sender") or se)
+            exempted = item.get("exempted", False)
+            count = len(item.get("email_ids", []))
+            offer = _html.escape(item.get("offer_line") or "Promotional offer")
+            rows.append(
+                f'<div class="py-3 border-b border-hairline last:border-0 flex items-center gap-3" data-pr-sender="{_html.escape(se)}">'
+                f'  <div class="min-w-0 flex-1">'
+                f'    <p class="text-sm font-semibold text-ink">{sn}</p>'
+                f'    <p class="text-xs text-ink-subtle mt-0.5">{offer}</p>'
+                f'    <p class="text-xs text-ink-tertiary">{count} email{"s" if count != 1 else ""}</p>'
+                f"  </div>"
+                f'  <div class="flex items-center gap-1.5 shrink-0">'
+                f"    {_countdown_badge(exempted)}"
+                f"    {_keep_btn(se, exempted)}"
+                f"  </div>"
+                f"</div>"
+            )
+        pr_pane = "".join(rows)
+
+    pr_badge = (
+        f'<span class="ml-1 text-[10px] text-ink-tertiary">({len(pr_items)})</span>'
+        if pr_items
+        else ""
+    )
+
+    return nl_pane, pr_pane, nl_badge, pr_badge
+
+
 def _render_brief_links(brief, account_email: str) -> str:
     """Render the brief's identified emails as the "What needs attention" list.
 
@@ -883,11 +1023,20 @@ def _render_brief_links(brief, account_email: str) -> str:
         f'<span class="ml-1 text-[10px] text-ink-tertiary">({len(deals)})</span>' if deals else ""
     )
 
+    # ── Newsletter & Promotions panes ─────────────────────────────────────────
+    nl_pane, pr_pane, nl_badge, pr_badge = _render_digest_panes(brief)
+
     tab_bar = (
         '<div class="flex gap-0 mb-3 border-b border-hairline">'
         '<button onclick="_briefTab(\'inbox\')" id="tab-btn-inbox" '
         'class="px-3 py-1.5 text-xs font-semibold border-b-2 border-accent text-accent -mb-px bg-transparent">'
         "Inbox</button>"
+        '<button onclick="_briefTab(\'newsletters\')" id="tab-btn-newsletters" '
+        'class="px-3 py-1.5 text-xs font-semibold border-b-2 border-transparent text-ink-subtle -mb-px bg-transparent">'
+        f"Newsletters{nl_badge}</button>"
+        '<button onclick="_briefTab(\'promotions\')" id="tab-btn-promotions" '
+        'class="px-3 py-1.5 text-xs font-semibold border-b-2 border-transparent text-ink-subtle -mb-px bg-transparent">'
+        f"Promotions{pr_badge}</button>"
         '<button onclick="_briefTab(\'deals\')" id="tab-btn-deals" '
         'class="px-3 py-1.5 text-xs font-semibold border-b-2 border-transparent text-ink-subtle -mb-px bg-transparent">'
         f"Deals &amp; Offers{deals_badge}</button>"
@@ -898,6 +1047,8 @@ def _render_brief_links(brief, account_email: str) -> str:
         f'<div class="mt-5 pt-4 border-t border-hairline">'
         f"{tab_bar}"
         f'<div id="brief-tab-inbox">{inbox_pane}</div>'
+        f'<div id="brief-tab-newsletters" style="display:none">{nl_pane}</div>'
+        f'<div id="brief-tab-promotions" style="display:none">{pr_pane}</div>'
         f'<div id="brief-tab-deals" style="display:none">{deals_pane}</div>'
         f"</div>"
     )
@@ -927,12 +1078,22 @@ async def brief_page(request: Request):
     recent = DailyBriefRepo(session).list_recent(account_email, limit=7)
     session.close()
 
+    trash_iso = ""
+    if brief and brief.digest_trash_after:
+        from datetime import timezone as _tz2
+
+        ta = brief.digest_trash_after
+        if ta.tzinfo is None:
+            ta = ta.replace(tzinfo=_tz2.utc)
+        trash_iso = ta.isoformat()
+
     ctx.update(
         {
             "brief": brief,
             "brief_status_html": _render_brief_status(brief) if brief else "",
             "brief_links_html": _render_brief_links(brief, account_email) if brief else "",
             "brief_html": _render_brief_html(brief.content) if brief else "",
+            "digest_trash_after_iso": trash_iso,
             "recent": recent,
             "today_str": today_str,
             "account_email": account_email,
@@ -1005,12 +1166,30 @@ async def brief_generate(request: Request):
     status_html = _render_brief_status(brief)
     links_html = _render_brief_links(brief, account_email)
     content_html = _render_brief_html(brief.content)
+
+    trash_iso = ""
+    if brief.digest_trash_after:
+        from datetime import timezone as _tz
+
+        ta = brief.digest_trash_after
+        if ta.tzinfo is None:
+            ta = ta.replace(tzinfo=_tz.utc)
+        trash_iso = ta.isoformat()
+
+    # Emit a script to re-init digest countdowns after HTMX swap
+    digest_init = (
+        f'<script>if(typeof _digestRefreshBadges==="function")_digestRefreshBadges("{trash_iso}");</script>'
+        if trash_iso
+        else ""
+    )
+
     return HTMLResponse(
         f'<div id="brief-content" class="px-5 py-5">'
         f'<div class="flex items-center gap-2 mb-4">{ai_badge}'
         f'<span class="text-ink-tertiary text-xs">Generated at {gen_time}</span></div>'
         f"{status_html}{links_html}{content_html}"
         f"</div>"
+        f"{digest_init}"
     )
 
 
@@ -3906,6 +4085,152 @@ async def brief_deal_open(gid: str = ""):
         f"?authuser={_q(account_email, safe='@')}#all/{_q(gid, safe='')}"
     )
     return RedirectResponse(gmail_url, status_code=302)
+
+
+@app.post("/digest/exempt")
+async def digest_exempt_add(request: Request):
+    """Permanently exempt a sender from digest auto-trash and mark them in today's brief JSON."""
+    import json as _json
+
+    from postmind.core.storage import DailyBrief, DigestExemptionRepo, get_session
+
+    account_email = _get_web_account() or ""
+    if not account_email:
+        return JSONResponse({"ok": False, "error": "no account"}, status_code=401)
+
+    body = await request.json()
+    sender_email = (body.get("sender_email") or "").lower().strip()
+    if not sender_email:
+        return JSONResponse({"ok": False, "error": "missing sender_email"}, status_code=400)
+
+    def _exempt():
+        from datetime import datetime, timezone
+
+        session = get_session()
+        DigestExemptionRepo(session).add(account_email, sender_email)
+        today_str = datetime.now(timezone.utc).date().isoformat()
+        brief = (
+            session.query(DailyBrief)
+            .filter_by(account_email=account_email, brief_date=today_str)
+            .first()
+        )
+        if brief:
+            for col in ("newsletters_json", "promotions_json"):
+                raw = getattr(brief, col, None)
+                if not raw:
+                    continue
+                try:
+                    items = _json.loads(raw)
+                    changed = False
+                    for item in items:
+                        if item.get("sender_email", "").lower() == sender_email:
+                            item["exempted"] = True
+                            changed = True
+                    if changed:
+                        setattr(brief, col, _json.dumps(items))
+                except Exception:
+                    pass
+            session.commit()
+
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(_executor, _exempt)
+    return {"ok": True}
+
+
+@app.delete("/digest/exempt")
+async def digest_exempt_remove(request: Request):
+    """Remove a sender exemption so they're included in future digest cleanups."""
+    import json as _json
+
+    from postmind.core.storage import DailyBrief, DigestExemptionRepo, get_session
+
+    account_email = _get_web_account() or ""
+    if not account_email:
+        return JSONResponse({"ok": False, "error": "no account"}, status_code=401)
+
+    body = await request.json()
+    sender_email = (body.get("sender_email") or "").lower().strip()
+    if not sender_email:
+        return JSONResponse({"ok": False, "error": "missing sender_email"}, status_code=400)
+
+    def _unexempt():
+        from datetime import datetime, timezone
+
+        session = get_session()
+        DigestExemptionRepo(session).remove(account_email, sender_email)
+        today_str = datetime.now(timezone.utc).date().isoformat()
+        brief = (
+            session.query(DailyBrief)
+            .filter_by(account_email=account_email, brief_date=today_str)
+            .first()
+        )
+        if brief:
+            for col in ("newsletters_json", "promotions_json"):
+                raw = getattr(brief, col, None)
+                if not raw:
+                    continue
+                try:
+                    items = _json.loads(raw)
+                    changed = False
+                    for item in items:
+                        if item.get("sender_email", "").lower() == sender_email:
+                            item["exempted"] = False
+                            changed = True
+                    if changed:
+                        setattr(brief, col, _json.dumps(items))
+                except Exception:
+                    pass
+            session.commit()
+
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(_executor, _unexempt)
+    return {"ok": True}
+
+
+@app.post("/digest/undo-all")
+async def digest_undo_all(request: Request):
+    """Exempt ALL senders in today's digest — cancels auto-trash for today."""
+    import json as _json
+
+    from postmind.core.storage import DailyBrief, DigestExemptionRepo, get_session
+
+    account_email = _get_web_account() or ""
+    if not account_email:
+        return JSONResponse({"ok": False, "error": "no account"}, status_code=401)
+
+    def _undo_all():
+        from datetime import datetime, timezone
+
+        session = get_session()
+        today_str = datetime.now(timezone.utc).date().isoformat()
+        brief = (
+            session.query(DailyBrief)
+            .filter_by(account_email=account_email, brief_date=today_str)
+            .first()
+        )
+        if not brief:
+            return
+        repo = DigestExemptionRepo(session)
+        for col in ("newsletters_json", "promotions_json"):
+            raw = getattr(brief, col, None)
+            if not raw:
+                continue
+            try:
+                items = _json.loads(raw)
+                for item in items:
+                    item["exempted"] = True
+                    se = item.get("sender_email", "")
+                    if se:
+                        repo.add(account_email, se)
+                setattr(brief, col, _json.dumps(items))
+            except Exception:
+                pass
+        brief.digest_trash_after = None
+        session.commit()
+
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(_executor, _undo_all)
+    return {"ok": True}
 
 
 @app.get("/email/preview/{gmail_id}")

@@ -25,6 +25,18 @@
     </button>
   </div>
 
+  {% if digest_trash_after_iso %}
+  <div id="digest-banner" class="mb-5 flex items-center justify-between gap-3 text-xs bg-surface-2 border border-hairline rounded-button px-3 py-2.5">
+    <div class="flex items-center gap-2 text-ink-subtle">
+      <svg class="w-3.5 h-3.5 shrink-0 text-ink-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+      <span id="digest-banner-text">Newsletters &amp; promotions queued for cleanup — <span id="digest-banner-countdown"></span></span>
+    </div>
+    <button onclick="_digestUndoAll(this)" class="text-accent font-medium hover:underline shrink-0 text-xs">Undo All</button>
+  </div>
+  {% endif %}
+
   {% if ai_mode == "off" %}
   <div class="mb-5 flex items-start gap-2 text-xs text-ink-subtle bg-surface-2 border border-hairline rounded-button px-3 py-2.5">
     <svg class="w-3.5 h-3.5 shrink-0 mt-0.5 text-ink-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -492,12 +504,15 @@ function briefAskAgent(question) {
 const _briefSpinSvg = '<svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>';
 
 function _briefTab(tab) {
-  document.getElementById('brief-tab-inbox').style.display = tab === 'inbox' ? '' : 'none';
-  document.getElementById('brief-tab-deals').style.display = tab === 'deals' ? '' : 'none';
+  const tabs = ['inbox', 'newsletters', 'promotions', 'deals'];
   const activeClass = 'px-3 py-1.5 text-xs font-semibold border-b-2 border-accent text-accent -mb-px bg-transparent';
   const inactiveClass = 'px-3 py-1.5 text-xs font-semibold border-b-2 border-transparent text-ink-subtle -mb-px bg-transparent';
-  document.getElementById('tab-btn-inbox').className = tab === 'inbox' ? activeClass : inactiveClass;
-  document.getElementById('tab-btn-deals').className = tab === 'deals' ? activeClass : inactiveClass;
+  tabs.forEach(t => {
+    const pane = document.getElementById('brief-tab-' + t);
+    const btn  = document.getElementById('tab-btn-' + t);
+    if (pane) pane.style.display = t === tab ? '' : 'none';
+    if (btn)  btn.className = t === tab ? activeClass : inactiveClass;
+  });
 }
 
 async function _briefAction(btn) {
@@ -576,6 +591,105 @@ async function _briefPreview(gid) {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') _briefPreviewClose();
 });
+
+// ── Digest: Keep toggle ───────────────────────────────────────────────────────
+document.addEventListener('click', async function(e) {
+  const btn = e.target.closest('.digest-keep-btn');
+  if (!btn) return;
+  const sender = btn.dataset.sender;
+  const exempted = btn.dataset.exempted === '1';
+  const method = exempted ? 'DELETE' : 'POST';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/digest/exempt', {
+      method,
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({sender_email: sender}),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      const newExempted = !exempted;
+      btn.dataset.exempted = newExempted ? '1' : '0';
+      btn.title = newExempted ? 'Un-keep this sender' : 'Keep — never auto-trash';
+      // Swap icon colour
+      if (newExempted) {
+        btn.classList.remove('text-ink-tertiary', 'hover:text-success');
+        btn.classList.add('text-success', 'hover:text-ink-tertiary');
+      } else {
+        btn.classList.remove('text-success', 'hover:text-ink-tertiary');
+        btn.classList.add('text-ink-tertiary', 'hover:text-success');
+      }
+      // Update countdown badge in same row
+      const row = btn.closest('[data-nl-sender],[data-pr-sender]');
+      if (row) {
+        const badge = row.querySelector('.digest-countdown');
+        if (badge && newExempted) {
+          badge.outerHTML = '<span class="pm-badge text-[10px] text-success border-success-border bg-success-subtle">Kept</span>';
+        }
+      }
+    }
+  } catch(err) { console.error('digest exempt error', err); }
+  btn.disabled = false;
+});
+
+// ── Digest: countdown badges ──────────────────────────────────────────────────
+function _digestRefreshBadges(trashAfterIso) {
+  if (!trashAfterIso) return;
+  const target = new Date(trashAfterIso);
+  // Update banner countdown
+  const bannerEl = document.getElementById('digest-banner-countdown');
+  if (bannerEl) {
+    const diffMs = target - new Date();
+    if (diffMs <= 0) {
+      bannerEl.textContent = 'cleanup pending next heartbeat';
+    } else {
+      const hrs = Math.floor(diffMs / 3600000);
+      const mins = Math.floor((diffMs % 3600000) / 60000);
+      bannerEl.textContent = hrs > 0 ? `trashing in ${hrs}h` : `trashing in ${mins}m`;
+    }
+  }
+  // Update per-card badges
+  document.querySelectorAll('.digest-countdown').forEach(el => {
+    const diffMs = target - new Date();
+    if (diffMs <= 0) {
+      el.textContent = 'Trashing soon';
+    } else {
+      const hrs = Math.floor(diffMs / 3600000);
+      el.textContent = hrs > 0 ? `Trashing in ${hrs}h` : 'Trashing soon';
+    }
+  });
+}
+
+// ── Digest: Undo All ──────────────────────────────────────────────────────────
+async function _digestUndoAll(btn) {
+  btn.disabled = true;
+  try {
+    const res = await fetch('/digest/undo-all', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    const data = await res.json();
+    if (data.ok) {
+      document.getElementById('digest-banner')?.remove();
+      document.querySelectorAll('.digest-countdown').forEach(el => {
+        el.outerHTML = '<span class="pm-badge text-[10px] text-success border-success-border bg-success-subtle">Kept</span>';
+      });
+      document.querySelectorAll('.digest-keep-btn').forEach(b => {
+        b.dataset.exempted = '1';
+        b.classList.remove('text-ink-tertiary', 'hover:text-success');
+        b.classList.add('text-success', 'hover:text-ink-tertiary');
+        b.title = 'Un-keep this sender';
+      });
+    }
+  } catch(err) { console.error('digest undo-all error', err); }
+  btn.disabled = false;
+}
+
+// Initialise countdown on page load
+(function() {
+  const iso = {{ ('"' + digest_trash_after_iso + '"') | safe if digest_trash_after_iso else 'null' }};
+  if (iso) {
+    _digestRefreshBadges(iso);
+    setInterval(() => _digestRefreshBadges(iso), 60000);
+  }
+})();
 
 async function _briefBulk(action, ids) {
   if (!ids || !ids.length) return;
