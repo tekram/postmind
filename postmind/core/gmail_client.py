@@ -205,6 +205,18 @@ def authenticate(
                     "Download it from Google Cloud Console → APIs & Services → Credentials.\n"
                     "See README.md for step-by-step setup."
                 )
+            # In non-interactive contexts (MCP server, headless CLI, no TTY) never
+            # open a browser — raise a clear error instead so the caller can surface
+            # actionable guidance without spawning tabs the user didn't ask for.
+            import sys
+            if not sys.stdin.isatty():
+                raise PermissionError(
+                    "No valid Gmail token found and running in a non-interactive context "
+                    "(MCP server or headless CLI). To authenticate:\n"
+                    "  1. Run `postmind serve` and open http://127.0.0.1:8484\n"
+                    "  2. Connect your Gmail account via the Accounts page\n"
+                    "  3. The token will be saved and reused automatically."
+                )
             # Restrict the credentials file too — it contains the OAuth client secret.
             # Do this before reading so the secret is protected even on first run.
             try:
