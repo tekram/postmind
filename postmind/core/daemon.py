@@ -8,6 +8,62 @@ from datetime import datetime, timezone
 logger = logging.getLogger(__name__)
 
 
+def _run_digest_trash(session, provider, account_email: str) -> None:
+    """Trash non-exempted digest emails if digest_trash_after has elapsed."""
+    import json as _json
+    from datetime import datetime, timezone
+
+    from postmind.core.storage import DailyBrief, DigestExemptionRepo, UndoLogRepo
+
+    today_str = datetime.now(timezone.utc).date().isoformat()
+    brief = session.query(DailyBrief).filter_by(
+        account_email=account_email, brief_date=today_str
+    ).first()
+    if not brief or not brief.digest_trash_after:
+        return
+
+    trash_after = brief.digest_trash_after
+    if trash_after.tzinfo is None:
+        trash_after = trash_after.replace(tzinfo=timezone.utc)
+    if trash_after > datetime.now(timezone.utc):
+        return
+
+    # Re-check exemptions at execution time — user may have toggled Keep after generation
+    exempted = DigestExemptionRepo(session).get_set(account_email)
+
+    email_ids: list[str] = []
+    for col in ("newsletters_json", "promotions_json"):
+        raw = getattr(brief, col, None)
+        if not raw:
+            continue
+        try:
+            for item in _json.loads(raw):
+                if not item.get("exempted", False) and (
+                    item.get("sender_email", "").lower() not in exempted
+                ):
+                    email_ids.extend(item.get("email_ids", []))
+        except Exception:
+            pass
+
+    email_ids = list(set(filter(None, email_ids)))
+    if email_ids:
+        for i in range(0, len(email_ids), 50):
+            batch = email_ids[i : i + 50]
+            try:
+                provider.trash_messages(batch)
+            except Exception as exc:
+                logger.warning("Digest trash batch failed: %s", exc)
+        UndoLogRepo(session).record(
+            account_email=account_email,
+            operation="digest_trash",
+            message_ids=email_ids,
+            description=f"Auto-trash from digest: {len(email_ids)} emails",
+        )
+
+    brief.digest_trash_after = None
+    session.commit()
+
+
 def _triage_account(email: str) -> None:
     """Run one heartbeat cycle for a single account: fetch new mail, classify, apply rules."""
     from postmind.config import get_settings, load_account_config, token_path_for
@@ -177,6 +233,12 @@ def _triage_account(email: str) -> None:
                     logger.info("Heartbeat %s: daily brief generated for %s", email, today_str)
             except Exception as exc:
                 logger.warning("Heartbeat %s: daily brief generation failed: %s", email, exc)
+
+        # Auto-trash digest emails if 48h window has elapsed (runs for all providers)
+        try:
+            _run_digest_trash(get_session(), provider, email)
+        except Exception as exc:
+            logger.warning("Heartbeat %s: digest trash check failed: %s", email, exc)
 
     except Exception as exc:
         logger.error("Heartbeat %s failed: %s", email, exc, exc_info=True)
