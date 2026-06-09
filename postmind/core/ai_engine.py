@@ -617,6 +617,67 @@ cheerfulness, no filler.\
         body = self._complete(SYSTEM_PROMPT, prompt, max_tokens=300)
         return body.strip()
 
+    # ── Digest summarization ─────────────────────────────────────────────────
+
+    def summarize_newsletter_sender(
+        self,
+        sender: str,
+        emails: list[dict],
+    ) -> list[str]:
+        """Return exactly 3 bullet strings summarising a sender's last-24h emails.
+
+        Each email dict has 'subject' and 'snippet'. Privacy-first: no full bodies.
+        """
+        import re as _re
+
+        email_lines = "\n".join(
+            f'- Subject: {e.get("subject", "")} | Snippet: {e.get("snippet", "")[:200]}'
+            for e in emails[:5]
+        )
+        prompt = f"""\
+Summarise the following newsletter emails from "{sender}" in exactly 3 short bullet points.
+Each bullet should be one sentence capturing a key topic, story, or insight.
+Output ONLY a JSON array of 3 strings. No preamble, no markdown, just the array.
+
+Emails:
+{email_lines}
+
+Output format: ["bullet 1", "bullet 2", "bullet 3"]
+"""
+        raw = self._complete(SYSTEM_PROMPT, prompt, max_tokens=200)
+        m = _re.search(r"\[.*?\]", raw, _re.DOTALL)
+        if m:
+            try:
+                bullets = json.loads(m.group(0))
+                if isinstance(bullets, list) and len(bullets) >= 3:
+                    return [str(b) for b in bullets[:3]]
+            except Exception:
+                pass
+        lines = [l.lstrip("•-123456789. ").strip() for l in raw.splitlines() if l.strip()]
+        lines = [l for l in lines if l]
+        while len(lines) < 3:
+            lines.append("(no summary)")
+        return lines[:3]
+
+    def extract_promo_offer_line(
+        self,
+        sender: str,
+        subject: str,
+        snippet: str,
+    ) -> str:
+        """Extract a single offer line (≤ 12 words) from a promotional email."""
+        prompt = f"""\
+Extract the core offer or promotion from this vendor email in 12 words or fewer.
+Be specific: include discount %, deadline, or product name if present.
+Output ONLY the offer line. No preamble, no punctuation at end unless a date.
+
+From: {sender}
+Subject: {subject}
+Snippet: {snippet[:300]}
+"""
+        raw = self._complete(SYSTEM_PROMPT, prompt, max_tokens=60)
+        return raw.strip().strip('"').strip("'")
+
     # ── Avoidance analysis ───────────────────────────────────────────────────
 
     def analyze_avoided_email(self, msg: Message) -> str:

@@ -191,6 +191,34 @@ class MockAIEngine:
             "**Quick win**\n[mock] Inbox is clear — pick your oldest unread email and archive it."
         )
 
+    # ── Digest summarization ─────────────────────────────────────────────────
+
+    def summarize_newsletter_sender(
+        self,
+        sender: str,
+        emails: list[dict],
+    ) -> list[str]:
+        subjects = [e.get("subject", "")[:50] for e in emails[:3]]
+        first = subjects[0] if subjects else "recent topics"
+        return [
+            f"[mock] {sender} covered: {first}",
+            "[mock] Key industry updates and analysis included",
+            "[mock] Actionable insights for this week",
+        ]
+
+    def extract_promo_offer_line(
+        self,
+        sender: str,
+        subject: str,
+        snippet: str,
+    ) -> str:
+        import re as _re
+
+        m = _re.search(r"\d+%", subject)
+        if m:
+            return f"[mock] {m.group(0)} off — {sender}"
+        return f"[mock] Special offer from {sender}"
+
     # ── Cleanup batch naming ──────────────────────────────────────────────────
 
     def propose_batches(self, digest: list[dict]) -> dict:
