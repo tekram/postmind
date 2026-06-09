@@ -1470,15 +1470,25 @@ async def cleanup_confirm(request: Request):
     if not trash_senders and not archive_senders and not feedback_items and not create_rule_key:
         return RedirectResponse("/cleanup", status_code=303)
 
-    cached = _cache_get()
-    if not cached:
-        return _resp(request, "error.html", {"error": "Scan data expired. Re-open Clean Up."})
-
     from postmind.core.storage import BlocklistRepo
     from postmind.core.storage import get_session as _gs
 
-    groups = cached["groups"]
-    account_email = cached["account_email"]
+    cached = _cache_get()
+    if cached:
+        groups = cached["groups"]
+        account_email = cached["account_email"]
+    else:
+        from postmind.core.sender_stats import fetch_sender_groups_from_db
+        from postmind.core.storage import EmailRepo
+
+        account_email = _get_web_account() or ""
+        if account_email and EmailRepo(_gs()).get_inbox(account_email, limit=1):
+            groups = fetch_sender_groups_from_db(
+                account_email=account_email, scope="inbox", min_count=1, top_n=500, sort_by="score"
+            )
+        else:
+            return _resp(request, "error.html", {"error": "No inbox data. Please run a Sync first."})
+
     blocked_set = BlocklistRepo(_gs()).blocked_emails(account_email) if account_email else set()
 
     plan_actions = [("trash", trash_senders), ("archive", archive_senders)]
@@ -1844,15 +1854,29 @@ async def purge_confirm(request: Request):
     if not senders:
         return RedirectResponse("/stats", status_code=303)
 
-    cached = _cache_get()
-    if not cached:
-        return _resp(request, "error.html", {"error": "Scan data expired. Please re-run Stats."})
-
     from postmind.core.storage import BlocklistRepo
     from postmind.core.storage import get_session as _gs
 
-    groups = cached["groups"]
-    account_email = cached["account_email"]
+    cached = _cache_get()
+    if cached:
+        groups = cached["groups"]
+        account_email = cached["account_email"]
+    else:
+        # Cache expired — rebuild from DB (same fix as purge preview)
+        from postmind.core.sender_stats import fetch_sender_groups_from_db
+        from postmind.core.storage import EmailRepo
+
+        account_email = _get_web_account() or ""
+        if account_email and EmailRepo(_gs()).get_inbox(account_email, limit=1):
+            groups = fetch_sender_groups_from_db(
+                account_email=account_email,
+                scope="inbox",
+                min_count=1,
+                top_n=500,
+                sort_by="score",
+            )
+        else:
+            return _resp(request, "error.html", {"error": "No inbox data. Please run a Sync first."})
     # Enforce protected senders at confirm time (not just at stage time): a sender
     # blocked after the cache was populated must never be touched.
     blocked_set = BlocklistRepo(_gs()).blocked_emails(account_email) if account_email else set()
