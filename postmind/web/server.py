@@ -674,6 +674,21 @@ def _render_digest_panes(brief) -> tuple[str, str, str, str]:
         '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">'
         '<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>'
     )
+    _icon_eye = (
+        '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">'
+        '<path stroke-linecap="round" stroke-linejoin="round" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>'
+        '<circle cx="12" cy="12" r="3"/></svg>'
+    )
+
+    def _preview_btn(gmail_id: str) -> str:
+        if not gmail_id:
+            return ""
+        gid = _html.escape(gmail_id)
+        return (
+            f'<button onclick="event.stopPropagation();_briefPreview(\'{gid}\')" '
+            f'class="p-1 rounded text-ink-tertiary hover:text-accent hover:bg-accent-subtle transition-colors" '
+            f'title="Preview email">{_icon_eye}</button>'
+        )
 
     trash_after_iso = ""
     if brief and brief.digest_trash_after:
@@ -724,7 +739,9 @@ def _render_digest_panes(brief) -> tuple[str, str, str, str]:
             se = (item.get("sender_email") or "").lower()
             sn = _html.escape(item.get("sender") or se)
             exempted = item.get("exempted", False)
-            count = len(item.get("email_ids", []))
+            email_ids = item.get("email_ids", [])
+            count = len(email_ids)
+            first_id = email_ids[0] if email_ids else ""
             bullets = item.get("summary_bullets") or []
             bullet_html = "".join(
                 f'<li class="text-ink-subtle text-xs leading-relaxed">{_html.escape(str(b))}</li>'
@@ -735,12 +752,11 @@ def _render_digest_panes(brief) -> tuple[str, str, str, str]:
                 f'<div class="flex items-start justify-between gap-3">'
                 f'  <div class="min-w-0">'
                 f'    <p class="text-sm font-semibold text-ink">{sn}</p>'
-                f'    <p class="text-xs text-ink-tertiary">'
-                f'      {count} email{"s" if count != 1 else ""}'
-                f"    </p>"
+                f'    <p class="text-xs text-ink-tertiary">{count} email{"s" if count != 1 else ""}</p>'
                 f"  </div>"
                 f'  <div class="flex items-center gap-1.5 shrink-0">'
                 f"    {_countdown_badge(exempted)}"
+                f"    {_preview_btn(first_id)}"
                 f"    {_keep_btn(se, exempted)}"
                 f"  </div>"
                 f"</div>"
@@ -775,10 +791,19 @@ def _render_digest_panes(brief) -> tuple[str, str, str, str]:
             se = (item.get("sender_email") or "").lower()
             sn = _html.escape(item.get("sender") or se)
             exempted = item.get("exempted", False)
-            count = len(item.get("email_ids", []))
+            email_ids = item.get("email_ids", [])
+            count = len(email_ids)
+            first_id = email_ids[0] if email_ids else ""
             offer = _html.escape(item.get("offer_line") or "Promotional offer")
+            click_handler = (
+                f'onclick="if(!event.target.closest(\'button\'))_briefPreview(\'{_html.escape(first_id)}\')" '
+                f'style="cursor:pointer" '
+                if first_id else ""
+            )
             rows.append(
-                f'<div class="py-3 border-b border-hairline last:border-0 flex items-center gap-3" data-pr-sender="{_html.escape(se)}">'
+                f'<div class="py-3 border-b border-hairline last:border-0 flex items-center gap-3 '
+                f'hover:bg-surface-2 rounded-button -mx-1 px-1 transition-colors" '
+                f'data-pr-sender="{_html.escape(se)}" {click_handler}>'
                 f'  <div class="min-w-0 flex-1">'
                 f'    <p class="text-sm font-semibold text-ink">{sn}</p>'
                 f'    <p class="text-xs text-ink-subtle mt-0.5">{offer}</p>'
@@ -786,6 +811,7 @@ def _render_digest_panes(brief) -> tuple[str, str, str, str]:
                 f"  </div>"
                 f'  <div class="flex items-center gap-1.5 shrink-0">'
                 f"    {_countdown_badge(exempted)}"
+                f"    {_preview_btn(first_id)}"
                 f"    {_keep_btn(se, exempted)}"
                 f"  </div>"
                 f"</div>"
@@ -1013,16 +1039,6 @@ def _render_brief_links(brief, account_email: str) -> str:
             '<p class="text-ink-tertiary text-sm">Nothing needs your attention right now.</p>'
         )
 
-    # Deals pane — sorted by deal_score desc (already sorted by generator)
-    if deals:
-        deals_pane = _build_rows(deals, "deals-items-list", show_deal_score=True)
-    else:
-        deals_pane = '<p class="text-ink-tertiary text-sm">No deals or offers found in your recent emails.</p>'
-
-    deals_badge = (
-        f'<span class="ml-1 text-[10px] text-ink-tertiary">({len(deals)})</span>' if deals else ""
-    )
-
     # ── Newsletter & Promotions panes ─────────────────────────────────────────
     nl_pane, pr_pane, nl_badge, pr_badge = _render_digest_panes(brief)
 
@@ -1037,9 +1053,6 @@ def _render_brief_links(brief, account_email: str) -> str:
         '<button onclick="_briefTab(\'promotions\')" id="tab-btn-promotions" '
         'class="px-3 py-1.5 text-xs font-semibold border-b-2 border-transparent text-ink-subtle -mb-px bg-transparent">'
         f"Promotions{pr_badge}</button>"
-        '<button onclick="_briefTab(\'deals\')" id="tab-btn-deals" '
-        'class="px-3 py-1.5 text-xs font-semibold border-b-2 border-transparent text-ink-subtle -mb-px bg-transparent">'
-        f"Deals &amp; Offers{deals_badge}</button>"
         "</div>"
     )
 
@@ -1049,7 +1062,6 @@ def _render_brief_links(brief, account_email: str) -> str:
         f'<div id="brief-tab-inbox">{inbox_pane}</div>'
         f'<div id="brief-tab-newsletters" style="display:none">{nl_pane}</div>'
         f'<div id="brief-tab-promotions" style="display:none">{pr_pane}</div>'
-        f'<div id="brief-tab-deals" style="display:none">{deals_pane}</div>'
         f"</div>"
     )
 
