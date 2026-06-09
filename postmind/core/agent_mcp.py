@@ -124,6 +124,19 @@ def build_server(account_email: str | None = None):
         return svc.list_automation()
 
     @mcp.tool()
+    def find_cleanup_candidates(
+        exclude_senders: list[str] | None = None, top_n: int = 8
+    ) -> str:
+        """Analyze the inbox and return a cleanup report in three categories:
+        (1) high-storage personal/work senders, (2) newsletters never opened,
+        (3) transactional bulk (DocuSign, notifications, receipts).
+        Use for any 'what should I delete / clean up / what's wasting space' question.
+        Pass exclude_senders to skip contacts you want to keep."""
+        return svc.find_cleanup_candidates(
+            exclude_senders=exclude_senders or [], top_n=int(top_n or 8)
+        )
+
+    @mcp.tool()
     def run_sql(query: str) -> str:
         """Run one read-only SELECT over a snapshot of the local email cache.
 

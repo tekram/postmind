@@ -1846,7 +1846,7 @@ async def purge_confirm(request: Request):
         )
 
     def _do_purge():
-        from postmind.core.storage import UndoLogRepo, get_session
+        from postmind.core.storage import EmailRepo, UndoLogRepo, get_session
 
         client = _build_provider()
         all_ids = [mid for g in selected_groups for mid in g.message_ids]
@@ -1855,7 +1855,8 @@ async def purge_confirm(request: Request):
         # Record undo BEFORE the operation so a crash/partial failure still leaves
         # a reversible log entry (matches BulkEngine.execute ordering). The undo
         # path keys off `operation` — "archive" restores INBOX, "trash" untrashes.
-        entry = UndoLogRepo(get_session()).record(
+        session = get_session()
+        entry = UndoLogRepo(session).record(
             account_email=account_email,
             operation=action,
             message_ids=all_ids,
@@ -1870,6 +1871,8 @@ async def purge_confirm(request: Request):
             client.batch_archive(all_ids)
         else:
             client.batch_trash(all_ids)
+        # Keep local DB in sync so subsequent stats scans don't re-include these.
+        EmailRepo(session).mark_trashed(all_ids)
         return entry.id, len(all_ids)
 
     try:
@@ -5093,6 +5096,10 @@ agents and rules).
 Operating rules:
 - Use READ tools freely to gather facts before acting. Quote real numbers.
 - Tool chaining rules — follow these automatically without asking the user:
+  - "what should I delete / clean up / what's wasting space / find emails to delete": ALWAYS call \
+find_cleanup_candidates FIRST to show a categorized report. Pass any excluded senders the user \
+mentioned (e.g. exclude_senders=["saudahmirza@gmail.com"]). Show the full report, then ask which \
+category or sender they want to act on. NEVER stage a deletion before showing the report.
   - "summarize thread from X" / "summarize X's emails": call find_and_summarize_thread(search_query="from:X") directly.
   - "read/open/show thread": call find_emails_by_topic to get thread_ids first, then get_thread.
   - "summarize emails about Y": call find_and_summarize_thread(search_query="Y") directly.
@@ -5288,6 +5295,11 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
             )
         if name == "list_automation":
             return svc.list_automation()
+        if name == "find_cleanup_candidates":
+            return svc.find_cleanup_candidates(
+                exclude_senders=tool_input.get("exclude_senders") or [],
+                top_n=int(tool_input.get("top_n", 8) or 8),
+            )
         if name == "run_sql":
             return svc.run_sql(tool_input.get("query", ""))
         if name == "stage_trash":
@@ -5998,10 +6010,14 @@ async def agent_stream_endpoint(request: Request):
                 if await request.is_disconnected():
                     break
                 yield _sse(item)
-            # Final event with the accumulated actions/cards for confirm rendering.
-            if not await request.is_disconnected():
+            # Always emit final so cards/actions reach the client even if a
+            # transient disconnect was detected mid-stream (false positives from
+            # FastAPI's is_disconnected() would otherwise swallow the review card).
+            try:
                 yield _sse({"type": "final", "actions": actions, "cards": cards})
                 yield _sse({"type": "done"})
+            except Exception:
+                pass
             # Best-effort: save the user turn to server-side history.
             try:
                 import secrets as _secrets

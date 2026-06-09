@@ -136,10 +136,10 @@ READ_TOOLS: list[dict] = [
         "description": (
             "Find newsletters/subscriptions the user almost never opens — senders with a "
             "List-Unsubscribe header AND ≥60% unread ratio in the locally synced data. "
-            "Use for 'unsubscribe me from newsletters I never open' / 'what subscriptions do I ignore'. "
-            "Only looks at locally synced emails (not all of Gmail). "
-            "For finding OLD newsletters to delete (e.g. 'older than 3 years'), use "
-            "stage_trash_query with gmail_query='category:promotions older_than:3y' instead."
+            "Use ONLY when the user specifically asks about newsletters they ignore or want to unsubscribe from. "
+            "For a full inbox cleanup analysis ('what should I delete', 'what's wasting space', "
+            "'find emails to delete'), use find_cleanup_candidates instead — it covers storage, "
+            "newsletters, AND transactional bulk in one report."
         ),
         "input_schema": {
             "type": "object",
@@ -235,6 +235,33 @@ READ_TOOLS: list[dict] = [
         "name": "list_automation",
         "description": "Show the user's current automation: their heartbeat agent (if any) and active rules. Use before creating new ones or when asked 'what automations do I have'.",
         "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "find_cleanup_candidates",
+        "description": (
+            "Analyze the inbox and return a structured cleanup report broken into three categories: "
+            "(1) high-volume personal/work senders taking the most storage, "
+            "(2) newsletters and subscriptions the user almost never opens, "
+            "(3) transactional bulk senders (DocuSign, notifications, receipts). "
+            "ALWAYS call this first when the user asks what to delete, clean up, or what's wasting space. "
+            "Show the report and let the user decide what to act on — do NOT stage any deletions "
+            "without explicit user approval after they see the report. "
+            "Optionally exclude specific senders by email address."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "exclude_senders": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Sender email addresses to exclude from results (e.g. family/contacts to keep).",
+                },
+                "top_n": {
+                    "type": "integer",
+                    "description": "How many candidates to return per category (default 8).",
+                },
+            },
+        },
     },
 ]
 
@@ -788,6 +815,97 @@ def find_and_summarize_thread(provider, ai, search_query: str, result_index: int
     lines = results_text.split("\n")
     target_line = next((line for line in lines[1:] if thread_id in line), "")
     return f"**Summarizing:** {target_line.strip() or thread_id}\n\n{summary}"
+
+
+def find_cleanup_candidates(
+    groups, session, account_email: str, exclude_senders: list[str] | None = None, top_n: int = 8
+) -> str:
+    """Return a structured cleanup report in three categories.
+
+    ``groups``        — SenderGroup list from the sender stats scan (or DB).
+    ``session``       — SQLAlchemy session for the subscription query.
+    ``account_email`` — Active account email.
+    ``exclude_senders`` — Email addresses to skip (user-specified contacts to keep).
+    ``top_n``         — Max entries per category.
+    """
+    from postmind.core.sender_stats import classify_sender_risk
+
+    exclude = {e.strip().lower() for e in (exclude_senders or [])}
+
+    def _is_excluded(g) -> bool:
+        return (g.sender_email or "").lower() in exclude
+
+    # ── Category 1: high-storage personal/work (not newsletters, not sensitive) ──
+    _TRANSACTIONAL_KEYWORDS = (
+        "docusign", "dse@", "dse_na", "dotloop", "docuware", "notarize",
+        "noreply", "no-reply", "donotreply", "notification", "receipt",
+        "confirm", "invoice", "billing", "statement",
+    )
+
+    def _looks_transactional(g) -> bool:
+        em = (g.sender_email or "").lower()
+        nm = (g.sender_name or "").lower()
+        return any(kw in em or kw in nm for kw in _TRANSACTIONAL_KEYWORDS)
+
+    personal_work = []
+    transactional = []
+    for g in sorted(groups, key=lambda g: g.total_size_bytes, reverse=True):
+        if _is_excluded(g):
+            continue
+        if not g.has_unsubscribe:  # not a newsletter
+            if _looks_transactional(g):
+                transactional.append(g)
+            else:
+                personal_work.append(g)
+
+    # ── Category 2: newsletters never opened ────────────────────────────────────
+    rows = find_unopened_subscriptions(session, account_email, min_count=3, limit=top_n * 2)
+    subscriptions = [r for r in rows if r["sender_email"].lower() not in exclude]
+
+    # ── Format ──────────────────────────────────────────────────────────────────
+    lines = ["**Inbox cleanup candidates** (excluding senders you asked to skip)\n"]
+
+    # Personal/work
+    lines.append("### 📁 High-storage senders (personal / work)")
+    lines.append("These take the most space. Review before deleting — may be important.\n")
+    for g in personal_work[:top_n]:
+        risk = classify_sender_risk(g)
+        flag = " ⚠️ sensitive" if risk == "sensitive" else ""
+        lines.append(
+            f"- **{g.display_name}** `{g.sender_email}` — "
+            f"{g.total_size_mb:.0f} MB, {g.count:,} emails{flag}"
+        )
+    if not personal_work:
+        lines.append("- Nothing significant outside excluded senders.")
+
+    # Newsletters
+    lines.append("\n### 📧 Newsletters you never open (safe to trash + unsubscribe)")
+    lines.append("High unread ratio — you've stopped reading these.\n")
+    for r in subscriptions[:top_n]:
+        lines.append(
+            f"- **{r['sender_email']}** — {r['total']:,} emails, {r['unread_pct']}% unread"
+        )
+    if not subscriptions:
+        lines.append("- None found (or all excluded).")
+
+    # Transactional
+    lines.append("\n### 🧾 Transactional bulk (DocuSign, notifications, receipts)")
+    lines.append("Old documents and system notifications — usually safe to trash.\n")
+    for g in transactional[:top_n]:
+        lines.append(
+            f"- **{g.display_name}** `{g.sender_email}` — "
+            f"{g.total_size_mb:.0f} MB, {g.count:,} emails"
+        )
+    if not transactional:
+        lines.append("- None found.")
+
+    total_mb = sum(g.total_size_bytes for g in personal_work[:top_n] + transactional[:top_n]) / (1024 * 1024)
+    total_mb += sum(
+        next((g.total_size_bytes for g in groups if g.sender_email == r["sender_email"]), 0)
+        for r in subscriptions[:top_n]
+    ) / (1024 * 1024)
+    lines.append(f"\n**~{total_mb:.0f} MB** across the candidates above.")
+    return "\n".join(lines)
 
 
 def resolve_trash_query(

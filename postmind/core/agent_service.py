@@ -262,6 +262,20 @@ class AgentService:
         )
         return agent_tools.format_unopened(rows)
 
+    def find_cleanup_candidates(
+        self, exclude_senders: list[str] | None = None, top_n: int = 8
+    ) -> str:
+        """Structured cleanup report: storage hogs, never-opened newsletters, transactional bulk."""
+        from postmind.core import agent_tools
+        from postmind.core.storage import get_session
+
+        if not self.account_email:
+            return "No active account."
+        return agent_tools.find_cleanup_candidates(
+            self._groups(), get_session(), self.account_email,
+            exclude_senders=exclude_senders, top_n=int(top_n or 8),
+        )
+
     def list_automation(self) -> str:
         from postmind.core.storage import AgentRepo, RuleRepo, get_session
 
