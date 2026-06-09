@@ -617,19 +617,21 @@ def _render_brief_links(brief, account_email: str) -> str:
     is_gmail = load_account_config(account_email).get("provider", "gmail") == "gmail"
 
     # Bulk action bar
-    all_ids_js = _json.dumps([str(item.get("gmail_id") or "") for item in items if item.get("gmail_id")])
+    all_ids_js = _json.dumps(
+        [str(item.get("gmail_id") or "") for item in items if item.get("gmail_id")]
+    )
     bulk_bar = (
         '<div class="flex items-center justify-between mb-2">'
         '<p class="text-ink-subtle text-[11px] font-semibold uppercase tracking-[0.06em]">What needs attention</p>'
         '<div class="flex gap-1.5">'
-        f'<button onclick="_briefBulk(\'archive\', {_html.escape(all_ids_js)})" '
+        f"<button onclick=\"_briefBulk('archive', {_html.escape(all_ids_js)})\" "
         'title="Archive all" '
         'class="flex items-center gap-1 text-[11px] text-ink-tertiary hover:text-accent border border-hairline hover:border-accent-border bg-transparent hover:bg-accent-subtle rounded px-2 py-0.5 transition-colors">'
-        f'{_icon_archive}<span>Archive all</span></button>'
-        f'<button onclick="_briefBulk(\'trash\', {_html.escape(all_ids_js)})" '
+        f"{_icon_archive}<span>Archive all</span></button>"
+        f"<button onclick=\"_briefBulk('trash', {_html.escape(all_ids_js)})\" "
         'title="Trash all" '
         'class="flex items-center gap-1 text-[11px] text-ink-tertiary hover:text-danger border border-hairline hover:border-danger-border bg-transparent hover:bg-danger-bg rounded px-2 py-0.5 transition-colors">'
-        f'{_icon_trash}<span>Trash all</span></button>'
+        f"{_icon_trash}<span>Trash all</span></button>"
         "</div></div>"
     )
 
@@ -668,12 +670,13 @@ def _render_brief_links(brief, account_email: str) -> str:
 
             unread_dot = (
                 '<span class="shrink-0 w-1.5 h-1.5 rounded-full bg-accent mt-1.5" title="Unread"></span>'
-                if is_unread else
-                '<span class="shrink-0 w-1.5 h-1.5 mt-1.5"></span>'
+                if is_unread
+                else '<span class="shrink-0 w-1.5 h-1.5 mt-1.5"></span>'
             )
             sent_span = (
                 f'<span class="text-ink-tertiary text-[11px] tabular-nums whitespace-nowrap">{sent_label}</span>'
-                if sent_label else ""
+                if sent_label
+                else ""
             )
             score_badge = _DEAL_SCORE_BADGE.get(deal_score, "") if deal_score else ""
 
@@ -683,8 +686,8 @@ def _render_brief_links(brief, account_email: str) -> str:
                 f'<span class="block text-ink text-sm {subject_weight} truncate">{subject}</span>'
                 f'<span class="flex items-center gap-1.5 text-ink-tertiary text-xs truncate">'
                 f'<span class="truncate">{sender}</span>'
-                f'{("<span>·</span>" + sent_span) if sent_span else ""}'
-                f'</span>'
+                f"{('<span>·</span>' + sent_span) if sent_span else ''}"
+                f"</span>"
                 f"</span>"
             )
 
@@ -692,7 +695,9 @@ def _render_brief_links(brief, account_email: str) -> str:
             if is_gmail and gid:
                 if show_deal_score:
                     # Route deal opens through tracking endpoint
-                    open_url = f"/brief/deal-open?gid={_quote(str(item.get('gmail_id') or ''), safe='')}"
+                    open_url = (
+                        f"/brief/deal-open?gid={_quote(str(item.get('gmail_id') or ''), safe='')}"
+                    )
                 else:
                     open_url = (
                         "https://mail.google.com/mail/u/0/"
@@ -738,7 +743,9 @@ def _render_brief_links(brief, account_email: str) -> str:
     if items:
         inbox_pane = bulk_bar + _build_rows(items, "brief-items-list", show_deal_score=False)
     else:
-        inbox_pane = '<p class="text-ink-tertiary text-sm">Nothing needs your attention right now.</p>'
+        inbox_pane = (
+            '<p class="text-ink-tertiary text-sm">Nothing needs your attention right now.</p>'
+        )
 
     # Deals pane — sorted by deal_score desc (already sorted by generator)
     if deals:
@@ -746,7 +753,9 @@ def _render_brief_links(brief, account_email: str) -> str:
     else:
         deals_pane = '<p class="text-ink-tertiary text-sm">No deals or offers found in your recent emails.</p>'
 
-    deals_badge = f'<span class="ml-1 text-[10px] text-ink-tertiary">({len(deals)})</span>' if deals else ""
+    deals_badge = (
+        f'<span class="ml-1 text-[10px] text-ink-tertiary">({len(deals)})</span>' if deals else ""
+    )
 
     tab_bar = (
         '<div class="flex gap-0 mb-3 border-b border-hairline">'
@@ -3162,6 +3171,7 @@ async def triage_classify_stream(request: Request):
 
             # Load behavioral priors once per classify session
             from postmind.core.storage import UserActionRepo
+
             _acct = _get_web_account() or ""
             _priors = UserActionRepo(get_session()).sender_action_counts(_acct) if _acct else {}
 
@@ -3314,7 +3324,7 @@ async def triage_trash(request: Request):
 async def brief_action(request: Request):
     """Trash or archive one or many emails directly from the Daily Brief page."""
     form = await request.form()
-    action = (form.get("action") or "").strip()          # trash | archive | bulk_trash | bulk_archive
+    action = (form.get("action") or "").strip()  # trash | archive | bulk_trash | bulk_archive
     gmail_id = (form.get("gmail_id") or "").strip()
     gmail_ids_raw = form.getlist("gmail_ids[]")
 
@@ -3322,7 +3332,7 @@ async def brief_action(request: Request):
     if not ids:
         return JSONResponse({"ok": False, "error": "No message IDs"}, status_code=400)
 
-    base_action = action.removeprefix("bulk_")           # "trash" or "archive"
+    base_action = action.removeprefix("bulk_")  # "trash" or "archive"
     if base_action not in ("trash", "archive"):
         return JSONResponse({"ok": False, "error": f"Unknown action: {action}"}, status_code=400)
 
@@ -3356,9 +3366,7 @@ async def brief_action(request: Request):
         # Record behavioral signals (batch lookup to avoid N+1)
         email_recs = {
             r.gmail_id: r
-            for r in session.query(EmailRecord)
-            .filter(EmailRecord.gmail_id.in_(ids))
-            .all()
+            for r in session.query(EmailRecord).filter(EmailRecord.gmail_id.in_(ids)).all()
         }
         cls_map = ClassificationCacheRepo(session).get_many(ids)
         repo = UserActionRepo(session)
@@ -3424,6 +3432,7 @@ async def brief_deal_open(gid: str = ""):
         pass
 
     from urllib.parse import quote as _q
+
     gmail_url = (
         "https://mail.google.com/mail/u/0/"
         f"?authuser={_q(account_email, safe='@')}#all/{_q(gid, safe='')}"
@@ -3432,6 +3441,7 @@ async def brief_deal_open(gid: str = ""):
 
 
 # ── Rule proposals ────────────────────────────────────────────────────────────
+
 
 @app.get("/rules/proposals", response_class=HTMLResponse)
 async def rules_proposals_fragment(request: Request):
@@ -3458,13 +3468,13 @@ async def rules_proposals_fragment(request: Request):
             f'<div class="min-w-0 flex-1">'
             f'<p class="text-sm font-medium text-ink truncate">{name}</p>'
             f'<p class="text-xs text-ink-subtle mt-0.5">{explanation}</p>'
-            f'</div>'
+            f"</div>"
             f'<div class="shrink-0 flex gap-1.5">'
             f'<button hx-post="/rules/proposals/{p.id}/confirm" hx-target="#proposal-{p.id}" hx-swap="outerHTML" '
             f'class="pm-btn text-xs py-1 px-2.5">Create rule</button>'
             f'<button hx-post="/rules/proposals/{p.id}/dismiss" hx-target="#proposal-{p.id}" hx-swap="outerHTML" '
             f'class="pm-btn-secondary text-xs py-1 px-2.5">Dismiss</button>'
-            f'</div></div>'
+            f"</div></div>"
         )
 
     inner = "".join(cards)
@@ -3474,9 +3484,9 @@ async def rules_proposals_fragment(request: Request):
         f'<svg class="w-4 h-4 text-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">'
         f'<path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>'
         f'<p class="text-sm font-semibold text-ink">Suggested automations based on your actions</p>'
-        f'</div>'
-        f'{inner}'
-        f'</div>'
+        f"</div>"
+        f"{inner}"
+        f"</div>"
     )
 
 
@@ -3485,9 +3495,7 @@ async def rule_proposal_confirm(rule_id: int, request: Request):
     from postmind.core.storage import RuleRepo, get_session
 
     RuleRepo(get_session()).confirm_proposal(rule_id)
-    return HTMLResponse(
-        '<div class="py-2 text-xs text-success">✓ Rule created and active.</div>'
-    )
+    return HTMLResponse('<div class="py-2 text-xs text-success">✓ Rule created and active.</div>')
 
 
 @app.post("/rules/proposals/{rule_id}/dismiss", response_class=HTMLResponse)
@@ -4141,7 +4149,9 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
             return f"Staged {len(matched)} sender(s) — {total} emails, ~{mb:.0f} MB ({names}). The user must confirm in the preview before anything moves to Trash."
         if name == "stage_trash_query":
             gmail_query = (tool_input.get("gmail_query") or "").strip()
-            description = (tool_input.get("description") or gmail_query or "matching emails").strip()
+            description = (
+                tool_input.get("description") or gmail_query or "matching emails"
+            ).strip()
             newsletters_only = bool(tool_input.get("newsletters_only"))
             if not gmail_query:
                 return "I need a search query (e.g. 'older_than:2y') to find emails to trash."
@@ -4155,7 +4165,9 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                     "For other accounts, name the senders and I'll stage a sender-level trash instead."
                 )
             try:
-                emails = agent_tools.resolve_trash_query(provider, gmail_query, newsletters_only, limit=200)
+                emails = agent_tools.resolve_trash_query(
+                    provider, gmail_query, newsletters_only, limit=200
+                )
             except Exception as exc:
                 return f"Couldn't resolve that query: {exc}"
             if not emails:
@@ -4194,26 +4206,27 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
             label_name = (tool_input.get("label_name") or "").strip()
             if action == "label" and not label_name:
                 return "A label name is required to stage a label action."
-            staged, blocked, sensitive, err = _resolve_action_targets(
-                tool_input.get("senders") or [], tool_input.get("query", ""), account_email
-            )
-            if err:
-                return err
-            if not staged:
-                extra = f" ({len(blocked)} protected sender(s) skipped)" if blocked else ""
-                return f"No matching senders to {action.replace('_', ' ')}{extra} — nothing staged."
-            total = sum(g.count for g in staged)
-            verb = action.replace("_", " ")
-            title = {
-                "archive": "Archive emails",
-                "label": f"Label emails “{label_name}”",
-                "mark_read": "Mark emails as read",
-            }[action]
-            # Autopilot: auto-execute reversible actions without a confirm card
-            # (opt-in, off by default; trash/unsubscribe/send never qualify). Even
-            # under autopilot, SENSITIVE senders (bank/legal/health) keep the human
-            # gate — they're routed to a confirm card, never auto-executed.
+            # Autopilot path is web-specific — resolve targets inline so autopilot
+            # can call _execute_reversible_action directly (which is also web-specific).
             if _autopilot_on() and action in _AUTOPILOT_ACTIONS:
+                staged, blocked, sensitive, err = _resolve_action_targets(
+                    tool_input.get("senders") or [], tool_input.get("query", ""), account_email
+                )
+                if err:
+                    return err
+                if not staged:
+                    extra = f" ({len(blocked)} protected sender(s) skipped)" if blocked else ""
+                    return f"No matching senders to {action.replace('_', ' ')}{extra} — nothing staged."
+                verb = action.replace("_", " ")
+                title = {
+                    "archive": "Archive emails",
+                    "label": f"Label emails “{label_name}”",
+                    "mark_read": "Mark emails as read",
+                }[action]
+                # Autopilot: auto-execute reversible actions without a confirm card
+                # (opt-in, off by default; trash/unsubscribe/send never qualify). Even
+                # under autopilot, SENSITIVE senders (bank/legal/health) keep the human
+                # gate — they're routed to a confirm card, never auto-executed.
                 sset = set(sensitive)
                 auto = [g for g in staged if g.sender_email not in sset]
                 held = [g for g in staged if g.sender_email in sset]
@@ -4252,47 +4265,166 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                 if blocked:
                     parts.append(f"{len(blocked)} protected sender(s) skipped.")
                 return " ".join(parts) or "Nothing to do."
-            cards.append(
-                {
-                    "type": "bulk_action",
-                    "title": title,
-                    "fields": {
-                        "action": action,
-                        "label_name": label_name,
-                        "targets": _enrich_targets(staged),
-                        "total_count": total,
-                        "blocked": blocked,
-                        "sensitive": sensitive,
-                        "undoable": True,
-                    },
-                }
-            )
-            note = f" ({len(blocked)} protected skipped)" if blocked else ""
-            return f"Staged a {action.replace('_', ' ')} of {len(staged)} sender(s), {total} emails{note}. Showed a confirmation card; nothing happens until the user confirms. Reversible for 30 days."
+            else:
+                # Non-autopilot: delegate staging to AgentService for target resolution,
+                # blocklist checks, and sensitive-sender flagging.
+                from postmind.core.agent_service import AgentService
+
+                svc = AgentService(account_email=account_email, ai=ai)
+                cached = _cache_get()
+                if cached:
+                    svc._groups_cache = cached.get("groups", [])
+                if provider is not None:
+                    svc._provider = provider
+                result = svc.stage_cleanup(
+                    action,
+                    tool_input.get("senders") or [],
+                    tool_input.get("query", ""),
+                    label_name,
+                )
+                if "error" in result:
+                    return result["error"]
+                # Build enriched targets from the scan cache for the confirm card.
+                # The confirm endpoint re-resolves server-side from sender emails, so
+                # the card only needs sender_email checkboxes plus display metadata.
+                params = result.get("params", {})
+                blocked = params.get("blocked", [])
+                sensitive_set = set(params.get("sensitive", []))
+                groups_lookup: dict[str, object] = {}
+                if cached:
+                    for g in cached.get("groups", []):
+                        groups_lookup[(g.sender_email or "").lower()] = g
+                targets = []
+                for em in result.get("senders", []):
+                    g = groups_lookup.get(em.lower())
+                    if g is not None:
+                        targets.append(
+                            {
+                                "sender_email": g.sender_email,
+                                "sender_name": g.display_name,
+                                "count": g.count,
+                                "size_str": (
+                                    f"{g.total_size_mb:.1f} MB"
+                                    if g.total_size_mb >= 0.1
+                                    else f"{g.total_size_bytes // 1024} KB"
+                                ),
+                                "sensitive": em in sensitive_set,
+                            }
+                        )
+                    else:
+                        targets.append(
+                            {
+                                "sender_email": em,
+                                "sender_name": em,
+                                "count": 0,
+                                "size_str": "—",
+                                "sensitive": em in sensitive_set,
+                            }
+                        )
+                title = {
+                    "archive": "Archive emails",
+                    "label": f"Label emails “{label_name}”",
+                    "mark_read": "Mark emails as read",
+                }[action]
+                staged_emails = result.get("senders", [])
+                cards.append(
+                    {
+                        "type": "bulk_action",
+                        "title": title,
+                        "fields": {
+                            "token": result["token"],
+                            "action": action,
+                            "label_name": label_name,
+                            "targets": targets,
+                            "total_count": result.get("email_count", 0),
+                            "blocked": blocked,
+                            "sensitive": params.get("sensitive", []),
+                            "undoable": result.get("undoable", True),
+                        },
+                    }
+                )
+                note = f" ({len(blocked)} protected skipped)" if blocked else ""
+                verb = action.replace("_", " ")
+                return (
+                    f"Staged a {verb} of {len(staged_emails)} sender(s), "
+                    f"{result.get('email_count', 0)} emails{note}. "
+                    f"Showed a confirmation card; nothing happens until the user confirms. "
+                    f"Reversible for 30 days."
+                )
         if name == "stage_unsubscribe":
-            staged, blocked, sensitive, err = _resolve_action_targets(
-                tool_input.get("senders") or [], tool_input.get("query", ""), account_email
+            from postmind.core.agent_service import AgentService
+
+            svc = AgentService(account_email=account_email, ai=ai)
+            cached = _cache_get()
+            if cached:
+                svc._groups_cache = cached.get("groups", [])
+            try:
+                svc._provider = _build_provider()
+            except Exception:
+                pass
+            result = svc.stage_unsubscribe(
+                tool_input.get("senders") or [],
+                tool_input.get("query", ""),
+                bool(tool_input.get("also_trash", False)),
             )
-            if err:
-                return err
-            if not staged:
-                extra = f" ({len(blocked)} protected sender(s) skipped)" if blocked else ""
-                return f"No matching senders to unsubscribe from{extra} — nothing staged."
-            total = sum(g.count for g in staged)
+            if "error" in result:
+                return result["error"]
+            # Build enriched targets from the scan cache for the confirm card.
+            params = result.get("params", {})
+            blocked = params.get("blocked", [])
+            sensitive_set = set(params.get("sensitive", []))
+            groups_lookup: dict[str, object] = {}
+            if cached:
+                for g in cached.get("groups", []):
+                    groups_lookup[(g.sender_email or "").lower()] = g
+            targets = []
+            for em in result.get("senders", []):
+                g = groups_lookup.get(em.lower())
+                if g is not None:
+                    targets.append(
+                        {
+                            "sender_email": g.sender_email,
+                            "sender_name": g.display_name,
+                            "count": g.count,
+                            "size_str": (
+                                f"{g.total_size_mb:.1f} MB"
+                                if g.total_size_mb >= 0.1
+                                else f"{g.total_size_bytes // 1024} KB"
+                            ),
+                            "sensitive": em in sensitive_set,
+                        }
+                    )
+                else:
+                    targets.append(
+                        {
+                            "sender_email": em,
+                            "sender_name": em,
+                            "count": 0,
+                            "size_str": "—",
+                            "sensitive": em in sensitive_set,
+                        }
+                    )
             cards.append(
                 {
                     "type": "unsubscribe",
                     "title": "Unsubscribe from senders",
                     "fields": {
-                        "targets": _enrich_targets(staged),
-                        "total_count": total,
+                        "token": result["token"],
+                        "targets": targets,
+                        "total_count": result.get("email_count", 0),
                         "blocked": blocked,
-                        "sensitive": sensitive,
+                        "sensitive": params.get("sensitive", []),
                     },
                 }
             )
+            sender_count = len(result.get("senders", []))
             note = f" ({len(blocked)} protected skipped)" if blocked else ""
-            return f"Staged unsubscribe from {len(staged)} sender(s){note}. Showed a confirmation card. Unsubscribe is external and NOT undoable; trashing the back-catalog is optional and undoable. Nothing happens until the user confirms."
+            return (
+                f"Staged unsubscribe from {sender_count} sender(s){note}. "
+                f"Showed a confirmation card. Unsubscribe is external and NOT undoable; "
+                f"trashing the back-catalog is optional and undoable. "
+                f"Nothing happens until the user confirms."
+            )
         if name == "draft_email":
             from postmind.core.storage import AgentRepo, get_session
 
@@ -4327,64 +4459,91 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
             )
             return f"Drafted the email and showed an editable card. Subject: {subject}. The user can edit and must click Send — nothing is sent automatically."
         if name == "send_email":
+            from postmind.core.agent_service import AgentService
+
+            svc = AgentService(account_email=account_email, ai=ai)
+            result = svc.stage_send(
+                tool_input.get("to", ""),
+                tool_input.get("subject", ""),
+                tool_input.get("body", ""),
+            )
+            if "error" in result:
+                return result["error"]
+            p = result.get("params", {})
             cards.append(
                 {
                     "type": "send_email",
                     "title": "Review & send",
                     "fields": {
-                        "to": (tool_input.get("to") or "").strip(),
-                        "subject": (tool_input.get("subject") or "").strip(),
-                        "body": (tool_input.get("body") or "").strip(),
+                        "token": result["token"],
+                        "to": p.get("to", ""),
+                        "subject": p.get("subject", ""),
+                        "body": p.get("body", ""),
                     },
                 }
             )
-            return "Showed an editable send-email card. Always-confirm: nothing is sent until the user clicks Send."
+            return f"Staged sending to {p.get('to', '')}. The user must confirm — nothing is sent until they click Send."
         if name == "create_agent":
-            email = (tool_input.get("email") or account_email or "").strip()
-            if not email:
-                return (
-                    "No account to attach the agent to — ask the user to connect an account first."
-                )
-            card = {
-                "type": "create_agent",
-                "title": "Create heartbeat agent",
-                "fields": {
-                    "email": email,
-                    "name": (tool_input.get("name") or email.split("@")[0].title()),
-                    "interval_minutes": int(tool_input.get("interval_minutes", 30) or 30),
-                    "voice_style": tool_input.get("voice_style", "") or "",
-                    "user_context": tool_input.get("user_context", "") or "",
-                    "run_rules": bool(tool_input.get("run_rules", True)),
-                    "run_followups": bool(tool_input.get("run_followups", True)),
-                    "run_avoidance": bool(tool_input.get("run_avoidance", False)),
-                },
-            }
-            cards.append(card)
-            return f"Staged a heartbeat agent for {email} (every {card['fields']['interval_minutes']}m). Showed the user a confirmation card."
+            from postmind.core.agent_service import AgentService
+
+            svc = AgentService(account_email=account_email, ai=ai)
+            result = svc.stage_create_agent(
+                email=tool_input.get("email", ""),
+                name=tool_input.get("name", ""),
+                interval_minutes=int(tool_input.get("interval_minutes", 30) or 30),
+                voice_style=tool_input.get("voice_style", ""),
+                user_context=tool_input.get("user_context", ""),
+                run_rules=bool(tool_input.get("run_rules", True)),
+                run_followups=bool(tool_input.get("run_followups", True)),
+                run_avoidance=bool(tool_input.get("run_avoidance", False)),
+            )
+            if "error" in result:
+                return result["error"]
+            p = result.get("params", {})
+            cards.append(
+                {
+                    "type": "create_agent",
+                    "title": "Create heartbeat agent",
+                    "fields": {
+                        "token": result["token"],
+                        "email": p.get("email", ""),
+                        "name": p.get("name", ""),
+                        "interval_minutes": p.get("interval_minutes", 30),
+                        "voice_style": p.get("voice_style", ""),
+                        "user_context": p.get("user_context", ""),
+                        "run_rules": p.get("run_rules", True),
+                        "run_followups": p.get("run_followups", True),
+                        "run_avoidance": p.get("run_avoidance", False),
+                    },
+                }
+            )
+            return (
+                f"Staged a heartbeat agent for {p.get('email', '')} "
+                f"(every {p.get('interval_minutes', 30)}m). Showed the user a confirmation card."
+            )
         if name == "create_rule":
-            nl = (tool_input.get("natural_language") or "").strip()
-            if not nl:
-                return "Need the rule in plain English."
-            if not account_email:
-                return "No active account — ask the user to connect one first."
-            try:
-                nl_rule = ai.translate_rule(nl)
-            except Exception as exc:
-                return f"Couldn't translate that rule: {exc}"
+            from postmind.core.agent_service import AgentService
+
+            svc = AgentService(account_email=account_email, ai=ai)
+            result = svc.stage_create_rule(tool_input.get("natural_language", ""))
+            if "error" in result:
+                return result["error"]
+            p = result.get("params", {})
             cards.append(
                 {
                     "type": "create_rule",
                     "title": "Create rule",
                     "fields": {
-                        "natural_language": nl,
-                        "gmail_query": nl_rule.gmail_query,
-                        "action": nl_rule.action,
-                        "explanation": nl_rule.explanation,
-                        "warnings": nl_rule.warnings or [],
+                        "token": result["token"],
+                        "natural_language": p.get("natural_language", ""),
+                        "gmail_query": p.get("gmail_query", ""),
+                        "action": p.get("action", ""),
+                        "explanation": p.get("explanation", ""),
+                        "warnings": p.get("warnings", []),
                     },
                 }
             )
-            return f"Staged a rule: {nl_rule.explanation} (query: {nl_rule.gmail_query}, action: {nl_rule.action}). Showed the user a confirmation card."
+            return f"Staged rule: {p.get('explanation', p.get('natural_language', ''))}. The user must confirm."
         return f"Unknown tool: {name}"
 
     return _executor_tool
