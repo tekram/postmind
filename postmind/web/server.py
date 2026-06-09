@@ -5700,7 +5700,7 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                     },
                 }
             )
-            return f"Staged a rule: {nl_rule.explanation} (query: {nl_rule.gmail_query}, action: {nl_rule.action}). Showed the user a confirmation card."
+            return f"Staged rule: {p.get('explanation', p.get('natural_language', ''))}. The user must confirm."
         if name == "run_sql":
             from postmind.core.agent_service import AgentService
 
