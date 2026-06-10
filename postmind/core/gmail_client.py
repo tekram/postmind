@@ -418,15 +418,36 @@ class GmailClient:
         return self._batch_modify(message_ids, remove=["INBOX"])
 
     def batch_trash(self, message_ids: list[str]) -> int:
-        count = 0
+        """Move messages to Trash. Falls back to individual calls for any that
+        the batch HTTP request fails on silently."""
         settings = get_settings()
+        succeeded: list[str] = []
+        failed: list[str] = []
+
+        def _on_success(request_id, response, exception):
+            if exception:
+                failed.append(request_id)
+            else:
+                succeeded.append(request_id)
+
         for chunk in _chunks(message_ids, settings.gmail_batch_size):
-            batch = self._service.new_batch_http_request()
+            batch = self._service.new_batch_http_request(callback=_on_success)
             for mid in chunk:
-                batch.add(self._service.users().messages().trash(userId=self._user, id=mid))
+                batch.add(
+                    self._service.users().messages().trash(userId=self._user, id=mid),
+                    request_id=mid,
+                )
             batch.execute()
-            count += len(chunk)
-        return count
+
+        # Retry individually for any that the batch dropped
+        for mid in failed:
+            try:
+                self._service.users().messages().trash(userId=self._user, id=mid).execute()
+                succeeded.append(mid)
+            except Exception:
+                pass
+
+        return len(succeeded)
 
     def batch_delete_permanent(self, message_ids: list[str]) -> int:
         """
