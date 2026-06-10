@@ -484,6 +484,19 @@ class EmailRepo:
             rec.is_acted_on = True
             self.s.commit()
 
+    def mark_trashed(self, gmail_ids: list[str]) -> None:
+        """Mark emails as no longer in inbox after a trash operation.
+
+        Keeps the DB in sync so subsequent stats scans don't include already-trashed
+        emails in sender groups, which would inflate purge counts.
+        """
+        if not gmail_ids:
+            return
+        self.s.query(EmailRecord).filter(EmailRecord.gmail_id.in_(gmail_ids)).update(
+            {EmailRecord.is_inbox: False}, synchronize_session=False
+        )
+        self.s.commit()
+
 
 class FollowUpRepo:
     def __init__(self, session: Session):

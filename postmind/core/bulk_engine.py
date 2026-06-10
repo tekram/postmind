@@ -130,6 +130,8 @@ class BulkEngine:
         # Mark as acted on in local cache
         for mid in message_ids:
             self.email_repo.mark_acted_on(mid)
+        if op.action == "trash":
+            self.email_repo.mark_trashed(message_ids)
 
         return BulkResult(
             undo_log_id=undo_entry.id,

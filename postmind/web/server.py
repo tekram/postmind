@@ -5356,15 +5356,50 @@ def _build_agent_tool_executor(account_email: str, ai, actions: list[dict], card
                 return err
             if not matched:
                 return "No matching senders found in the current scan — nothing staged."
-            total = sum(g.count for g in matched)
-            mb = sum(g.total_size_bytes for g in matched) / (1024 * 1024)
-            href = "/purge/preview?" + urlencode([("senders", g.sender_email) for g in matched])
-            if not any(a.get("href") == href for a in actions):
-                actions.append({"label": f"Review & confirm ({total} emails)", "href": href})
-            names = ", ".join(g.sender_email for g in matched[:5]) + (
-                "…" if len(matched) > 5 else ""
+            sender_emails = [g.sender_email for g in matched]
+            description = (
+                sender_emails[0] if len(sender_emails) == 1 else f"{len(sender_emails)} senders"
             )
-            return f"Staged {len(matched)} sender(s) — {total} emails, ~{mb:.0f} MB ({names}). The user must confirm in the preview before anything moves to Trash."
+            try:
+                provider = _build_provider()
+            except Exception as exc:
+                return f"Couldn't reach the mailbox: {exc}"
+            if not provider.supports("labels"):
+                # IMAP: no per-email review drawer — fall back to purge preview link.
+                total = sum(g.count for g in matched)
+                mb = sum(g.total_size_bytes for g in matched) / (1024 * 1024)
+                href = "/purge/preview?" + urlencode([("senders", g.sender_email) for g in matched])
+                if not any(a.get("href") == href for a in actions):
+                    actions.append({"label": f"Review & confirm ({total} emails)", "href": href})
+                names = ", ".join(sender_emails[:5]) + ("…" if len(matched) > 5 else "")
+                return f"Staged {len(matched)} sender(s) — {total} emails, ~{mb:.0f} MB ({names}). Open the Review link to confirm before anything moves to Trash."
+            # Gmail: resolve individual email IDs so the review drawer can show them.
+            from_parts = " OR ".join(f"from:{e}" for e in sender_emails[:25])
+            gmail_query = f"in:inbox ({from_parts})"
+            try:
+                emails = agent_tools.resolve_trash_query(provider, gmail_query, limit=300)
+            except Exception as exc:
+                return f"Couldn't resolve emails for those senders: {exc}"
+            if not emails:
+                return "No inbox emails found for those senders."
+            token = _review_put(account_email, description, emails)
+            sender_count = len({e["sender_email"] for e in emails})
+            cards.append(
+                {
+                    "type": "trash_review",
+                    "title": f"Review: {description}",
+                    "fields": {
+                        "token": token,
+                        "total_count": len(emails),
+                        "sender_count": sender_count,
+                        "description": description,
+                    },
+                }
+            )
+            return (
+                f"Staged {len(emails)} emails from {sender_count} sender(s) "
+                f"for review. The user opens the review drawer and approves before anything moves to Trash."
+            )
         if name == "stage_trash_query":
             gmail_query = (tool_input.get("gmail_query") or "").strip()
             description = (

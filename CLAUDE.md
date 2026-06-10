@@ -115,6 +115,17 @@ priors are loaded back at session start (`sender_priors()`) and fed to `AIEngine
 classifier can bias toward the user's past decisions. This is the existing hook for
 learning from user behavior — extend here for new signal types.
 
+## Testing web changes (autonomous — no need to ask)
+
+For ANY web feature or bug fix, act autonomously:
+
+1. **Ensure server is running** — check with `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8484/`. If not 200, start it: `pkill -f "postmind serve" 2>/dev/null; sleep 1; .venv/bin/postmind serve > /tmp/postmind.log 2>&1 &; sleep 3`
+2. **After code changes**, restart before testing: `pkill -f "postmind serve" 2>/dev/null; sleep 1; .venv/bin/postmind serve > /tmp/postmind.log 2>&1 &; sleep 3`
+3. **Use Playwright MCP** (`mcp__plugin_playwright_playwright__*`) to navigate, click, and screenshot the full user flow
+4. **Do not ask permission** — start the server, test in browser, and report what you observed. Browser is the source of truth, not test output or code review.
+
+Tests passing is not sufficient. Runtime failures only show up in the browser.
+
 ## Conventions
 
 - Ruff is the only linter/formatter (line-length 100 enforced by formatter, not lint;
