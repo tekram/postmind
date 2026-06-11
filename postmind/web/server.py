@@ -99,8 +99,8 @@ templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 try:
     from postmind.core.agent_mcp import build_server as _build_mcp_server
 
-    _mcp_server = _build_mcp_server()          # account_email=None → uses active account
-    app.mount("/mcp", _mcp_server.sse_app())    # SSE transport; broadly supported
+    _mcp_server = _build_mcp_server()  # account_email=None → uses active account
+    app.mount("/mcp", _mcp_server.sse_app())  # SSE transport; broadly supported
 except Exception:
     pass  # [mcp] extra not installed — web UI still works fine without it
 
@@ -697,7 +697,7 @@ def _render_digest_panes(brief) -> tuple[str, str, str, str]:
             return ""
         gid = _html.escape(gmail_id)
         return (
-            f'<button onclick="event.stopPropagation();_briefPreview(\'{gid}\')" '
+            f"<button onclick=\"event.stopPropagation();_briefPreview('{gid}')\" "
             f'class="p-1 rounded text-ink-tertiary hover:text-accent hover:bg-accent-subtle transition-colors" '
             f'title="Preview email">{_icon_eye}</button>'
         )
@@ -711,9 +711,7 @@ def _render_digest_panes(brief) -> tuple[str, str, str, str]:
 
     def _countdown_badge(exempted: bool) -> str:
         if exempted or not trash_after_iso:
-            return (
-                '<span class="pm-badge text-[10px] text-success border-success-border bg-success-subtle">Kept</span>'
-            )
+            return '<span class="pm-badge text-[10px] text-success border-success-border bg-success-subtle">Kept</span>'
         return (
             f'<span class="digest-countdown pm-badge text-[10px] text-ink-tertiary" '
             f'data-trash-after="{trash_after_iso}">Trashing in 48h</span>'
@@ -808,9 +806,10 @@ def _render_digest_panes(brief) -> tuple[str, str, str, str]:
             first_id = email_ids[0] if email_ids else ""
             offer = _html.escape(item.get("offer_line") or "Promotional offer")
             click_handler = (
-                f'onclick="if(!event.target.closest(\'button\'))_briefPreview(\'{_html.escape(first_id)}\')" '
+                f"onclick=\"if(!event.target.closest('button'))_briefPreview('{_html.escape(first_id)}')\" "
                 f'style="cursor:pointer" '
-                if first_id else ""
+                if first_id
+                else ""
             )
             rows.append(
                 f'<div class="py-3 border-b border-hairline last:border-0 flex items-center gap-3 '
@@ -1038,7 +1037,7 @@ def _render_brief_links(brief, account_email: str) -> str:
             rows.append(
                 f'<div class="brief-item group flex items-start gap-2.5 -mx-2 px-2 py-1.5 rounded-button '
                 f'hover:bg-surface-2 transition-colors cursor-pointer" data-gmail-id="{gid}" '
-                f'onclick="if(!event.target.closest(\'button,a\'))_briefPreview(\'{gid}\')">'
+                f"onclick=\"if(!event.target.closest('button,a'))_briefPreview('{gid}')\">"
                 f"{unread_dot}{score_badge or _icon_external}{text_content}{actions}"
                 f"</div>"
             )
@@ -1211,12 +1210,17 @@ async def brief_generate(request: Request):
         else ""
     )
 
+    stat_cards_oob = templates.env.get_template("_brief_stat_cards.html").render(
+        brief=brief, oob=True, auto_generate=False
+    )
+
     return HTMLResponse(
         f'<div id="brief-content" class="px-5 py-5">'
         f'<div class="flex items-center gap-2 mb-4">{ai_badge}'
         f'<span class="text-ink-tertiary text-xs">Generated at {gen_time}</span></div>'
         f"{status_html}{links_html}{content_html}"
         f"</div>"
+        f"{stat_cards_oob}"
         f"{digest_init}"
     )
 
@@ -1491,7 +1495,9 @@ async def cleanup_confirm(request: Request):
                 account_email=account_email, scope="inbox", min_count=1, top_n=500, sort_by="score"
             )
         else:
-            return _resp(request, "error.html", {"error": "No inbox data. Please run a Sync first."})
+            return _resp(
+                request, "error.html", {"error": "No inbox data. Please run a Sync first."}
+            )
 
     blocked_set = BlocklistRepo(_gs()).blocked_emails(account_email) if account_email else set()
 
@@ -1810,7 +1816,9 @@ def _render_purge_preview(
         return _resp(
             request,
             "error.html",
-            {"error": "None of those senders were found in your inbox data. Please run a Sync and try again."},
+            {
+                "error": "None of those senders were found in your inbox data. Please run a Sync and try again."
+            },
         )
     total_count = sum(g.count for g in selected_groups)
     total_mb = round(sum(g.total_size_bytes for g in selected_groups) / (1024 * 1024), 1)
@@ -1880,7 +1888,9 @@ async def purge_confirm(request: Request):
                 sort_by="score",
             )
         else:
-            return _resp(request, "error.html", {"error": "No inbox data. Please run a Sync first."})
+            return _resp(
+                request, "error.html", {"error": "No inbox data. Please run a Sync first."}
+            )
     # Enforce protected senders at confirm time (not just at stage time): a sender
     # blocked after the cache was populated must never be touched.
     blocked_set = BlocklistRepo(_gs()).blocked_emails(account_email) if account_email else set()
@@ -2125,11 +2135,13 @@ async def settings_mcp_servers_get(request: Request):
     enriched = []
     for s in servers:
         name = s.get("name", "")
-        enriched.append({
-            **s,
-            "connected": status_map.get(name, {}).get("connected", False),
-            "tool_count": status_map.get(name, {}).get("tool_count", 0),
-        })
+        enriched.append(
+            {
+                **s,
+                "connected": status_map.get(name, {}).get("connected", False),
+                "tool_count": status_map.get(name, {}).get("tool_count", 0),
+            }
+        )
     return {"servers": enriched}
 
 
@@ -2177,7 +2189,11 @@ async def settings_mcp_servers_test(request: Request):
     sess = MCPClientSession(cfg)
     await sess.connect()
     if not sess.connected:
-        return {"connected": False, "tools": [], "error": "Could not connect — check the command/URL and try again."}
+        return {
+            "connected": False,
+            "tools": [],
+            "error": "Could not connect — check the command/URL and try again.",
+        }
     tools = [t["name"].removeprefix(f"mcp_{cfg.name}_") for t in sess.tools]
     await sess.close()
     return {"connected": True, "tool_count": len(tools), "tools": tools[:20]}
@@ -2194,7 +2210,9 @@ _MCP_TEMPLATES = [
         "command": "npx",
         "args": ["-y", "@modelcontextprotocol/server-memory"],
         "env_vars": [],
-        "setup_steps": ["Requires Node.js (npx). Run: npx -y @modelcontextprotocol/server-memory to verify."],
+        "setup_steps": [
+            "Requires Node.js (npx). Run: npx -y @modelcontextprotocol/server-memory to verify."
+        ],
         "free": True,
         "requires_auth": False,
     },
@@ -2296,12 +2314,7 @@ async def mcp_templates(request: Request):
     if email:
         cfg = load_account_config(email)
         configured_names = {s.get("name") for s in (cfg.get("mcp_servers") or [])}
-    return {
-        "templates": [
-            {**t, "configured": t["id"] in configured_names}
-            for t in _MCP_TEMPLATES
-        ]
-    }
+    return {"templates": [{**t, "configured": t["id"] in configured_names} for t in _MCP_TEMPLATES]}
 
 
 @app.post("/settings/mcp-servers/from-template/{template_id}")
@@ -2503,6 +2516,7 @@ async def gmail_add_start(request: Request):
             state["email"] = email
             try:
                 from postmind.core.mcp_client import bootstrap_memory_for_account
+
                 bootstrap_memory_for_account(email)
             except Exception:
                 pass
@@ -2561,6 +2575,7 @@ def _test_and_register_imap(server, user, password, port, folder, display_name):
     set_active_account(user)
     try:
         from postmind.core.mcp_client import bootstrap_memory_for_account
+
         bootstrap_memory_for_account(user)
     except Exception:
         pass
@@ -3509,9 +3524,7 @@ def _sync_worker(task_id: str, scope: str, limit: int | None, deep: bool) -> Non
             )
             state["complete"] = False
         else:
-            state["detail"] = (
-                f"Local cache is up to date — {len(existing_ids):,} emails cached."
-            )
+            state["detail"] = f"Local cache is up to date — {len(existing_ids):,} emails cached."
             state["complete"] = True
 
     except Exception as exc:
@@ -4958,7 +4971,11 @@ async def agent_memory_status(request: Request):
             "configured": True,
             "entity_count": len(entities),
             "entities": [
-                {"name": e.get("name"), "type": e.get("entityType"), "observations": len(e.get("observations", []))}
+                {
+                    "name": e.get("name"),
+                    "type": e.get("entityType"),
+                    "observations": len(e.get("observations", [])),
+                }
                 for e in entities[:20]
             ],
             "file": str(mem_file),
@@ -6028,9 +6045,16 @@ async def agent_stream_endpoint(request: Request):
                 executor_deep = _build_agent_tool_executor(account_email, ai_deep, actions, cards)
                 if not settings.extended_thinking:
                     # Static "working…" hint only when thinking isn't streaming live
-                    _put({"type": "thinking", "text": "Working on it — this may take a moment for a complex task."})
+                    _put(
+                        {
+                            "type": "thinking",
+                            "text": "Working on it — this may take a moment for a complex task.",
+                        }
+                    )
                 stream_iter = ai_deep.chat_stream_deep(
-                    messages, system=system, tools=_agent_tools_for(account_email),
+                    messages,
+                    system=system,
+                    tools=_agent_tools_for(account_email),
                     tool_executor=executor_deep,
                 )
                 for event in stream_iter:
@@ -6056,14 +6080,23 @@ async def agent_stream_endpoint(request: Request):
                 # Deep local: non-streaming Ollama with higher iteration ceiling.
                 deep_ollama_kwargs = {
                     "mode": "local",
-                    "ollama_model": settings.deep_task_model or engine_kwargs.get("ollama_model", ""),
+                    "ollama_model": settings.deep_task_model
+                    or engine_kwargs.get("ollama_model", ""),
                 }
                 ai_deep = AIEngine(**deep_ollama_kwargs)
                 executor_deep = _build_agent_tool_executor(account_email, ai_deep, actions, cards)
-                _put({"type": "thinking", "text": "Working on it — running locally, may take a moment."})
+                _put(
+                    {
+                        "type": "thinking",
+                        "text": "Working on it — running locally, may take a moment.",
+                    }
+                )
                 reply = ai_deep.chat(
-                    messages, system=system, tools=agent_tools.ALL_TOOLS,
-                    tool_executor=executor_deep, max_tool_iterations=30,
+                    messages,
+                    system=system,
+                    tools=agent_tools.ALL_TOOLS,
+                    tool_executor=executor_deep,
+                    max_tool_iterations=30,
                 )
                 _put({"type": "text_delta", "text": reply})
                 _put({"type": "done"})

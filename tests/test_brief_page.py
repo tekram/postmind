@@ -41,17 +41,19 @@ def client(monkeypatch):
 
 def _seed_brief() -> None:
     session = st.get_session()
-    session.add(DailyBrief(
-        account_email=ACCOUNT,
-        brief_date=datetime.now(timezone.utc).date().isoformat(),
-        content="**Test brief** content here.",
-        ai_used=True,
-        unread_count=5,
-        new_since_yesterday=2,
-        high_priority_count=1,
-        overdue_followups_count=0,
-        generated_at=datetime.now(timezone.utc),
-    ))
+    session.add(
+        DailyBrief(
+            account_email=ACCOUNT,
+            brief_date=datetime.now(timezone.utc).date().isoformat(),
+            content="**Test brief** content here.",
+            ai_used=True,
+            unread_count=5,
+            new_since_yesterday=2,
+            high_priority_count=1,
+            overdue_followups_count=0,
+            generated_at=datetime.now(timezone.utc),
+        )
+    )
     session.commit()
     session.close()
 
@@ -96,3 +98,47 @@ def test_brief_page_existing_brief_renders_content_no_autotrigger(client, monkey
     assert 'hx-post="/brief/generate" hx-trigger="load"' not in html
     assert 'id="brief-stat-cards"' in html
     assert ">5</p>" in html  # unread count rendered in stat card
+
+
+def test_brief_generate_includes_oob_stat_cards(client, monkeypatch):
+    """POST /brief/generate response must carry an hx-swap-oob block that
+    updates #brief-stat-cards with the freshly generated counts."""
+    from types import SimpleNamespace
+
+    import postmind.core.daily_brief as db_mod
+
+    fake_brief = SimpleNamespace(
+        content="Fresh **brief**.",
+        ai_used=False,
+        generated_at=datetime.now(timezone.utc),
+        unread_count=7,
+        new_since_yesterday=3,
+        high_priority_count=2,
+        overdue_followups_count=1,
+        avoided_count=0,
+        items_json=None,
+        deals_json=None,
+        newsletters_json=None,
+        promotions_json=None,
+        digest_trash_after=None,
+    )
+
+    class _FakeGen:
+        def __init__(self, account_email):
+            pass
+
+        def get_or_generate(self, force=False):
+            return fake_brief
+
+    monkeypatch.setattr(db_mod, "DailyBriefGenerator", _FakeGen)
+
+    resp = client.post("/brief/generate")
+    assert resp.status_code == 200
+    html = resp.text
+    assert 'id="brief-content"' in html
+    assert "Fresh" in html
+    # OOB stat-cards block with the new counts
+    assert 'id="brief-stat-cards"' in html
+    assert "hx-swap-oob" in html
+    assert ">7</p>" in html  # unread
+    assert ">2</p>" in html  # high priority
