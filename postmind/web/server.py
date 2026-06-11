@@ -1179,11 +1179,13 @@ async def brief_generate(request: Request):
     try:
         brief = await loop.run_in_executor(_executor, _gen)
     except Exception as exc:
-        # No OOB swap here: the stat-card skeleton stays put so the user can
-        # retry via "Generate Now"; the error replaces #brief-content only.
+        # No OOB swap here: the stat-card skeleton stays put and the error
+        # replaces #brief-content only. The wrapper must keep id="brief-content"
+        # so "Generate Now" (hx-target="#brief-content") can still retry.
         return HTMLResponse(
+            f'<div id="brief-content" class="px-5 py-5">'
             f"<div class='text-danger text-sm p-3 bg-danger-bg border border-danger-border rounded-card'>"
-            f"Generation failed: {_html.escape(str(exc))}</div>"
+            f"Generation failed: {_html.escape(str(exc))}</div></div>"
         )
 
     ai_badge = (

@@ -142,3 +142,25 @@ def test_brief_generate_includes_oob_stat_cards(client, monkeypatch):
     assert "hx-swap-oob" in html
     assert ">7</p>" in html  # unread
     assert ">2</p>" in html  # high priority
+
+
+def test_brief_generate_error_keeps_brief_content_target(client, monkeypatch):
+    """On generation failure the error must replace #brief-content while keeping
+    that id — otherwise Generate Now (hx-target="#brief-content") can't retry."""
+    import postmind.core.daily_brief as db_mod
+
+    class _FailGen:
+        def __init__(self, account_email):
+            pass
+
+        def get_or_generate(self, force=False):
+            raise RuntimeError("ollama unreachable")
+
+    monkeypatch.setattr(db_mod, "DailyBriefGenerator", _FailGen)
+
+    resp = client.post("/brief/generate")
+    assert resp.status_code == 200
+    html = resp.text
+    assert 'id="brief-content"' in html
+    assert "Generation failed" in html
+    assert "ollama unreachable" in html

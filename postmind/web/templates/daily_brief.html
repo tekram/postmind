@@ -73,7 +73,7 @@
     </div>
 
     <div class="px-5 py-5" id="brief-content"
-         {% if auto_generate %}hx-post="/brief/generate" hx-trigger="load" hx-swap="outerHTML"{% endif %}>
+         {% if auto_generate %}hx-post="/brief/generate" hx-trigger="load" hx-swap="outerHTML" hx-disabled-elt="#brief-generate-btn"{% endif %}>
       {% if brief %}
       {{ brief_status_html | safe }}
       {{ brief_links_html | safe }}
