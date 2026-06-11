@@ -2,6 +2,13 @@
 {% block title %}Daily Brief — postmind{% endblock %}
 {% block content %}
 
+<style>
+  #brief-generate-btn.htmx-request #brief-gen-icon { animation: spin 1s linear infinite; }
+  #brief-generate-btn.htmx-request .brief-gen-label { display: none; }
+  #brief-generate-btn.htmx-request .brief-gen-busy { display: inline; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+
 <div class="p-8 max-w-3xl">
 
   <!-- Header -->
@@ -11,17 +18,18 @@
       <p class="text-ink-subtle text-sm mt-1">{{ today_str }}</p>
     </div>
     <button
+      id="brief-generate-btn"
       hx-post="/brief/generate"
       hx-target="#brief-content"
       hx-swap="outerHTML"
-      hx-indicator="#brief-spinner"
-      class="pm-btn-secondary flex items-center gap-2">
+      hx-disabled-elt="this"
+      class="pm-btn-secondary flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed">
       <!-- Lucide: refresh-cw -->
-      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+      <svg id="brief-gen-icon" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
         <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
       </svg>
-      Generate Now
-      <span id="brief-spinner" class="htmx-indicator text-xs text-ink-tertiary">Generating…</span>
+      <span class="brief-gen-label">Generate Now</span>
+      <span class="brief-gen-busy hidden text-xs">Generating&hellip;</span>
     </button>
   </div>
 
