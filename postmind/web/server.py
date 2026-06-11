@@ -1093,6 +1093,10 @@ async def brief_page(request: Request):
 
     from postmind.core.storage import DailyBriefRepo, get_session
 
+    # Fast DB-only lookup so the page renders instantly. When no brief exists
+    # today, the template auto-fires POST /brief/generate via HTMX instead.
+    # Deliberate trade-off: unlike get_or_generate(force=False), this never
+    # auto-refreshes a brief older than 1h — use "Generate Now" or the daemon.
     today_str = _dt.now(_tz.utc).date().isoformat()
     session = get_session()
     repo = DailyBriefRepo(session)
