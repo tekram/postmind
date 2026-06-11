@@ -1179,6 +1179,8 @@ async def brief_generate(request: Request):
     try:
         brief = await loop.run_in_executor(_executor, _gen)
     except Exception as exc:
+        # No OOB swap here: the stat-card skeleton stays put so the user can
+        # retry via "Generate Now"; the error replaces #brief-content only.
         return HTMLResponse(
             f"<div class='text-danger text-sm p-3 bg-danger-bg border border-danger-border rounded-card'>"
             f"Generation failed: {_html.escape(str(exc))}</div>"
@@ -1210,6 +1212,9 @@ async def brief_generate(request: Request):
         else ""
     )
 
+    # Out-of-band swap so the stat cards refresh alongside #brief-content.
+    # Must stay a top-level sibling in the response (HTMX OOB requirement) and
+    # precede digest_init, whose script reads the freshly swapped DOM.
     stat_cards_oob = templates.env.get_template("_brief_stat_cards.html").render(
         brief=brief, oob=True, auto_generate=False
     )
