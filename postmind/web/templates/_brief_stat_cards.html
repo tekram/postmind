@@ -1,0 +1,42 @@
+{# Stat mini-cards — shared by /brief page render and the /brief/generate OOB swap.
+   Context: brief (may be None), auto_generate (bool), oob (bool, set by /brief/generate). #}
+<div id="brief-stat-cards" {% if oob %}hx-swap-oob="true"{% endif %}>
+  {% if brief %}
+  <div class="grid grid-cols-3 gap-4 mb-6">
+    <div class="pm-card p-4">
+      <p class="text-ink-subtle text-[11px] font-semibold uppercase tracking-[0.06em]">Unread</p>
+      <p class="text-2xl font-semibold text-ink mt-1 tabular">{{ brief.unread_count }}</p>
+      <p class="text-ink-tertiary text-xs mt-1">{{ brief.new_since_yesterday }} new since yesterday</p>
+    </div>
+    <div class="pm-card p-4">
+      <p class="text-ink-subtle text-[11px] font-semibold uppercase tracking-[0.06em]">High priority</p>
+      <p class="text-2xl font-semibold {% if brief.high_priority_count > 0 %}text-warning{% else %}text-ink{% endif %} mt-1 tabular">{{ brief.high_priority_count }}</p>
+      <p class="text-ink-tertiary text-xs mt-1">need attention</p>
+    </div>
+    <div class="pm-card p-4">
+      <p class="text-ink-subtle text-[11px] font-semibold uppercase tracking-[0.06em]">Follow-ups overdue</p>
+      <p class="text-2xl font-semibold {% if brief.overdue_followups_count > 0 %}text-danger{% else %}text-ink{% endif %} mt-1 tabular">{{ brief.overdue_followups_count }}</p>
+      <p class="text-ink-tertiary text-xs mt-1">no reply yet</p>
+    </div>
+  </div>
+  {% elif auto_generate %}
+  <div class="grid grid-cols-3 gap-4 mb-6">
+    {% for label in ["Unread", "High priority", "Follow-ups overdue"] %}
+    <div class="pm-card p-4">
+      <p class="text-ink-subtle text-[11px] font-semibold uppercase tracking-[0.06em]">{{ label }}</p>
+      <div class="h-8 w-12 mt-1 rounded bg-surface-2 animate-pulse"></div>
+      <div class="h-3 w-24 mt-2 rounded bg-surface-2 animate-pulse"></div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="pm-card p-8 text-center mb-6">
+    <p class="text-ink-tertiary text-sm">No brief generated yet today — hit "Generate Now" above.</p>
+    <p class="text-ink-tertiary/60 text-xs mt-1.5">
+      Or enable <strong>Generate daily brief</strong> in
+      <a href="/agents" class="text-accent underline">Agents → Automation</a>
+      to auto-generate on the first heartbeat each morning.
+    </p>
+  </div>
+  {% endif %}
+</div>

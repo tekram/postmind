@@ -923,7 +923,8 @@ def _render_brief_links(brief, account_email: str) -> str:
         "</div></div>"
     )
 
-    from datetime import datetime as _dt, timezone as _tz
+    from datetime import datetime as _dt
+    from datetime import timezone as _tz
 
     def _fmt_date(ms: int) -> str:
         if not ms:
@@ -1090,16 +1091,13 @@ async def brief_page(request: Request):
     from datetime import datetime as _dt
     from datetime import timezone as _tz
 
-    from postmind.core.daily_brief import DailyBriefGenerator
     from postmind.core.storage import DailyBriefRepo, get_session
 
     today_str = _dt.now(_tz.utc).date().isoformat()
-    loop = asyncio.get_event_loop()
-    brief = await loop.run_in_executor(
-        _executor, lambda: DailyBriefGenerator(account_email).get_or_generate(force=False)
-    )
     session = get_session()
-    recent = DailyBriefRepo(session).list_recent(account_email, limit=7)
+    repo = DailyBriefRepo(session)
+    brief = repo.get_today(account_email, today_str)
+    recent = repo.list_recent(account_email, limit=7)
     session.close()
 
     trash_iso = ""
@@ -1122,6 +1120,8 @@ async def brief_page(request: Request):
             "today_str": today_str,
             "account_email": account_email,
             "ai_mode": _ai_mode(),
+            "auto_generate": brief is None,
+            "oob": False,
         }
     )
     return _resp(request, "daily_brief.html", ctx)
