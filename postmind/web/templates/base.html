@@ -374,6 +374,8 @@
       <span id="sync-banner-msg">Syncing…</span>
       <a href="/sync" class="ml-auto text-xs font-medium underline underline-offset-2 hover:text-accent-hover shrink-0">View progress →</a>
     </div>
+    <!-- Stale-sync warning (lazy-loaded; empty when fresh) -->
+    <div hx-get="/sync/stale-check" hx-trigger="load" hx-swap="outerHTML"></div>
     {% block content %}{% endblock %}
   </main>
 

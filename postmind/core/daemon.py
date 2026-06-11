@@ -64,6 +64,82 @@ def _run_digest_trash(session, provider, account_email: str) -> None:
     session.commit()
 
 
+def _maybe_refresh_inbox_cache(account_email: str) -> None:
+    """Re-sync the inbox EmailRecord cache if it is older than periodic_sync_hours.
+
+    Upserts only new message IDs so repeated calls are cheap.  Gmail-only.
+    """
+    import json as _json
+    from datetime import timedelta
+
+    from sqlalchemy import select as _select
+
+    from postmind.config import get_settings, load_account_config, token_path_for
+    from postmind.core.gmail_client import GmailClient
+    from postmind.core.storage import AccountRepo, EmailRecord, EmailRepo, get_session
+
+    settings = get_settings()
+    periodic_hours = getattr(settings, "periodic_sync_hours", 6)
+    if periodic_hours <= 0:
+        return
+
+    session = get_session()
+    acct = AccountRepo(session).get(account_email)
+    last_synced = acct.last_synced_at if acct else None
+    if last_synced is not None:
+        if last_synced.tzinfo is None:
+            last_synced = last_synced.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - last_synced < timedelta(hours=periodic_hours):
+            return  # still fresh — nothing to do
+
+    if not token_path_for(account_email).exists():
+        return
+
+    cfg = load_account_config(account_email)
+    if cfg.get("provider", "gmail") != "gmail":
+        return
+
+    logger.info("Heartbeat %s: inbox cache stale — refreshing", account_email)
+    client = GmailClient()
+    repo = EmailRepo(session)
+    existing_ids: set[str] = set(
+        session.execute(
+            _select(EmailRecord.gmail_id).where(EmailRecord.account_email == account_email)
+        )
+        .scalars()
+        .all()
+    )
+    ids = client.list_message_ids(query="in:inbox", max_results=200)
+    new_ids = [i for i in ids if i not in existing_ids]
+    if new_ids:
+        messages = client.get_messages_metadata_batch(new_ids)
+        records = [
+            EmailRecord(
+                account_email=account_email,
+                gmail_id=msg.id,
+                thread_id=msg.thread_id,
+                subject=msg.headers.subject,
+                sender_email=msg.sender_email,
+                sender_name=msg.sender_name,
+                snippet=msg.snippet or "",
+                label_ids_json=_json.dumps(msg.label_ids),
+                internal_date=msg.internal_date,
+                size_estimate=msg.size_estimate,
+                is_unread=msg.is_unread,
+                is_inbox=msg.is_inbox,
+                list_unsubscribe=msg.headers.list_unsubscribe or "",
+            )
+            for msg in messages
+        ]
+        repo.upsert_many(records)
+        logger.info(
+            "Heartbeat %s: inbox cache refresh — upserted %d new messages",
+            account_email,
+            len(records),
+        )
+    AccountRepo(session).update_last_synced(account_email)
+
+
 def _triage_account(email: str) -> None:
     """Run one heartbeat cycle for a single account: fetch new mail, classify, apply rules."""
     from postmind.config import get_settings, load_account_config, token_path_for
@@ -239,6 +315,14 @@ def _triage_account(email: str) -> None:
             _run_digest_trash(get_session(), provider, email)
         except Exception as exc:
             logger.warning("Heartbeat %s: digest trash check failed: %s", email, exc)
+
+        # Periodic full inbox cache refresh (Gmail only) — keeps the local DB fresh
+        # so briefs and stats reflect recent mail even without a manual sync.
+        if provider_name == "gmail":
+            try:
+                _maybe_refresh_inbox_cache(email)
+            except Exception as exc:
+                logger.warning("Heartbeat %s: inbox cache refresh failed: %s", email, exc)
 
     except Exception as exc:
         logger.error("Heartbeat %s failed: %s", email, exc, exc_info=True)

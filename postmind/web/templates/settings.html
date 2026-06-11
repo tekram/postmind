@@ -458,6 +458,19 @@
           <span class="text-sm text-ink-muted">minutes</span>
         </div>
 
+        <div>
+          <div class="flex items-center gap-3">
+            <label class="text-sm text-ink-muted shrink-0">Auto-refresh inbox cache every</label>
+            <input type="number" name="periodic_sync_hours"
+                   value="{{ periodic_sync_hours }}" min="0" max="168"
+                   class="pm-input w-20 text-sm text-center tabular">
+            <span class="text-sm text-ink-muted">hours</span>
+          </div>
+          <p class="text-xs text-ink-subtle mt-1">
+            Keeps the local email cache fresh so briefs and stats stay current. Set to 0 to disable (manual sync only). A stale-data warning appears in the app when the cache is &gt;24h old.
+          </p>
+        </div>
+
         <button type="submit" class="pm-btn">Save sync settings</button>
       </form>
     </div>

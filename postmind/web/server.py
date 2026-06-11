@@ -2086,6 +2086,7 @@ async def settings_page(request: Request):
                 "auto_start_daemon": s.auto_start_daemon,
                 "daemon_interval_minutes": s.daemon_interval_minutes,
                 "auto_sync_on_first_run": s.auto_sync_on_first_run,
+                "periodic_sync_hours": s.periodic_sync_hours,
             }
         )
     except Exception:
@@ -2113,6 +2114,7 @@ async def settings_page(request: Request):
                 "auto_start_daemon": True,
                 "daemon_interval_minutes": 30,
                 "auto_sync_on_first_run": True,
+                "periodic_sync_hours": 6,
             }
         )
 
@@ -3151,11 +3153,13 @@ async def update_daemon_settings(request: Request):
     auto_daemon = form.get("auto_start_daemon") == "on"
     auto_sync = form.get("auto_sync_on_first_run") == "on"
     interval = max(1, int(form.get("daemon_interval_minutes") or "30"))
+    periodic_sync = max(0, int(form.get("periodic_sync_hours") or "6"))
     _write_env(
         {
             "POSTMIND_AUTO_START_DAEMON": "true" if auto_daemon else "false",
             "POSTMIND_AUTO_SYNC_ON_FIRST_RUN": "true" if auto_sync else "false",
             "POSTMIND_DAEMON_INTERVAL_MINUTES": str(interval),
+            "POSTMIND_PERIODIC_SYNC_HOURS": str(periodic_sync),
         }
     )
     return RedirectResponse("/settings?success=daemon", status_code=303)
@@ -3340,6 +3344,57 @@ def _sync_overview(account_email: str) -> dict:
         }
     finally:
         session.close()
+
+
+@app.get("/sync/stale-check", response_class=HTMLResponse)
+async def sync_stale_check():
+    """HTMX endpoint — returns warning banner HTML when inbox cache is stale, empty otherwise."""
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+    from datetime import timezone as _tz
+
+    account_email = _get_web_account() or ""
+    if not account_email:
+        return HTMLResponse("")
+
+    try:
+        from postmind.core.storage import AccountRepo, get_session
+
+        session = get_session()
+        acct = AccountRepo(session).get(account_email)
+        session.close()
+        last_synced = acct.last_synced_at if acct else None
+
+        if last_synced is None:
+            age_str = "never synced"
+        else:
+            if last_synced.tzinfo is None:
+                last_synced = last_synced.replace(tzinfo=_tz.utc)
+            age = _dt.now(_tz.utc) - last_synced
+            if age <= _td(hours=24):
+                return HTMLResponse("")  # fresh — no banner
+            hours = int(age.total_seconds() // 3600)
+            age_str = f"{hours}h ago" if hours < 48 else f"{age.days}d ago"
+    except Exception:
+        return HTMLResponse("")
+
+    return HTMLResponse(
+        "<div id='stale-sync-banner' "
+        "class='flex items-center gap-3 px-5 py-2.5 bg-warning-bg border-b border-warning-border text-warning text-xs'>"
+        "<svg class='w-3.5 h-3.5 shrink-0' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='2'>"
+        "<path stroke-linecap='round' stroke-linejoin='round' d='M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z'/>"
+        "</svg>"
+        f"<span>Inbox data is stale &mdash; last synced <strong>{age_str}</strong>. "
+        "Data may be outdated.</span>"
+        "<a href='/sync' class='ml-1 font-medium underline hover:text-warning shrink-0'>Sync now</a>"
+        "<button onclick=\"document.getElementById('stale-sync-banner').remove()\" "
+        "class='ml-auto shrink-0 p-0.5 rounded hover:bg-warning/10 transition-colors' aria-label='Dismiss'>"
+        "<svg class='w-3.5 h-3.5' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='2'>"
+        "<path stroke-linecap='round' stroke-linejoin='round' d='M6 18L18 6M6 6l12 12'/>"
+        "</svg>"
+        "</button>"
+        "</div>"
+    )
 
 
 @app.get("/sync", response_class=HTMLResponse)

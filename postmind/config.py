@@ -169,6 +169,7 @@ class Settings(BaseSettings):
     auto_start_daemon: bool = True  # Start heartbeat daemon automatically on `postmind serve`
     daemon_interval_minutes: int = 30  # How often the daemon polls for new mail
     auto_sync_on_first_run: bool = True  # Kick off initial inbox sync for accounts never synced
+    periodic_sync_hours: int = 6  # Re-sync inbox cache this often (0 = manual only)
 
     # Rate limiting
     gmail_batch_size: int = 50  # Max messages per Gmail batch request
