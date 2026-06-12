@@ -2782,7 +2782,7 @@ async def watch_start(request: Request):
         try:
             from postmind.core.daemon import start_daemon_background
 
-            start_daemon_background(stop_event=_watch_stop_event)
+            start_daemon_background(stop_event=_watch_stop_event, interval_minutes=_watch_interval)
         except Exception:
             pass
 

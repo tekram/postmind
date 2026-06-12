@@ -16,9 +16,11 @@ def _run_digest_trash(session, provider, account_email: str) -> None:
     from postmind.core.storage import DailyBrief, DigestExemptionRepo, UndoLogRepo
 
     today_str = datetime.now(timezone.utc).date().isoformat()
-    brief = session.query(DailyBrief).filter_by(
-        account_email=account_email, brief_date=today_str
-    ).first()
+    brief = (
+        session.query(DailyBrief)
+        .filter_by(account_email=account_email, brief_date=today_str)
+        .first()
+    )
     if not brief or not brief.digest_trash_after:
         return
 
@@ -421,7 +423,13 @@ def start_daemon_background(stop_event=None, interval_minutes: int | None = None
             repo.register(acct.email, acct.email.split("@")[0].title(), interval_minutes or 30)
         active = [a for a in AgentRepo(get_session()).list_all() if a.is_active]
 
-    scheduler = BackgroundScheduler(jobstores={"default": MemoryJobStore()})
+    # Generous misfire grace: on laptops the machine often sleeps through the
+    # scheduled tick — coalesce the backlog and run once on wake instead of
+    # skipping (APScheduler's default grace is 1s, which skips everything).
+    scheduler = BackgroundScheduler(
+        jobstores={"default": MemoryJobStore()},
+        job_defaults={"coalesce": True, "max_instances": 1, "misfire_grace_time": 15 * 60},
+    )
     for agent in active:
         mins = interval_minutes or agent.interval_minutes
         scheduler.add_job(
