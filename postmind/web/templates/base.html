@@ -374,7 +374,7 @@
       <span id="sync-banner-msg">Syncing…</span>
       <a href="/sync" class="ml-auto text-xs font-medium underline underline-offset-2 hover:text-accent-hover shrink-0">View progress →</a>
     </div>
-    <!-- Stale-sync warning (lazy-loaded; empty when fresh) -->
+    <!-- Stale-sync warning (lazy-loaded; empty when fresh; dismissed for 4h via localStorage) -->
     <div hx-get="/sync/stale-check" hx-trigger="load" hx-swap="outerHTML"></div>
     {% block content %}{% endblock %}
   </main>
@@ -382,6 +382,9 @@
 </div>
 
 <!-- ── Floating assistant ──────────────────────────────────────────────── -->
+{# Hidden on /agent: the Super Agent page is itself a chat, and the FAB sits
+   on top of its Run button (bottom-right), stealing clicks. #}
+{% if request.url.path != "/agent" %}
 <div id="pm-assistant" class="fixed bottom-5 right-5 z-50">
 
   <!-- Launcher -->
@@ -564,6 +567,7 @@
   });
 })();
 </script>
+{% endif %}
 
 <script>
 (function () {
@@ -595,5 +599,15 @@
 })();
 </script>
 {% block extra_js %}{% endblock %}
+<script>
+// Hide stale-sync banner for 4h after user dismisses it
+document.addEventListener('htmx:afterSettle', function() {
+  var d = localStorage.getItem('pm_stale_dismissed');
+  if (d && Date.now() - parseInt(d) < 4 * 3600 * 1000) {
+    var el = document.getElementById('stale-sync-banner');
+    if (el) el.remove();
+  }
+});
+</script>
 </body>
 </html>
